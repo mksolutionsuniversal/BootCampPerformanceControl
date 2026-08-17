@@ -296,7 +296,7 @@ public sealed class DiagnosticReportServiceTests
 
     private sealed class FakeHardwareDetectionService : IHardwareDetectionService
     {
-        private readonly HardwareDetectionService _hardwareDetectionService = new();
+        private readonly HardwareDetectionService _hardwareDetectionService = new(new ModelSupportRegistry());
         private readonly HardwareSnapshot _snapshot;
 
         public FakeHardwareDetectionService(HardwareSnapshot snapshot)

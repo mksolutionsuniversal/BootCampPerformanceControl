@@ -13,7 +13,8 @@ public static class AppCompositionRoot
     public static MainViewModel CreateMainViewModel(IApplicationLogger logger)
     {
         var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
-        var hardwareDetectionService = new HardwareDetectionService();
+        var modelSupportRegistry = new ModelSupportRegistry();
+        var hardwareDetectionService = new HardwareDetectionService(modelSupportRegistry);
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
         var powerManagementService = new WindowsPowerManagementService(
