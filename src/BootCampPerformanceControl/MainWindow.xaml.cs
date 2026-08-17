@@ -1,23 +1,37 @@
-﻿using System.Text;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using BootCampPerformanceControl.Logging;
+using BootCampPerformanceControl.UI;
 
 namespace BootCampPerformanceControl;
 
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
 public partial class MainWindow : Window
 {
+    private bool _isLoaded;
+
     public MainWindow()
+        : this(AppCompositionRoot.CreateMainViewModel(new FileApplicationLogger()))
+    {
+    }
+
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
+        DataContext = viewModel;
+        Loaded += OnLoaded;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (_isLoaded)
+        {
+            return;
+        }
+
+        _isLoaded = true;
+
+        if (DataContext is MainViewModel viewModel && viewModel.RefreshCommand.CanExecute(null))
+        {
+            viewModel.RefreshCommand.Execute(null);
+        }
     }
 }
