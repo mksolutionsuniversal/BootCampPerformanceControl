@@ -29,6 +29,20 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ApplicationVersion_MatchesAssemblyInformationalVersion()
+    {
+        var expectedVersion = typeof(MainViewModel).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        Assert.False(string.IsNullOrWhiteSpace(expectedVersion));
+        Assert.Equal(expectedVersion, viewModel.ApplicationVersion);
+    }
+
+    [Fact]
     public void ProfileButtons_GamingOptimisedIsEnabledForVerifiedMacBookPro16_1()
     {
         var viewModel = CreateViewModel(
