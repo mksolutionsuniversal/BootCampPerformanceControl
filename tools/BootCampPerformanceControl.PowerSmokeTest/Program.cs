@@ -8,14 +8,20 @@ namespace BootCampPerformanceControl.PowerSmokeTest;
 
 internal static class Program
 {
-    private static readonly Guid RequiredApplyNoopSchemeId = new(
+    private static readonly Guid RequiredApplySchemeId = new(
         "381b4222-f694-41f0-9685-ff5bb260df2e");
 
-    private static readonly ProcessorPowerSettings RequiredApplyNoopSettings = new(
+    private static readonly ProcessorPowerSettings RequiredApplyState = new(
         ProcessorMaximumAc: 95,
         ProcessorMaximumDc: 95,
         BoostModeAc: 2,
         BoostModeDc: 2);
+
+    private static readonly ProcessorPowerSettings ApplyGamingSettings = new(
+        ProcessorMaximumAc: 95,
+        ProcessorMaximumDc: 95,
+        BoostModeAc: 0,
+        BoostModeDc: 0);
 
     private static readonly JsonSerializerOptions ResultJsonOptions = new()
     {
@@ -25,7 +31,8 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length != 1 || (args[0] != "apply-noop" && args[0] != "restore"))
+        if (args.Length != 1
+            || (args[0] != "apply-noop" && args[0] != "apply-gaming" && args[0] != "restore"))
         {
             PrintUsage();
             return 2;
@@ -37,9 +44,18 @@ internal static class Program
 
         try
         {
-            return mode == "apply-noop"
-                ? await RunApplyNoopAsync(logger).ConfigureAwait(false)
-                : await RunRestoreAsync(logger).ConfigureAwait(false);
+            return mode switch
+            {
+                "apply-noop" => await RunApplyAsync(
+                    mode,
+                    RequiredApplyState,
+                    logger).ConfigureAwait(false),
+                "apply-gaming" => await RunApplyAsync(
+                    mode,
+                    ApplyGamingSettings,
+                    logger).ConfigureAwait(false),
+                _ => await RunRestoreAsync(logger).ConfigureAwait(false)
+            };
         }
         catch (Exception exception)
         {
@@ -50,7 +66,10 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunApplyNoopAsync(IApplicationLogger logger)
+    private static async Task<int> RunApplyAsync(
+        string mode,
+        ProcessorPowerSettings requestedSettings,
+        IApplicationLogger logger)
     {
         var snapshotFilePath = GetRestoreSnapshotFilePath();
         var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
@@ -62,10 +81,10 @@ internal static class Program
             CancellationToken.None).ConfigureAwait(false);
         PrintState("Current Windows power state", currentState);
 
-        if (!MatchesRequiredApplyNoopState(currentState))
+        if (!MatchesRequiredApplyState(currentState))
         {
             Console.Error.WriteLine(
-                "REFUSED: current Windows power state does not exactly match the required apply-noop guard state.");
+                $"REFUSED: current Windows power state does not exactly match the required {mode} guard state.");
             Console.Error.WriteLine("No Windows power write was attempted.");
             return 1;
         }
@@ -88,14 +107,15 @@ internal static class Program
         }
 
         var result = await powerManagementService.ApplyProcessorSettingsAsync(
-            RequiredApplyNoopSettings,
+            requestedSettings,
             currentState,
             CancellationToken.None).ConfigureAwait(false);
 
         PrintOperationResult(result);
         Console.WriteLine(
             $"restore-snapshot.json exists after Apply: {File.Exists(snapshotFilePath)}");
-        Console.WriteLine("apply-noop complete. Restore was not invoked and the backup was not deleted.");
+        Console.WriteLine(
+            $"{mode} complete. Restore was not invoked and the backup was not deleted.");
 
         return result.IsSuccessful ? 0 : 1;
     }
@@ -137,13 +157,13 @@ internal static class Program
         return result.IsSuccessful ? 0 : 1;
     }
 
-    private static bool MatchesRequiredApplyNoopState(PowerStateSnapshot state)
+    private static bool MatchesRequiredApplyState(PowerStateSnapshot state)
     {
-        return state.SchemeId == RequiredApplyNoopSchemeId
-            && state.ProcessorMaximumAc == RequiredApplyNoopSettings.ProcessorMaximumAc
-            && state.ProcessorMaximumDc == RequiredApplyNoopSettings.ProcessorMaximumDc
-            && state.BoostModeAc == RequiredApplyNoopSettings.BoostModeAc
-            && state.BoostModeDc == RequiredApplyNoopSettings.BoostModeDc;
+        return state.SchemeId == RequiredApplySchemeId
+            && state.ProcessorMaximumAc == RequiredApplyState.ProcessorMaximumAc
+            && state.ProcessorMaximumDc == RequiredApplyState.ProcessorMaximumDc
+            && state.BoostModeAc == RequiredApplyState.BoostModeAc
+            && state.BoostModeDc == RequiredApplyState.BoostModeDc;
     }
 
     private static void PrintState(string heading, PowerStateSnapshot state)
@@ -178,6 +198,7 @@ internal static class Program
         Console.Error.WriteLine("Developer-only production power smoke test.");
         Console.Error.WriteLine("Run exactly one explicit mode:");
         Console.Error.WriteLine("  BootCampPerformanceControl.PowerSmokeTest apply-noop");
+        Console.Error.WriteLine("  BootCampPerformanceControl.PowerSmokeTest apply-gaming");
         Console.Error.WriteLine("  BootCampPerformanceControl.PowerSmokeTest restore");
     }
 }
