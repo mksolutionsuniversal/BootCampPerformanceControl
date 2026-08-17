@@ -389,6 +389,84 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task GamingButton_FailedApplyAfterRestoreSnapshotSavedRefreshesRestoreUiAndClearsDetectedProfileState()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var expectedStateBefore = GamingOptimisedPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerManagementService = new FakePowerManagementService(
+            FailedPowerOperation(expectedStateBefore, requestedSettings, "Native write failed."),
+            GamingOptimisedPowerState(),
+            expectedStateBefore)
+        {
+            SaveRestoreSnapshotBeforeGuardedApplyResult = true
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+        Assert.False(GetProfile(viewModel, "restore").IsEnabled);
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.NotNull(GetProfile(viewModel, "restore").Command);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task GamingButton_CanceledApplyAfterRestoreSnapshotSavedRefreshesRestoreUiAndClearsDetectedProfileState()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var expectedStateBefore = GamingOptimisedPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerManagementService = new FakePowerManagementService(
+            FailedPowerOperation(expectedStateBefore, requestedSettings, "Apply canceled."),
+            GamingOptimisedPowerState(),
+            expectedStateBefore)
+        {
+            SaveRestoreSnapshotBeforeGuardedApplyResult = true,
+            GuardedApplyException = new OperationCanceledException("Apply canceled after snapshot save.")
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+        Assert.False(GetProfile(viewModel, "restore").IsEnabled);
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.NotNull(GetProfile(viewModel, "restore").Command);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+        Assert.Equal("Profile application canceled.", viewModel.StatusMessage);
+    }
+
+    [Fact]
     public void GamingButton_SuccessfulApplyReReadsPowerStateAndUpdatesDisplayedValues()
     {
         var expectedStateBefore = PowerState(
@@ -1214,6 +1292,10 @@ public sealed class MainViewModelTests
 
         public PowerStateSnapshot? LastExpectedStateBefore { get; private set; }
 
+        public bool SaveRestoreSnapshotBeforeGuardedApplyResult { get; set; }
+
+        public Exception? GuardedApplyException { get; set; }
+
         public void QueueReadGate(AsyncGate gate)
         {
             _readGates.Enqueue(gate);
@@ -1263,11 +1345,17 @@ public sealed class MainViewModelTests
             LastGuardedSettings = requestedSettings;
             LastExpectedStateBefore = expectedStateBefore;
 
-            if (_applyResult.IsSuccessful && RestoreSnapshotStore is not null)
+            if ((_applyResult.IsSuccessful || SaveRestoreSnapshotBeforeGuardedApplyResult)
+                && RestoreSnapshotStore is not null)
             {
                 await RestoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
                     expectedStateBefore,
                     cancellationToken);
+            }
+
+            if (GuardedApplyException is not null)
+            {
+                throw GuardedApplyException;
             }
 
             return _applyResult;

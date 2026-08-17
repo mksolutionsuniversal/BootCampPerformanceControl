@@ -321,6 +321,7 @@ public sealed class MainViewModel : ViewModelBase
 
             if (!result.IsSuccessful)
             {
+                RefreshProfileStateAfterUncertainApply();
                 StatusMessage = $"Profile application failed: {result.FailureReason}";
                 _logger.Error(
                     $"Profile application failed for '{profileId}': {result.FailureReason}",
@@ -408,6 +409,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private void OnProfileApplyCanceled(OperationCanceledException exception)
     {
+        RefreshProfileStateAfterUncertainApply();
         StatusMessage = "Profile application canceled.";
         _logger.Info($"Profile application canceled: {exception.Message}");
     }
@@ -482,6 +484,12 @@ public sealed class MainViewModel : ViewModelBase
         RestoreSnapshotStatus = _restoreSnapshotStore.HasOriginalRestoreSnapshot
             ? "Available - original processor settings can be restored."
             : "Not available.";
+    }
+
+    private void RefreshProfileStateAfterUncertainApply()
+    {
+        ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+        UpdateProfiles(_lastVerificationResult);
     }
 
     private void ApplyHardwareFailure()
