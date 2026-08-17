@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore BootCampPerformanceControl.sln
+
+      - name: Build
+        run: |
+          dotnet build BootCampPerformanceControl.sln `
+            --configuration Release `
+            --no-restore
+
+      - name: Test
+        run: |
+          dotnet test BootCampPerformanceControl.sln `
+            --configuration Release `
+            --no-build `
+            --no-restore
