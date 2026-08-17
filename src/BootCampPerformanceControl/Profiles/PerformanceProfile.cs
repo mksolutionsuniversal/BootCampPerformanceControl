@@ -6,5 +6,6 @@ public sealed record PerformanceProfile(
     ProfileScope Scope,
     string? TargetModel,
     bool IsAvailableForDetectedModel,
+    ProcessorPowerProfileTarget PowerTarget,
     IReadOnlyList<ProfileSettingMetadata> Settings,
     string Description);

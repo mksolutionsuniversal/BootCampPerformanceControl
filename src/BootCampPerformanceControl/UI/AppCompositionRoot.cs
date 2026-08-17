@@ -11,10 +11,14 @@ public static class AppCompositionRoot
 {
     public static MainViewModel CreateMainViewModel(IApplicationLogger logger)
     {
+        var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
+        var powerManagementService = new WindowsPowerManagementService(
+            restoreSnapshotStore,
+            logger);
+
         return new MainViewModel(
             new HardwareDetectionService(),
-            new WindowsPowerManagementService(),
-            new InMemoryRestoreSnapshotStore(),
+            powerManagementService,
             new UnavailableFanControlService(),
             new ProfileCatalog(),
             logger);

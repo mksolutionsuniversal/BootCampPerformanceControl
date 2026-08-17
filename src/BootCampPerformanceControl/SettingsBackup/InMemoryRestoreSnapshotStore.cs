@@ -22,6 +22,7 @@ public sealed class InMemoryRestoreSnapshotStore : IRestoreSnapshotStore
         PowerStateSnapshot snapshot,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_syncRoot)
@@ -50,6 +51,7 @@ public sealed class InMemoryRestoreSnapshotStore : IRestoreSnapshotStore
         PowerStateSnapshot snapshot,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_syncRoot)

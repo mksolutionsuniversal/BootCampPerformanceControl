@@ -5,7 +5,6 @@ using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
-using BootCampPerformanceControl.SettingsBackup;
 
 namespace BootCampPerformanceControl.UI;
 
@@ -13,7 +12,6 @@ public sealed class MainViewModel : ViewModelBase
 {
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
-    private readonly IRestoreSnapshotStore _restoreSnapshotStore;
     private readonly IProfileCatalog _profileCatalog;
     private readonly IApplicationLogger _logger;
     private string _macModel = "Not detected";
@@ -35,14 +33,12 @@ public sealed class MainViewModel : ViewModelBase
     public MainViewModel(
         IHardwareDetectionService hardwareDetectionService,
         IPowerManagementService powerManagementService,
-        IRestoreSnapshotStore restoreSnapshotStore,
         IFanControlService fanControlService,
         IProfileCatalog profileCatalog,
         IApplicationLogger logger)
     {
         _hardwareDetectionService = hardwareDetectionService;
         _powerManagementService = powerManagementService;
-        _restoreSnapshotStore = restoreSnapshotStore;
         _profileCatalog = profileCatalog;
         _logger = logger;
         _fanControlStatus = fanControlService.GetStatus().DisplayText;
@@ -183,21 +179,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 _logger.Info("Power-state read started.");
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
-                var restoreSnapshotInitialized = await _restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
-                    currentPowerState,
-                    cancellationToken);
-
                 ApplyPowerState(currentPowerState);
-
-                if (restoreSnapshotInitialized)
-                {
-                    _logger.Info("Original restore snapshot initialized from the first successful power read.");
-                }
-                else
-                {
-                    _logger.Info("Original restore snapshot already exists; current refresh did not overwrite it.");
-                }
-
                 _logger.Info($"Power-state read completed. Active scheme: {currentPowerState.SchemeId}.");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
