@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Windows.Input;
+using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
@@ -17,6 +18,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
+    private readonly IDiagnosticReportService _diagnosticReportService;
+    private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
     private readonly IApplicationLogger _logger;
     private ModelVerificationResult _lastVerificationResult = ModelVerificationResult.Unknown();
     private string _macModel = "Not detected";
@@ -42,6 +45,8 @@ public sealed class MainViewModel : ViewModelBase
         IProfileCatalog profileCatalog,
         ProfileApplyService profileApplyService,
         IRestoreSnapshotStore restoreSnapshotStore,
+        IDiagnosticReportService diagnosticReportService,
+        IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
         IApplicationLogger logger)
     {
         _hardwareDetectionService = hardwareDetectionService;
@@ -49,6 +54,8 @@ public sealed class MainViewModel : ViewModelBase
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
         _restoreSnapshotStore = restoreSnapshotStore;
+        _diagnosticReportService = diagnosticReportService;
+        _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
         _fanControlStatus = fanControlService.GetStatus().DisplayText;
         RefreshCommand = new AsyncCommand(
@@ -56,10 +63,17 @@ public sealed class MainViewModel : ViewModelBase
             canExecute: () => !IsBusy,
             onCanceled: OnRefreshCanceled,
             onException: OnRefreshException);
+        ExportDiagnosticReportCommand = new AsyncCommand(
+            ExportDiagnosticReportAsync,
+            canExecute: () => !IsBusy,
+            onCanceled: OnExportDiagnosticReportCanceled,
+            onException: OnExportDiagnosticReportException);
         UpdateProfiles(_lastVerificationResult);
     }
 
     public ICommand RefreshCommand { get; }
+
+    public ICommand ExportDiagnosticReportCommand { get; }
 
     public ObservableCollection<ProfileButtonViewModel> ProfileButtons { get; } = [];
 
@@ -229,6 +243,50 @@ public sealed class MainViewModel : ViewModelBase
     {
         StatusMessage = "Refresh failed. Check the log for details.";
         _logger.Error("Refresh failed unexpectedly.", exception);
+    }
+
+    private async Task ExportDiagnosticReportAsync(CancellationToken cancellationToken)
+    {
+        IsBusy = true;
+        StatusMessage = "Generating diagnostic report...";
+
+        try
+        {
+            _logger.Info("Diagnostic report export started.");
+            var report = await _diagnosticReportService
+                .GenerateAsync(cancellationToken);
+            var saved = await _diagnosticReportFileSaveService
+                .SaveAsync(report, cancellationToken);
+
+            if (!saved)
+            {
+                StatusMessage = "Diagnostic report export canceled.";
+                _logger.Info("Diagnostic report export canceled.");
+                return;
+            }
+
+            StatusMessage = "Diagnostic report exported successfully.";
+            _logger.Info("Diagnostic report exported successfully.");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OnExportDiagnosticReportCanceled(OperationCanceledException exception)
+    {
+        StatusMessage = "Diagnostic report export canceled.";
+        _logger.Info("Diagnostic report export canceled.");
+    }
+
+    private void OnExportDiagnosticReportException(Exception exception)
+    {
+        StatusMessage = "Diagnostic report export failed. Check the log for details.";
+        _logger.Error(
+            "Diagnostic report export failed unexpectedly.",
+            new InvalidOperationException(
+                $"Diagnostic report export failed with {exception.GetType().Name}."));
     }
 
     private async Task ApplyProfileAsync(string profileId, CancellationToken cancellationToken)
@@ -428,6 +486,11 @@ public sealed class MainViewModel : ViewModelBase
         if (RefreshCommand is AsyncCommand refreshCommand)
         {
             refreshCommand.NotifyCanExecuteChanged();
+        }
+
+        if (ExportDiagnosticReportCommand is AsyncCommand exportDiagnosticReportCommand)
+        {
+            exportDiagnosticReportCommand.NotifyCanExecuteChanged();
         }
 
         foreach (var profileButton in ProfileButtons)

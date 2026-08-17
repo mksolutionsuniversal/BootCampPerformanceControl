@@ -33,11 +33,18 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,12">
-            <Button DockPanel.Dock="Right"
-                    Content="Refresh"
-                    Command="{Binding RefreshCommand}"
-                    MinWidth="110"
-                    Padding="16,8" />
+            <StackPanel DockPanel.Dock="Right"
+                        Orientation="Horizontal">
+                <Button Content="Export Diagnostic Report"
+                        Command="{Binding ExportDiagnosticReportCommand}"
+                        MinWidth="190"
+                        Padding="16,8"
+                        Margin="0,0,8,0" />
+                <Button Content="Refresh"
+                        Command="{Binding RefreshCommand}"
+                        MinWidth="110"
+                        Padding="16,8" />
+            </StackPanel>
             <StackPanel>
                 <TextBlock Text="BootCamp Performance Control"
                            FontSize="22"

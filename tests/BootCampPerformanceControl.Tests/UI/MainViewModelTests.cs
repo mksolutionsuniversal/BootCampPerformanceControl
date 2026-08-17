@@ -1,4 +1,5 @@
 using System.Reflection;
+using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
@@ -40,6 +41,155 @@ public sealed class MainViewModelTests
 
         Assert.False(string.IsNullOrWhiteSpace(expectedVersion));
         Assert.Equal(expectedVersion, viewModel.ApplicationVersion);
+    }
+
+    [Fact]
+    public void ExportDiagnosticReportCommand_IsExposed()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        Assert.NotNull(viewModel.ExportDiagnosticReportCommand);
+        Assert.True(viewModel.ExportDiagnosticReportCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ExportDiagnosticReportCommand_SuccessfulExportGeneratesAndSavesReportOnce()
+    {
+        var diagnosticReportService = new FakeDiagnosticReportService();
+        var diagnosticReportFileSaveService = new FakeDiagnosticReportFileSaveService();
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            diagnosticReportService: diagnosticReportService,
+            diagnosticReportFileSaveService: diagnosticReportFileSaveService);
+
+        viewModel.ExportDiagnosticReportCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, diagnosticReportService.GenerateCallCount);
+        Assert.Equal(1, diagnosticReportFileSaveService.SaveCallCount);
+        Assert.Equal(diagnosticReportService.Report, diagnosticReportFileSaveService.LastReport);
+        Assert.Equal("Diagnostic report exported successfully.", viewModel.StatusMessage);
+        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task ExportDiagnosticReportCommand_UserCancellationReportsCanceledWithoutError()
+    {
+        var diagnosticReportService = new FakeDiagnosticReportService();
+        var diagnosticReportFileSaveService = new FakeDiagnosticReportFileSaveService
+        {
+            SaveResult = false
+        };
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            diagnosticReportService: diagnosticReportService,
+            diagnosticReportFileSaveService: diagnosticReportFileSaveService);
+
+        viewModel.ExportDiagnosticReportCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, diagnosticReportService.GenerateCallCount);
+        Assert.Equal(1, diagnosticReportFileSaveService.SaveCallCount);
+        Assert.Equal("Diagnostic report export canceled.", viewModel.StatusMessage);
+        Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public async Task ExportDiagnosticReportCommand_SaveFailureDoesNotLogSelectedFilePath()
+    {
+        const string privatePath = @"C:\Users\Alice\Desktop\diagnostics.txt";
+        var diagnosticReportFileSaveService = new FakeDiagnosticReportFileSaveService
+        {
+            SaveException = new IOException($"Access to '{privatePath}' was denied.")
+        };
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            diagnosticReportFileSaveService: diagnosticReportFileSaveService);
+
+        viewModel.ExportDiagnosticReportCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal("Diagnostic report export failed. Check the log for details.", viewModel.StatusMessage);
+        var error = Assert.Single(logger.Errors);
+        Assert.DoesNotContain(privatePath, error.Message);
+        Assert.DoesNotContain(privatePath, error.Exception.ToString());
+    }
+
+    [Fact]
+    public async Task ExportDiagnosticReportCommand_CannotExecuteWhileRefreshIsBusy()
+    {
+        var hardwareDetectionService = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var diagnosticReportService = new FakeDiagnosticReportService();
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            diagnosticReportService: diagnosticReportService);
+        var refreshDetectGate = new AsyncGate();
+        hardwareDetectionService.QueueDetectGate(refreshDetectGate);
+
+        viewModel.RefreshCommand.Execute(null);
+        await refreshDetectGate.WaitUntilEnteredAsync();
+
+        Assert.True(viewModel.IsBusy);
+        Assert.False(viewModel.ExportDiagnosticReportCommand.CanExecute(null));
+
+        viewModel.ExportDiagnosticReportCommand.Execute(null);
+
+        Assert.Equal(0, diagnosticReportService.GenerateCallCount);
+
+        refreshDetectGate.Release();
+        await WaitForIdleAsync(viewModel);
+    }
+
+    [Fact]
+    public async Task ExportDiagnosticReportCommand_DisablesOtherOperationCommandsWhileBusy()
+    {
+        var diagnosticReportService = new FakeDiagnosticReportService();
+        var diagnosticReportFileSaveService = new FakeDiagnosticReportFileSaveService();
+        var diagnosticGenerateGate = new AsyncGate();
+        diagnosticReportService.QueueGenerateGate(diagnosticGenerateGate);
+        var hardwareDetectionService = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            diagnosticReportService: diagnosticReportService,
+            diagnosticReportFileSaveService: diagnosticReportFileSaveService);
+
+        viewModel.RefreshCommand.Execute(null);
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        var detectCallCountAfterRefresh = hardwareDetectionService.DetectCallCount;
+
+        viewModel.ExportDiagnosticReportCommand.Execute(null);
+        await diagnosticGenerateGate.WaitUntilEnteredAsync();
+
+        Assert.True(viewModel.IsBusy);
+        Assert.False(viewModel.ExportDiagnosticReportCommand.CanExecute(null));
+        Assert.False(viewModel.RefreshCommand.CanExecute(null));
+        Assert.False(gamingCommand.CanExecute(null));
+
+        viewModel.RefreshCommand.Execute(null);
+        gamingCommand.Execute(null);
+
+        Assert.Equal(detectCallCountAfterRefresh, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+
+        diagnosticGenerateGate.Release();
+        await WaitForIdleAsync(viewModel);
     }
 
     [Fact]
@@ -623,7 +773,9 @@ public sealed class MainViewModelTests
         FakeHardwareDetectionService hardwareDetectionService,
         FakePowerManagementService powerManagementService,
         IRestoreSnapshotStore? restoreSnapshotStore = null,
-        TestApplicationLogger? logger = null)
+        TestApplicationLogger? logger = null,
+        FakeDiagnosticReportService? diagnosticReportService = null,
+        FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null)
     {
         var profileCatalog = new ProfileCatalog();
         restoreSnapshotStore ??= new InMemoryRestoreSnapshotStore();
@@ -640,6 +792,8 @@ public sealed class MainViewModelTests
                 new ProfileExecutionResolver(),
                 powerManagementService),
             restoreSnapshotStore,
+            diagnosticReportService ?? new FakeDiagnosticReportService(),
+            diagnosticReportFileSaveService ?? new FakeDiagnosticReportFileSaveService(),
             logger ?? new TestApplicationLogger());
     }
 
@@ -777,6 +931,63 @@ public sealed class MainViewModelTests
             IsSuccessful = false,
             FailureMessage = failureMessage
         };
+    }
+
+    private sealed class FakeDiagnosticReportService : IDiagnosticReportService
+    {
+        private readonly Queue<AsyncGate> _generateGates = [];
+
+        public DiagnosticReportResult Report { get; set; } = new(
+            "Diagnostic report content.",
+            "BootCampPerformanceControl-Diagnostics-Test.txt");
+
+        public int GenerateCallCount { get; private set; }
+
+        public void QueueGenerateGate(AsyncGate gate)
+        {
+            _generateGates.Enqueue(gate);
+        }
+
+        public async Task<DiagnosticReportResult> GenerateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GenerateCallCount++;
+
+            if (_generateGates.Count > 0)
+            {
+                await _generateGates.Dequeue().WaitAsync();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Report;
+        }
+    }
+
+    private sealed class FakeDiagnosticReportFileSaveService : IDiagnosticReportFileSaveService
+    {
+        public bool SaveResult { get; set; } = true;
+
+        public Exception? SaveException { get; set; }
+
+        public DiagnosticReportResult? LastReport { get; private set; }
+
+        public int SaveCallCount { get; private set; }
+
+        public Task<bool> SaveAsync(
+            DiagnosticReportResult report,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveCallCount++;
+            LastReport = report;
+
+            if (SaveException is not null)
+            {
+                throw SaveException;
+            }
+
+            return Task.FromResult(SaveResult);
+        }
     }
 
     private sealed class FakeFanControlService : IFanControlService
