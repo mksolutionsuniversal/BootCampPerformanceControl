@@ -208,6 +208,27 @@ public sealed class DiagnosticReportServiceTests
         Assert.Equal(0, restoreSnapshotStore.ClearOriginalRestoreSnapshotCallCount);
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenCanceledAfterPowerReadBeforeRestorePresence_PropagatesCancellation()
+    {
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var powerManagementService = new FakePowerManagementService(PowerState())
+        {
+            AfterReadCurrentState = cancellationTokenSource.Cancel
+        };
+        var restoreSnapshotStore = new FakeRestoreSnapshotStore(PowerState());
+        var service = CreateService(
+            VerifiedHardwareSnapshot(),
+            powerManagementService: powerManagementService,
+            restoreSnapshotStore: restoreSnapshotStore);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => service.GenerateAsync(cancellationTokenSource.Token));
+
+        Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal(0, restoreSnapshotStore.HasOriginalRestoreSnapshotCallCount);
+    }
+
     private static DiagnosticReportService CreateService(
         HardwareSnapshot hardwareSnapshot,
         PowerStateSnapshot? powerState = null,
@@ -312,10 +333,13 @@ public sealed class DiagnosticReportServiceTests
 
         public int RestoreOriginalSettingsCallCount { get; private set; }
 
+        public Action? AfterReadCurrentState { get; set; }
+
         public Task<PowerStateSnapshot> ReadCurrentStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ReadCurrentStateCallCount++;
+            AfterReadCurrentState?.Invoke();
             return Task.FromResult(_powerState);
         }
 
@@ -352,7 +376,16 @@ public sealed class DiagnosticReportServiceTests
             _snapshot = snapshot;
         }
 
-        public bool HasOriginalRestoreSnapshot => _snapshot is not null;
+        public bool HasOriginalRestoreSnapshot
+        {
+            get
+            {
+                HasOriginalRestoreSnapshotCallCount++;
+                return _snapshot is not null;
+            }
+        }
+
+        public int HasOriginalRestoreSnapshotCallCount { get; private set; }
 
         public int TrySaveOriginalRestoreSnapshotCallCount { get; private set; }
 

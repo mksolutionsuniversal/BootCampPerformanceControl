@@ -158,6 +158,10 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
             cancellationToken.ThrowIfCancellationRequested();
             return _restoreSnapshotStore.HasOriginalRestoreSnapshot;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             _logger.Error("Diagnostic report generation failed while checking restore snapshot presence.", exception);
