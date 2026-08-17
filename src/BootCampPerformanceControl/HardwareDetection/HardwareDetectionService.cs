@@ -5,6 +5,15 @@ namespace BootCampPerformanceControl.HardwareDetection;
 
 public sealed class HardwareDetectionService : IHardwareDetectionService
 {
+    private readonly IModelSupportRegistry _modelSupportRegistry;
+
+    public HardwareDetectionService(IModelSupportRegistry modelSupportRegistry)
+    {
+        ArgumentNullException.ThrowIfNull(modelSupportRegistry);
+
+        _modelSupportRegistry = modelSupportRegistry;
+    }
+
     public async Task<HardwareSnapshot> DetectAsync(CancellationToken cancellationToken)
     {
         try
@@ -36,7 +45,8 @@ public sealed class HardwareDetectionService : IHardwareDetectionService
                 "This milestone is intended for Intel Macs running Windows through Boot Camp.");
         }
 
-        if (string.Equals(model, VerifiedHardwareModels.MacBookPro16_1, StringComparison.OrdinalIgnoreCase))
+        var supportDefinition = _modelSupportRegistry.Find(model);
+        if (supportDefinition?.ProcessorPowerControlVerified == true)
         {
             return new ModelVerificationResult(
                 manufacturer,
