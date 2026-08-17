@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using BootCampPerformanceControl.ApplicationInfo;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -323,17 +323,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
 
     private static string GetApplicationVersion()
     {
-        var assembly = typeof(DiagnosticReportService).Assembly;
-        var informationalVersion = assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion;
-
-        if (!string.IsNullOrWhiteSpace(informationalVersion))
-        {
-            return FormatValue(informationalVersion);
-        }
-
-        return FormatValue(assembly.GetName().Version?.ToString());
+        return ApplicationVersionProvider.GetInformationalVersion();
     }
 
     private static string CreateSuggestedFileName(string? model)

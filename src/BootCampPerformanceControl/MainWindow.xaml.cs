@@ -34,4 +34,13 @@ public partial class MainWindow : Window
             viewModel.RefreshCommand.Execute(null);
         }
     }
+
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        var aboutWindow = new AboutWindow
+        {
+            Owner = this
+        };
+        aboutWindow.ShowDialog();
+    }
 }

@@ -6,7 +6,7 @@ BootCamp Performance Control is an open-source Windows utility for Intel Macs ru
 
 This is an alpha release: `0.1.0-alpha`.
 
-Use it only if you understand that hardware and power-management behavior can vary across Boot Camp installations. The first enabled profile has been built for a verified MacBookPro16,1 path, and unsupported or unverified models must not receive model-specific writes.
+Use it only if you understand that hardware and power-management behavior can vary across Boot Camp installations. This alpha is model-conservative: the first enabled profile has been built strictly for the verified MacBookPro16,1 path, and unsupported or unverified models do not receive model-specific writes. When an original processor-state snapshot is available, use Restore to return to the pre-application processor state.
 
 ## Current alpha support
 
@@ -53,23 +53,30 @@ Enabled in `0.1.0-alpha`:
 
 ## Build
 
-Restore and build the solution:
+Build the solution:
 
 ```powershell
 dotnet build BootCampPerformanceControl.sln -c Release
 ```
 
-Publish a framework-dependent Windows x64 build:
+Create the self-contained Windows x64 alpha publish using the publish script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-alpha.ps1
+```
+
+Or publish directly using the `win-x64-alpha` profile:
 
 ```powershell
 dotnet publish src/BootCampPerformanceControl/BootCampPerformanceControl.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained false `
-  -o artifacts/0.1.0-alpha/win-x64
+  /p:PublishProfile=win-x64-alpha `
+  -o artifacts/BootCampPerformanceControl-0.1.0-alpha-win-x64
 ```
 
-The publish output is intentionally not an installer.
+The published output will be placed in:
+`artifacts/BootCampPerformanceControl-0.1.0-alpha-win-x64/`
+
+The publish output is intentionally a standalone folder and not an installer.
 
 ## Test
 
