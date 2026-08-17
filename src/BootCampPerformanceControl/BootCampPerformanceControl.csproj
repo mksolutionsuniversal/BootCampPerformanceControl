@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -14,7 +14,9 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyTitle>BootCamp Performance Control</AssemblyTitle>
     <Product>BootCamp Performance Control</Product>
-    <Authors>BootCamp Performance Control contributors</Authors>
+    <Company>MK Universal Solutions LTD</Company>
+    <Authors>MK Universal Solutions LTD</Authors>
+    <Copyright>Copyright © 2026 MK Universal Solutions LTD</Copyright>
     <Description>Open-source Windows utility for Intel Macs running Windows through Boot Camp to apply verified power-management profiles.</Description>
     <RepositoryType>git</RepositoryType>
     <PackageTags>bootcamp;windows;macbook;power-management</PackageTags>

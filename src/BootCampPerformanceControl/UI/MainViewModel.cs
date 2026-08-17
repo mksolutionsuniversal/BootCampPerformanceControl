@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
-using System.Reflection;
 using System.Windows.Input;
+using BootCampPerformanceControl.ApplicationInfo;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.HardwareDetection;
@@ -83,7 +83,7 @@ public sealed class MainViewModel : ViewModelBase
 
     public ObservableCollection<ProfileButtonViewModel> ProfileButtons { get; } = [];
 
-    public string ApplicationVersion { get; } = GetApplicationInformationalVersion();
+    public string ApplicationVersion { get; } = ApplicationVersionProvider.GetInformationalVersion();
 
     public string ReadOnlyMessage => "Only verified Gaming Optimised execution is enabled in this milestone.";
 
@@ -607,14 +607,5 @@ public sealed class MainViewModel : ViewModelBase
         return string.IsNullOrWhiteSpace(videoController.DriverVersion)
             ? videoController.Name
             : $"{videoController.Name} (driver {videoController.DriverVersion})";
-    }
-
-    private static string GetApplicationInformationalVersion()
-    {
-        return typeof(MainViewModel).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-            ?? typeof(MainViewModel).Assembly.GetName().Version?.ToString()
-            ?? "Unknown";
     }
 }
