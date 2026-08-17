@@ -18,6 +18,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
+    private readonly ProcessorProfileStateEvaluator _processorProfileStateEvaluator;
     private readonly IDiagnosticReportService _diagnosticReportService;
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
     private readonly IApplicationLogger _logger;
@@ -34,6 +35,8 @@ public sealed class MainViewModel : ViewModelBase
     private string _processorMaximumDc = "Not read";
     private string _boostModeAc = "Not read";
     private string _boostModeDc = "Not read";
+    private string _detectedProfileState = "Unknown - power state has not been read.";
+    private string _restoreSnapshotStatus = "Not available.";
     private string _fanControlStatus;
     private string _statusMessage = "Ready";
     private bool _isBusy;
@@ -45,6 +48,7 @@ public sealed class MainViewModel : ViewModelBase
         IProfileCatalog profileCatalog,
         ProfileApplyService profileApplyService,
         IRestoreSnapshotStore restoreSnapshotStore,
+        ProcessorProfileStateEvaluator processorProfileStateEvaluator,
         IDiagnosticReportService diagnosticReportService,
         IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
         IApplicationLogger logger)
@@ -54,10 +58,12 @@ public sealed class MainViewModel : ViewModelBase
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
         _restoreSnapshotStore = restoreSnapshotStore;
+        _processorProfileStateEvaluator = processorProfileStateEvaluator;
         _diagnosticReportService = diagnosticReportService;
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
         _fanControlStatus = fanControlService.GetStatus().DisplayText;
+        RefreshRestoreSnapshotStatus();
         RefreshCommand = new AsyncCommand(
             RefreshAsync,
             canExecute: () => !IsBusy,
@@ -153,6 +159,18 @@ public sealed class MainViewModel : ViewModelBase
         private set => SetProperty(ref _boostModeDc, value);
     }
 
+    public string DetectedProfileState
+    {
+        get => _detectedProfileState;
+        private set => SetProperty(ref _detectedProfileState, value);
+    }
+
+    public string RestoreSnapshotStatus
+    {
+        get => _restoreSnapshotStatus;
+        private set => SetProperty(ref _restoreSnapshotStatus, value);
+    }
+
     public string FanControlStatus
     {
         get => _fanControlStatus;
@@ -214,6 +232,8 @@ public sealed class MainViewModel : ViewModelBase
                 _logger.Info("Power-state read started.");
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
                 ApplyPowerState(currentPowerState);
+                ApplyDetectedProfileState(currentPowerState, verificationResult);
+                RefreshRestoreSnapshotStatus();
                 _logger.Info($"Power-state read completed. Active scheme: {currentPowerState.SchemeId}.");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -316,11 +336,15 @@ public sealed class MainViewModel : ViewModelBase
             {
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
                 ApplyPowerState(currentPowerState);
+                ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
+                RefreshRestoreSnapshotStatus();
                 StatusMessage = $"Profile '{profileId}' applied successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after profile application. Active scheme: {currentPowerState.SchemeId}.");
             }
             catch (Exception exception)
             {
+                ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+                RefreshRestoreSnapshotStatus();
                 StatusMessage = $"Profile '{profileId}' was applied and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
                 _logger.Error(
                     $"Power-state UI refresh failed after successful profile application for '{profileId}'.",
@@ -361,11 +385,15 @@ public sealed class MainViewModel : ViewModelBase
             {
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
                 ApplyPowerState(currentPowerState);
+                ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
+                RefreshRestoreSnapshotStatus();
                 StatusMessage = "Original power settings restored successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
             }
             catch (Exception exception)
             {
+                ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+                RefreshRestoreSnapshotStatus();
                 StatusMessage = "Original power settings were restored and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
                 _logger.Error(
                     "Power-state UI refresh failed after successful restore.",
@@ -432,6 +460,30 @@ public sealed class MainViewModel : ViewModelBase
         BoostModeDc = PowerBoostModeFormatter.Format(snapshot.BoostModeDc);
     }
 
+    private void ApplyDetectedProfileState(
+        PowerStateSnapshot snapshot,
+        ModelVerificationResult verificationResult)
+    {
+        ApplyDetectedProfileState(_processorProfileStateEvaluator.Evaluate(snapshot, verificationResult));
+    }
+
+    private void ApplyDetectedProfileState(ProcessorProfileState state)
+    {
+        DetectedProfileState = state switch
+        {
+            ProcessorProfileState.GamingOptimisedDetected => "Gaming Optimised settings detected.",
+            ProcessorProfileState.Other => "Windows / custom processor settings.",
+            _ => "Unknown - power state has not been read."
+        };
+    }
+
+    private void RefreshRestoreSnapshotStatus()
+    {
+        RestoreSnapshotStatus = _restoreSnapshotStore.HasOriginalRestoreSnapshot
+            ? "Available - original processor settings can be restored."
+            : "Not available.";
+    }
+
     private void ApplyHardwareFailure()
     {
         MacModel = "Detection failed";
@@ -448,10 +500,13 @@ public sealed class MainViewModel : ViewModelBase
         ProcessorMaximumDc = "Read failed";
         BoostModeAc = "Read failed";
         BoostModeDc = "Read failed";
+        ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+        RefreshRestoreSnapshotStatus();
     }
 
     private void UpdateProfiles(ModelVerificationResult verificationResult)
     {
+        RefreshRestoreSnapshotStatus();
         ProfileButtons.Clear();
 
         foreach (var profile in _profileCatalog.GetProfiles(verificationResult))

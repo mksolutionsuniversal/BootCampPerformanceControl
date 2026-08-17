@@ -17,6 +17,9 @@ public static class AppCompositionRoot
         var hardwareDetectionService = new HardwareDetectionService(modelSupportRegistry);
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
+        var processorProfileStateEvaluator = new ProcessorProfileStateEvaluator(
+            profileCatalog,
+            profileExecutionResolver);
         var powerManagementService = new WindowsPowerManagementService(
             restoreSnapshotStore,
             logger);
@@ -40,6 +43,7 @@ public static class AppCompositionRoot
             profileCatalog,
             profileApplyService,
             restoreSnapshotStore,
+            processorProfileStateEvaluator,
             diagnosticReportService,
             new WpfDiagnosticReportFileSaveService(),
             logger);
