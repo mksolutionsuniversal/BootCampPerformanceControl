@@ -7,6 +7,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{0D467DA2-65F
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl", "src\BootCampPerformanceControl\BootCampPerformanceControl.csproj", "{F1059FFE-3D8A-4D11-B43E-7AD275A1470A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E18B0A8D-B8C8-4783-9054-0C7C70138402}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl.Tests", "tests\BootCampPerformanceControl.Tests\BootCampPerformanceControl.Tests.csproj", "{5C9C7673-2379-47C1-B44E-E1139919F423}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl.PowerSmokeTest", "tools\BootCampPerformanceControl.PowerSmokeTest\BootCampPerformanceControl.PowerSmokeTest.csproj", "{A74AC729-2AA3-43F6-8CB9-8A3821BA5136}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,8 +28,18 @@ Global
 		{F1059FFE-3D8A-4D11-B43E-7AD275A1470A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F1059FFE-3D8A-4D11-B43E-7AD275A1470A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F1059FFE-3D8A-4D11-B43E-7AD275A1470A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C9C7673-2379-47C1-B44E-E1139919F423}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C9C7673-2379-47C1-B44E-E1139919F423}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C9C7673-2379-47C1-B44E-E1139919F423}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C9C7673-2379-47C1-B44E-E1139919F423}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A74AC729-2AA3-43F6-8CB9-8A3821BA5136}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A74AC729-2AA3-43F6-8CB9-8A3821BA5136}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A74AC729-2AA3-43F6-8CB9-8A3821BA5136}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A74AC729-2AA3-43F6-8CB9-8A3821BA5136}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{F1059FFE-3D8A-4D11-B43E-7AD275A1470A} = {0D467DA2-65F7-4C74-8845-3F51D6121AD0}
+		{5C9C7673-2379-47C1-B44E-E1139919F423} = {E18B0A8D-B8C8-4783-9054-0C7C70138402}
+		{A74AC729-2AA3-43F6-8CB9-8A3821BA5136} = {8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}
 	EndGlobalSection
 EndGlobal
