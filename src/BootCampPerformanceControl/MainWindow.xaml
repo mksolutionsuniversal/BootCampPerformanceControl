@@ -142,8 +142,10 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Button Content="{Binding DisplayName}"
+                                        Command="{Binding Command}"
                                         IsEnabled="{Binding IsEnabled}"
                                         ToolTip="{Binding ToolTip}"
+                                        ToolTipService.ShowOnDisabled="True"
                                         MinHeight="36"
                                         Margin="0,0,8,0" />
                             </DataTemplate>

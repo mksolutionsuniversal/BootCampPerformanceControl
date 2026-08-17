@@ -30,6 +30,11 @@ public sealed class AsyncCommand : ICommand
         return !_isExecuting && (_canExecute?.Invoke() ?? true);
     }
 
+    public void NotifyCanExecuteChanged()
+    {
+        RaiseCanExecuteChanged();
+    }
+
     public async void Execute(object? parameter)
     {
         if (!CanExecute(parameter))

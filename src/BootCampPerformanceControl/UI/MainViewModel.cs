@@ -5,6 +5,7 @@ using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
+using BootCampPerformanceControl.SettingsBackup;
 
 namespace BootCampPerformanceControl.UI;
 
@@ -13,7 +14,10 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
     private readonly IProfileCatalog _profileCatalog;
+    private readonly ProfileApplyService _profileApplyService;
+    private readonly IRestoreSnapshotStore _restoreSnapshotStore;
     private readonly IApplicationLogger _logger;
+    private ModelVerificationResult _lastVerificationResult = ModelVerificationResult.Unknown();
     private string _macModel = "Not detected";
     private string _cpu = "Not detected";
     private string _coreThreadCount = "Not detected";
@@ -35,25 +39,30 @@ public sealed class MainViewModel : ViewModelBase
         IPowerManagementService powerManagementService,
         IFanControlService fanControlService,
         IProfileCatalog profileCatalog,
+        ProfileApplyService profileApplyService,
+        IRestoreSnapshotStore restoreSnapshotStore,
         IApplicationLogger logger)
     {
         _hardwareDetectionService = hardwareDetectionService;
         _powerManagementService = powerManagementService;
         _profileCatalog = profileCatalog;
+        _profileApplyService = profileApplyService;
+        _restoreSnapshotStore = restoreSnapshotStore;
         _logger = logger;
         _fanControlStatus = fanControlService.GetStatus().DisplayText;
         RefreshCommand = new AsyncCommand(
             RefreshAsync,
+            canExecute: () => !IsBusy,
             onCanceled: OnRefreshCanceled,
             onException: OnRefreshException);
-        UpdateProfiles(ModelVerificationResult.Unknown());
+        UpdateProfiles(_lastVerificationResult);
     }
 
     public ICommand RefreshCommand { get; }
 
     public ObservableCollection<ProfileButtonViewModel> ProfileButtons { get; } = [];
 
-    public string ReadOnlyMessage => "Read-only milestone – power changes are disabled.";
+    public string ReadOnlyMessage => "Only verified Gaming Optimised execution is enabled in this milestone.";
 
     public string MacModel
     {
@@ -142,7 +151,13 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsBusy
     {
         get => _isBusy;
-        private set => SetProperty(ref _isBusy, value);
+        private set
+        {
+            if (SetProperty(ref _isBusy, value))
+            {
+                NotifyOperationCommandsCanExecuteChanged();
+            }
+        }
     }
 
     private async Task RefreshAsync(CancellationToken cancellationToken)
@@ -160,6 +175,7 @@ public sealed class MainViewModel : ViewModelBase
                 _logger.Info("Hardware detection started.");
                 var hardwareSnapshot = await _hardwareDetectionService.DetectAsync(cancellationToken);
                 verificationResult = _hardwareDetectionService.VerifyModel(hardwareSnapshot);
+                _lastVerificationResult = verificationResult;
                 ApplyHardware(hardwareSnapshot);
                 ApplyCompatibility(verificationResult);
                 UpdateProfiles(verificationResult);
@@ -171,6 +187,7 @@ public sealed class MainViewModel : ViewModelBase
                 errors++;
                 ApplyHardwareFailure();
                 ApplyCompatibility(verificationResult);
+                _lastVerificationResult = verificationResult;
                 UpdateProfiles(verificationResult);
                 _logger.Error("Hardware detection failed.", exception);
             }
@@ -209,6 +226,119 @@ public sealed class MainViewModel : ViewModelBase
     {
         StatusMessage = "Refresh failed. Check the log for details.";
         _logger.Error("Refresh failed unexpectedly.", exception);
+    }
+
+    private async Task ApplyProfileAsync(string profileId, CancellationToken cancellationToken)
+    {
+        IsBusy = true;
+        StatusMessage = $"Applying profile '{profileId}'...";
+
+        try
+        {
+            _logger.Info($"Profile application started: {profileId}.");
+            var result = await _profileApplyService.ApplyProfileAsync(profileId, cancellationToken);
+
+            if (!result.IsSuccessful)
+            {
+                StatusMessage = $"Profile application failed: {result.FailureReason}";
+                _logger.Error(
+                    $"Profile application failed for '{profileId}': {result.FailureReason}",
+                    new InvalidOperationException(result.FailureReason));
+                return;
+            }
+
+            _logger.Info($"Profile application succeeded: {profileId}. Re-reading power state.");
+            _lastVerificationResult = result.ModelVerificationResult;
+            UpdateProfiles(_lastVerificationResult);
+
+            try
+            {
+                var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                ApplyPowerState(currentPowerState);
+                StatusMessage = $"Profile '{profileId}' applied successfully. Power state refreshed.";
+                _logger.Info($"Power-state read completed after profile application. Active scheme: {currentPowerState.SchemeId}.");
+            }
+            catch (Exception exception)
+            {
+                StatusMessage = $"Profile '{profileId}' was applied and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
+                _logger.Error(
+                    $"Power-state UI refresh failed after successful profile application for '{profileId}'.",
+                    exception);
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
+    {
+        IsBusy = true;
+        StatusMessage = "Restoring original power settings...";
+
+        try
+        {
+            _logger.Info("Restore started.");
+            var result = await _powerManagementService.RestoreOriginalSettingsAsync(cancellationToken);
+
+            if (!result.IsSuccessful)
+            {
+                var failureMessage = result.FailureMessage ?? "Restore operation failed.";
+                StatusMessage = $"Restore failed: {failureMessage}";
+                UpdateProfiles(_lastVerificationResult);
+                _logger.Error(
+                    $"Restore failed: {failureMessage}",
+                    new InvalidOperationException(failureMessage));
+                return;
+            }
+
+            _logger.Info("Restore succeeded. Re-reading power state.");
+            UpdateProfiles(_lastVerificationResult);
+
+            try
+            {
+                var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                ApplyPowerState(currentPowerState);
+                StatusMessage = "Original power settings restored successfully. Power state refreshed.";
+                _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
+            }
+            catch (Exception exception)
+            {
+                StatusMessage = "Original power settings were restored and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
+                _logger.Error(
+                    "Power-state UI refresh failed after successful restore.",
+                    exception);
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OnProfileApplyCanceled(OperationCanceledException exception)
+    {
+        StatusMessage = "Profile application canceled.";
+        _logger.Info($"Profile application canceled: {exception.Message}");
+    }
+
+    private void OnProfileApplyException(Exception exception)
+    {
+        StatusMessage = "Profile application failed. Check the log for details.";
+        _logger.Error("Profile application failed unexpectedly.", exception);
+    }
+
+    private void OnRestoreCanceled(OperationCanceledException exception)
+    {
+        StatusMessage = "Restore canceled.";
+        _logger.Info($"Restore canceled: {exception.Message}");
+    }
+
+    private void OnRestoreException(Exception exception)
+    {
+        StatusMessage = "Restore failed. Check the log for details.";
+        _logger.Error("Restore failed unexpectedly.", exception);
     }
 
     private void ApplyHardware(HardwareSnapshot snapshot)
@@ -265,7 +395,44 @@ public sealed class MainViewModel : ViewModelBase
 
         foreach (var profile in _profileCatalog.GetProfiles(verificationResult))
         {
-            ProfileButtons.Add(new ProfileButtonViewModel(profile));
+            ProfileButtons.Add(new ProfileButtonViewModel(
+                profile,
+                CreateProfileCommand(profile),
+                _restoreSnapshotStore.HasOriginalRestoreSnapshot));
+        }
+    }
+
+    private AsyncCommand CreateProfileCommand(PerformanceProfile profile)
+    {
+        if (string.Equals(profile.Id, "restore", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AsyncCommand(
+                RestoreOriginalSettingsAsync,
+                canExecute: () => !IsBusy,
+                onCanceled: OnRestoreCanceled,
+                onException: OnRestoreException);
+        }
+
+        return new AsyncCommand(
+            cancellationToken => ApplyProfileAsync(profile.Id, cancellationToken),
+            canExecute: () => !IsBusy,
+            onCanceled: OnProfileApplyCanceled,
+            onException: OnProfileApplyException);
+    }
+
+    private void NotifyOperationCommandsCanExecuteChanged()
+    {
+        if (RefreshCommand is AsyncCommand refreshCommand)
+        {
+            refreshCommand.NotifyCanExecuteChanged();
+        }
+
+        foreach (var profileButton in ProfileButtons)
+        {
+            if (profileButton.Command is AsyncCommand profileCommand)
+            {
+                profileCommand.NotifyCanExecuteChanged();
+            }
         }
     }
 

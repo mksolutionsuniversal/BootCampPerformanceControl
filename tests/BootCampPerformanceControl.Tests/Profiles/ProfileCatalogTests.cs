@@ -7,7 +7,7 @@ namespace BootCampPerformanceControl.Tests.Profiles;
 public sealed class ProfileCatalogTests
 {
     [Fact]
-    public void VerifiedModel_HasConservativeTypedTargetsAndDisabledButtons()
+    public void VerifiedModel_HasConservativeTypedTargetsAndExpectedButtonAvailability()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
@@ -39,8 +39,16 @@ public sealed class ProfileCatalogTests
             ProfileUnspecifiedValueSource.OriginalRestoreSnapshot,
             fullPerformance.PowerTarget.UnspecifiedValueSource);
 
+        var buttons = profiles
+            .Select(profile => new ProfileButtonViewModel(
+                profile,
+                new AsyncCommand(_ => Task.CompletedTask),
+                isRestoreSnapshotAvailable: false))
+            .ToList();
+
+        Assert.True(Assert.Single(buttons, button => button.ProfileId == "gaming-optimised").IsEnabled);
         Assert.All(
-            profiles.Select(profile => new ProfileButtonViewModel(profile)),
+            buttons.Where(button => button.ProfileId != "gaming-optimised"),
             button => Assert.False(button.IsEnabled));
     }
 
