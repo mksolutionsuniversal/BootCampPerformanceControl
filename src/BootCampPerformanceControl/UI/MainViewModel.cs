@@ -333,6 +333,8 @@ public sealed class MainViewModel : ViewModelBase
             _lastVerificationResult = result.ModelVerificationResult;
             UpdateProfiles(_lastVerificationResult);
 
+            var profileDisplayName = GetProfileDisplayName(profileId);
+
             try
             {
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
@@ -341,6 +343,13 @@ public sealed class MainViewModel : ViewModelBase
                 RefreshRestoreSnapshotStatus();
                 StatusMessage = $"Profile '{profileId}' applied successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after profile application. Active scheme: {currentPowerState.SchemeId}.");
+            }
+            catch (OperationCanceledException exception)
+            {
+                HandlePostSuccessPowerStateRefreshCanceled(
+                    $"Profile '{profileDisplayName}' was applied and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
+                    $"Power-state UI refresh canceled after successful profile application for '{profileId}'",
+                    exception);
             }
             catch (Exception exception)
             {
@@ -391,6 +400,13 @@ public sealed class MainViewModel : ViewModelBase
                 StatusMessage = "Original power settings restored successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
             }
+            catch (OperationCanceledException exception)
+            {
+                HandlePostSuccessPowerStateRefreshCanceled(
+                    "Original processor settings were restored and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
+                    "Power-state UI refresh canceled after successful restore",
+                    exception);
+            }
             catch (Exception exception)
             {
                 ApplyDetectedProfileState(ProcessorProfileState.Unknown);
@@ -430,6 +446,27 @@ public sealed class MainViewModel : ViewModelBase
     {
         StatusMessage = "Restore failed. Check the log for details.";
         _logger.Error("Restore failed unexpectedly.", exception);
+    }
+
+    private void HandlePostSuccessPowerStateRefreshCanceled(
+        string statusMessage,
+        string logMessage,
+        OperationCanceledException exception)
+    {
+        ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+        UpdateProfiles(_lastVerificationResult);
+        StatusMessage = statusMessage;
+        _logger.Info($"{logMessage}: {exception.Message}");
+    }
+
+    private string GetProfileDisplayName(string profileId)
+    {
+        return _profileCatalog.GetProfiles(_lastVerificationResult)
+            .FirstOrDefault(profile => string.Equals(
+                profile.Id,
+                profileId,
+                StringComparison.OrdinalIgnoreCase))
+            ?.DisplayName ?? profileId;
     }
 
     private void ApplyHardware(HardwareSnapshot snapshot)
