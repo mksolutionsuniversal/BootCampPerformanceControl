@@ -1,3 +1,4 @@
+using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
@@ -23,6 +24,13 @@ public static class AppCompositionRoot
             profileCatalog,
             profileExecutionResolver,
             powerManagementService);
+        var diagnosticReportService = new DiagnosticReportService(
+            hardwareDetectionService,
+            powerManagementService,
+            restoreSnapshotStore,
+            profileCatalog,
+            profileExecutionResolver,
+            logger);
 
         return new MainViewModel(
             hardwareDetectionService,
@@ -31,6 +39,8 @@ public static class AppCompositionRoot
             profileCatalog,
             profileApplyService,
             restoreSnapshotStore,
+            diagnosticReportService,
+            new WpfDiagnosticReportFileSaveService(),
             logger);
     }
 }
