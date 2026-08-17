@@ -24,6 +24,8 @@ internal sealed class FakePowerProfileApi : IPowerProfileApi
 
     public HashSet<int> IgnoreNativeWriteNumbers { get; } = [];
 
+    public Action<int>? BeforeNativeWrite { get; set; }
+
     public void AddScheme(Guid schemeId, ProcessorPowerSettings settings)
     {
         _settingsByScheme[schemeId] = settings;
@@ -103,6 +105,8 @@ internal sealed class FakePowerProfileApi : IPowerProfileApi
     private bool ShouldIgnoreConfiguredWrite()
     {
         NativeWriteCount++;
+        BeforeNativeWrite?.Invoke(NativeWriteCount);
+
         if (NativeWriteCount == FailOnNativeWriteNumber
             || FailOnNativeWriteNumbers.Contains(NativeWriteCount))
         {

@@ -5,6 +5,7 @@ namespace BootCampPerformanceControl.PowerManagement;
 
 public sealed class WindowsPowerManagementService : IPowerManagementService
 {
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly IPowerProfileApi _powerApi;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
     private readonly IApplicationLogger _logger;
@@ -35,7 +36,7 @@ public sealed class WindowsPowerManagementService : IPowerManagementService
         ProcessorPowerSettings requestedSettings,
         CancellationToken cancellationToken)
     {
-        return ApplyProcessorSettingsCoreAsync(
+        return ApplyProcessorSettingsSerializedAsync(
             requestedSettings,
             expectedStateBefore: null,
             cancellationToken);
@@ -48,10 +49,29 @@ public sealed class WindowsPowerManagementService : IPowerManagementService
     {
         ArgumentNullException.ThrowIfNull(expectedStateBefore);
 
-        return ApplyProcessorSettingsCoreAsync(
+        return ApplyProcessorSettingsSerializedAsync(
             requestedSettings,
             expectedStateBefore,
             cancellationToken);
+    }
+
+    private async Task<PowerOperationResult> ApplyProcessorSettingsSerializedAsync(
+        ProcessorPowerSettings requestedSettings,
+        PowerStateSnapshot? expectedStateBefore,
+        CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ApplyProcessorSettingsCoreAsync(
+                requestedSettings,
+                expectedStateBefore,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     private async Task<PowerOperationResult> ApplyProcessorSettingsCoreAsync(
@@ -157,6 +177,20 @@ public sealed class WindowsPowerManagementService : IPowerManagementService
     }
 
     public async Task<PowerOperationResult> RestoreOriginalSettingsAsync(
+        CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await RestoreOriginalSettingsCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    private async Task<PowerOperationResult> RestoreOriginalSettingsCoreAsync(
         CancellationToken cancellationToken)
     {
         const PowerOperationKind operation = PowerOperationKind.RestoreOriginalSnapshot;

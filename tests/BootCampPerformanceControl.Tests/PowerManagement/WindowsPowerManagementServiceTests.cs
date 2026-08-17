@@ -47,6 +47,116 @@ public sealed class WindowsPowerManagementServiceTests
     }
 
     [Fact]
+    public async Task StateChangingOperations_AreSerializedPerWindowsPowerManagementServiceInstance()
+    {
+        var schemeId = Guid.NewGuid();
+        var original = new ProcessorPowerSettings(100, 90, 2, 1);
+        var requested = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerApi = new FakePowerProfileApi(schemeId, original);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var firstWriteEntered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseFirstWrite = new ManualResetEventSlim(false);
+        powerApi.BeforeNativeWrite = writeNumber =>
+        {
+            if (writeNumber == 1)
+            {
+                firstWriteEntered.TrySetResult(true);
+                if (!releaseFirstWrite.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException("Timed out waiting to release the controlled native write.");
+                }
+            }
+        };
+
+        var applyTask = service.ApplyProcessorSettingsAsync(requested, CancellationToken.None);
+        Task<PowerOperationResult>? restoreTask = null;
+
+        try
+        {
+            await firstWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            restoreTask = service.RestoreOriginalSettingsAsync(CancellationToken.None);
+
+            Assert.False(restoreTask.IsCompleted);
+            Assert.Equal(1, powerApi.NativeWriteCount);
+        }
+        finally
+        {
+            releaseFirstWrite.Set();
+        }
+
+        var applyResult = await applyTask.WaitAsync(TimeSpan.FromSeconds(10));
+        var restoreResult = await (restoreTask
+                ?? throw new InvalidOperationException("Restore task was not started."))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(applyResult.IsSuccessful);
+        Assert.True(restoreResult.IsSuccessful);
+        Assert.Equal(8, powerApi.NativeWriteCount);
+        Assert.Equal(original, powerApi.GetSettings(schemeId));
+        Assert.False(store.HasOriginalRestoreSnapshot);
+    }
+
+    [Fact]
+    public async Task ApplyProcessorSettingsAsync_CancelledOperationGateWaiterPerformsNoNativeWrites()
+    {
+        var schemeId = Guid.NewGuid();
+        var original = new ProcessorPowerSettings(100, 90, 2, 1);
+        var requested = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerApi = new FakePowerProfileApi(schemeId, original);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var firstWriteEntered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseFirstWrite = new ManualResetEventSlim(false);
+        powerApi.BeforeNativeWrite = writeNumber =>
+        {
+            if (writeNumber == 1)
+            {
+                firstWriteEntered.TrySetResult(true);
+                if (!releaseFirstWrite.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException("Timed out waiting to release the controlled native write.");
+                }
+            }
+        };
+
+        var activeApplyTask = service.ApplyProcessorSettingsAsync(
+            requested,
+            CancellationToken.None);
+
+        try
+        {
+            await firstWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var cancellationSource = new CancellationTokenSource();
+            var waitingApplyTask = service.ApplyProcessorSettingsAsync(
+                requested,
+                CreateSnapshot(schemeId, original),
+                cancellationSource.Token);
+
+            Assert.False(waitingApplyTask.IsCompleted);
+            cancellationSource.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await waitingApplyTask);
+            Assert.Equal(1, powerApi.NativeWriteCount);
+            Assert.False(activeApplyTask.IsCompleted);
+        }
+        finally
+        {
+            releaseFirstWrite.Set();
+        }
+
+        var activeResult = await activeApplyTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(activeResult.IsSuccessful);
+        Assert.Equal(4, powerApi.NativeWriteCount);
+        Assert.Equal(requested, powerApi.GetSettings(schemeId));
+        Assert.True(store.HasOriginalRestoreSnapshot);
+    }
+
+    [Fact]
     public async Task ApplyProcessorSettingsAsync_WithMatchingExpectedState_Proceeds()
     {
         var schemeId = Guid.NewGuid();
