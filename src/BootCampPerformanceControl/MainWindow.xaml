@@ -50,6 +50,7 @@
                            FontSize="22"
                            FontWeight="SemiBold" />
                 <TextBlock Text="{Binding ReadOnlyMessage}"
+                           TextWrapping="Wrap"
                            FontWeight="SemiBold"
                            Foreground="#8A3A0A"
                            Margin="0,4,0,0" />
