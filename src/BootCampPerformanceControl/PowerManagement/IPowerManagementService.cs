@@ -8,5 +8,10 @@ public interface IPowerManagementService
         ProcessorPowerSettings requestedSettings,
         CancellationToken cancellationToken);
 
+    Task<PowerOperationResult> ApplyProcessorSettingsAsync(
+        ProcessorPowerSettings requestedSettings,
+        PowerStateSnapshot expectedStateBefore,
+        CancellationToken cancellationToken);
+
     Task<PowerOperationResult> RestoreOriginalSettingsAsync(CancellationToken cancellationToken);
 }

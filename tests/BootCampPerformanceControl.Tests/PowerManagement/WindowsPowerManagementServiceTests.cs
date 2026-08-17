@@ -47,6 +47,93 @@ public sealed class WindowsPowerManagementServiceTests
     }
 
     [Fact]
+    public async Task ApplyProcessorSettingsAsync_WithMatchingExpectedState_Proceeds()
+    {
+        var schemeId = Guid.NewGuid();
+        var currentSettings = new ProcessorPowerSettings(95, 95, 2, 2);
+        var powerApi = new FakePowerProfileApi(schemeId, currentSettings);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var expectedState = CreateSnapshot(schemeId, currentSettings);
+
+        var result = await service.ApplyProcessorSettingsAsync(
+            currentSettings,
+            expectedState,
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(4, powerApi.NativeWriteCount);
+        Assert.True(store.HasOriginalRestoreSnapshot);
+    }
+
+    [Fact]
+    public async Task ApplyProcessorSettingsAsync_WithMismatchedExpectedScheme_AbortsBeforeSnapshotAndWrites()
+    {
+        var actualSchemeId = Guid.NewGuid();
+        var currentSettings = new ProcessorPowerSettings(95, 95, 2, 2);
+        var powerApi = new FakePowerProfileApi(actualSchemeId, currentSettings);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var expectedState = CreateSnapshot(Guid.NewGuid(), currentSettings);
+
+        var result = await service.ApplyProcessorSettingsAsync(
+            currentSettings,
+            expectedState,
+            CancellationToken.None);
+
+        await AssertApplyPreconditionFailureAsync(result, powerApi, store);
+        Assert.False(result.Verification?.SchemeIdMatches);
+    }
+
+    [Fact]
+    public async Task ApplyProcessorSettingsAsync_WithMismatchedExpectedCpuValues_AbortsBeforeSnapshotAndWrites()
+    {
+        var schemeId = Guid.NewGuid();
+        var currentSettings = new ProcessorPowerSettings(95, 95, 2, 2);
+        var powerApi = new FakePowerProfileApi(schemeId, currentSettings);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var expectedState = CreateSnapshot(
+            schemeId,
+            new ProcessorPowerSettings(94, 93, 2, 2));
+
+        var result = await service.ApplyProcessorSettingsAsync(
+            currentSettings,
+            expectedState,
+            CancellationToken.None);
+
+        await AssertApplyPreconditionFailureAsync(result, powerApi, store);
+        Assert.False(result.Verification?.ProcessorMaximumAcMatches);
+        Assert.False(result.Verification?.ProcessorMaximumDcMatches);
+        Assert.True(result.Verification?.BoostModeAcMatches);
+        Assert.True(result.Verification?.BoostModeDcMatches);
+    }
+
+    [Fact]
+    public async Task ApplyProcessorSettingsAsync_WithMismatchedExpectedBoostValues_AbortsBeforeSnapshotAndWrites()
+    {
+        var schemeId = Guid.NewGuid();
+        var currentSettings = new ProcessorPowerSettings(95, 95, 2, 2);
+        var powerApi = new FakePowerProfileApi(schemeId, currentSettings);
+        var store = new InMemoryRestoreSnapshotStore();
+        var service = CreateService(powerApi, store);
+        var expectedState = CreateSnapshot(
+            schemeId,
+            new ProcessorPowerSettings(95, 95, 1, 3));
+
+        var result = await service.ApplyProcessorSettingsAsync(
+            currentSettings,
+            expectedState,
+            CancellationToken.None);
+
+        await AssertApplyPreconditionFailureAsync(result, powerApi, store);
+        Assert.True(result.Verification?.ProcessorMaximumAcMatches);
+        Assert.True(result.Verification?.ProcessorMaximumDcMatches);
+        Assert.False(result.Verification?.BoostModeAcMatches);
+        Assert.False(result.Verification?.BoostModeDcMatches);
+    }
+
+    [Fact]
     public async Task ApplyProcessorSettingsAsync_RollsBackAfterANativeWriteFails()
     {
         var schemeId = Guid.NewGuid();
@@ -382,6 +469,20 @@ public sealed class WindowsPowerManagementServiceTests
             powerApi,
             store,
             new TestApplicationLogger());
+    }
+
+    private static async Task AssertApplyPreconditionFailureAsync(
+        PowerOperationResult result,
+        FakePowerProfileApi powerApi,
+        IRestoreSnapshotStore store)
+    {
+        Assert.False(result.IsSuccessful);
+        Assert.NotNull(result.FailureMessage);
+        Assert.Contains("precondition failed", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Equal(0, powerApi.NativeWriteCount);
+        Assert.Equal(0, powerApi.SetActiveSchemeCount);
+        Assert.False(store.HasOriginalRestoreSnapshot);
+        Assert.Null(await store.GetOriginalRestoreSnapshotAsync(CancellationToken.None));
     }
 
     private static PowerStateSnapshot CreateSnapshot(

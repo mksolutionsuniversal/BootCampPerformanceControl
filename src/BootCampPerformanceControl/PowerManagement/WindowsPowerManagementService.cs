@@ -31,8 +31,32 @@ public sealed class WindowsPowerManagementService : IPowerManagementService
         return Task.Run(ReadCurrentState, cancellationToken);
     }
 
-    public async Task<PowerOperationResult> ApplyProcessorSettingsAsync(
+    public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
         ProcessorPowerSettings requestedSettings,
+        CancellationToken cancellationToken)
+    {
+        return ApplyProcessorSettingsCoreAsync(
+            requestedSettings,
+            expectedStateBefore: null,
+            cancellationToken);
+    }
+
+    public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
+        ProcessorPowerSettings requestedSettings,
+        PowerStateSnapshot expectedStateBefore,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expectedStateBefore);
+
+        return ApplyProcessorSettingsCoreAsync(
+            requestedSettings,
+            expectedStateBefore,
+            cancellationToken);
+    }
+
+    private async Task<PowerOperationResult> ApplyProcessorSettingsCoreAsync(
+        ProcessorPowerSettings requestedSettings,
+        PowerStateSnapshot? expectedStateBefore,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(requestedSettings);
@@ -61,6 +85,33 @@ public sealed class WindowsPowerManagementService : IPowerManagementService
         {
             _logger.Error("Apply processor settings failed while reading the initial state.", exception);
             return CreatePreflightFailure(operation, requestedSettings, exception.Message);
+        }
+
+        if (expectedStateBefore is not null)
+        {
+            var preconditionVerification = PowerStateVerification.Compare(
+                expectedStateBefore.SchemeId,
+                ProcessorPowerSettings.FromSnapshot(expectedStateBefore),
+                stateBefore);
+
+            if (!preconditionVerification.IsSuccessful)
+            {
+                const string failureMessage =
+                    "Apply expected-state precondition failed; no restore snapshot or power setting was changed.";
+                _logger.Info(
+                    $"{failureMessage} Expected: {FormatState(expectedStateBefore)}. "
+                    + $"Actual: {FormatState(stateBefore)}.");
+                return new PowerOperationResult(
+                    operation,
+                    IsSuccessful: false,
+                    stateBefore.SchemeId,
+                    stateBefore,
+                    requestedSettings,
+                    StateAfter: null,
+                    preconditionVerification,
+                    Rollback: null,
+                    failureMessage);
+            }
         }
 
         _logger.Info(
