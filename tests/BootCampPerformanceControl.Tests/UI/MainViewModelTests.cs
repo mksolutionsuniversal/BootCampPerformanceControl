@@ -569,8 +569,9 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void GamingButton_SuccessfulApplyUiRereadCancellationDoesNotReportCanceledApply()
+    public async Task GamingButton_SuccessfulApplyUiRereadCancellationReportsApplySuccessWithCanceledRefresh()
     {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
         var expectedStateBefore = InitialPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
         var powerManagementService = new FakePowerManagementService(
@@ -582,19 +583,38 @@ public sealed class MainViewModelTests
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
             powerManagementService,
+            restoreSnapshotStore,
             logger: logger);
 
         viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
 
-        Assert.Contains("was applied and verified", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("refreshing the displayed power state failed", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("canceled", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Profile 'Gaming Optimised' was applied and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
+            viewModel.StatusMessage);
+        Assert.DoesNotContain("Profile application canceled", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("failed. Check the log", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.Equal(3, powerManagementService.ReadCurrentStateCallCount);
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
         Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
         Assert.Equal(0, powerManagementService.RestoreOriginalSettingsCallCount);
-        Assert.Single(logger.Errors);
+        Assert.Empty(logger.Errors);
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.Contains("UI refresh canceled", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            logger.InformationMessages,
+            message => message.StartsWith("Profile application canceled:", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -728,6 +748,88 @@ public sealed class MainViewModelTests
         Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
         Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
         Assert.Single(logger.Errors);
+    }
+
+    [Fact]
+    public async Task RestoreButton_SuccessfulRestoreUiRereadCancellationReportsRestoreSuccessWithCanceledRefresh()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var powerManagementService = new FakePowerManagementService();
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            PowerState(
+                ProcessorMaximumAc: 95,
+                ProcessorMaximumDc: 95,
+                BoostModeAc: 0,
+                BoostModeDc: 0),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        powerManagementService.QueueReadException(new OperationCanceledException("UI restore refresh canceled."));
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            logger);
+
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(
+            "Original processor settings were restored and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
+            viewModel.StatusMessage);
+        Assert.DoesNotContain("Restore canceled", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+        Assert.False(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+        Assert.False(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.Equal(1, powerManagementService.RestoreOriginalSettingsCallCount);
+        Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+        Assert.Empty(logger.Errors);
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.Contains("UI refresh canceled", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            logger.InformationMessages,
+            message => message.StartsWith("Restore canceled:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task RestoreButton_CanceledBeforeRestoreCompletesReportsRestoreCanceled()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            InitialPowerState(),
+            CancellationToken.None);
+        var powerManagementService = new FakePowerManagementService
+        {
+            RestoreException = new OperationCanceledException("Restore canceled before completion.")
+        };
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            logger);
+
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal("Restore canceled.", viewModel.StatusMessage);
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.Equal(1, powerManagementService.RestoreOriginalSettingsCallCount);
+        Assert.Equal(0, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Empty(logger.Errors);
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.StartsWith("Restore canceled:", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1296,6 +1398,8 @@ public sealed class MainViewModelTests
 
         public Exception? GuardedApplyException { get; set; }
 
+        public Exception? RestoreException { get; set; }
+
         public void QueueReadGate(AsyncGate gate)
         {
             _readGates.Enqueue(gate);
@@ -1364,6 +1468,11 @@ public sealed class MainViewModelTests
         public async Task<PowerOperationResult> RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
         {
             RestoreOriginalSettingsCallCount++;
+
+            if (RestoreException is not null)
+            {
+                throw RestoreException;
+            }
 
             if (RestoreResult.IsSuccessful && RestoreSnapshotStore is not null)
             {
