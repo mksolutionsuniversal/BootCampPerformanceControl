@@ -44,6 +44,94 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void DetectedProfileState_InitialStateIsUnknown()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public void RestoreSnapshotStatus_InitialStateReflectsUnavailableSnapshot()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+    }
+
+    [Fact]
+    public async Task RestoreSnapshotStatus_InitialStateReflectsAvailableSnapshot()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            InitialPowerState(),
+            CancellationToken.None);
+
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            restoreSnapshotStore);
+
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+    }
+
+    [Fact]
+    public async Task Refresh_WithVerifiedExactGamingPowerState_DisplaysGamingOptimisedDetected()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(GamingOptimisedPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task Refresh_WithDifferingPowerState_DisplaysWindowsCustomProcessorSettings()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal("Windows / custom processor settings.", viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task Refresh_WithPowerReadFailure_ClearsPreviouslyDetectedGamingStateToUnknown()
+    {
+        var powerManagementService = new FakePowerManagementService(GamingOptimisedPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+
+        powerManagementService.QueueReadException(new InvalidOperationException("Power read failed."));
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+    }
+
+    [Fact]
     public void ExportDiagnosticReportCommand_IsExposed()
     {
         var viewModel = CreateViewModel(
@@ -251,6 +339,7 @@ public sealed class MainViewModelTests
         Assert.False(restore.IsEnabled);
         Assert.Null(restore.Command);
         Assert.Contains("No original restore snapshot", restore.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
     }
 
     [Fact]
@@ -269,6 +358,9 @@ public sealed class MainViewModelTests
         Assert.True(restore.IsEnabled);
         Assert.NotNull(restore.Command);
         Assert.Contains("exact original saved power state", restore.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
     }
 
     [Fact]
@@ -294,6 +386,84 @@ public sealed class MainViewModelTests
         Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
         Assert.Contains("Profile application failed:", viewModel.StatusMessage);
         Assert.Single(logger.Errors);
+    }
+
+    [Fact]
+    public async Task GamingButton_FailedApplyAfterRestoreSnapshotSavedRefreshesRestoreUiAndClearsDetectedProfileState()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var expectedStateBefore = GamingOptimisedPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerManagementService = new FakePowerManagementService(
+            FailedPowerOperation(expectedStateBefore, requestedSettings, "Native write failed."),
+            GamingOptimisedPowerState(),
+            expectedStateBefore)
+        {
+            SaveRestoreSnapshotBeforeGuardedApplyResult = true
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+        Assert.False(GetProfile(viewModel, "restore").IsEnabled);
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.NotNull(GetProfile(viewModel, "restore").Command);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task GamingButton_CanceledApplyAfterRestoreSnapshotSavedRefreshesRestoreUiAndClearsDetectedProfileState()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var expectedStateBefore = GamingOptimisedPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerManagementService = new FakePowerManagementService(
+            FailedPowerOperation(expectedStateBefore, requestedSettings, "Apply canceled."),
+            GamingOptimisedPowerState(),
+            expectedStateBefore)
+        {
+            SaveRestoreSnapshotBeforeGuardedApplyResult = true,
+            GuardedApplyException = new OperationCanceledException("Apply canceled after snapshot save.")
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal("Gaming Optimised settings detected.", viewModel.DetectedProfileState);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
+        Assert.False(GetProfile(viewModel, "restore").IsEnabled);
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(
+            "Available - original processor settings can be restored.",
+            viewModel.RestoreSnapshotStatus);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.NotNull(GetProfile(viewModel, "restore").Command);
+        Assert.Equal(
+            "Unknown - power state has not been read.",
+            viewModel.DetectedProfileState);
+        Assert.Equal("Profile application canceled.", viewModel.StatusMessage);
     }
 
     [Fact]
@@ -485,8 +655,10 @@ public sealed class MainViewModelTests
         Assert.Equal("90%", viewModel.ProcessorMaximumDc);
         Assert.Equal("1 (Enabled)", viewModel.BoostModeAc);
         Assert.Equal("2 (Aggressive)", viewModel.BoostModeDc);
+        Assert.Equal("Windows / custom processor settings.", viewModel.DetectedProfileState);
         Assert.Contains("restored successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
         Assert.False(restoreSnapshotStore.HasOriginalRestoreSnapshot);
+        Assert.Equal("Not available.", viewModel.RestoreSnapshotStatus);
         Assert.False(GetProfile(viewModel, "restore").IsEnabled);
     }
 
@@ -778,6 +950,7 @@ public sealed class MainViewModelTests
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null)
     {
         var profileCatalog = new ProfileCatalog();
+        var profileExecutionResolver = new ProfileExecutionResolver();
         restoreSnapshotStore ??= new InMemoryRestoreSnapshotStore();
         powerManagementService.RestoreSnapshotStore = restoreSnapshotStore;
 
@@ -789,9 +962,12 @@ public sealed class MainViewModelTests
             new ProfileApplyService(
                 hardwareDetectionService,
                 profileCatalog,
-                new ProfileExecutionResolver(),
+                profileExecutionResolver,
                 powerManagementService),
             restoreSnapshotStore,
+            new ProcessorProfileStateEvaluator(
+                profileCatalog,
+                profileExecutionResolver),
             diagnosticReportService ?? new FakeDiagnosticReportService(),
             diagnosticReportFileSaveService ?? new FakeDiagnosticReportFileSaveService(),
             logger ?? new TestApplicationLogger());
@@ -845,6 +1021,15 @@ public sealed class MainViewModelTests
             ProcessorMaximumDc: 70,
             BoostModeAc: 2,
             BoostModeDc: 2);
+    }
+
+    private static PowerStateSnapshot GamingOptimisedPowerState()
+    {
+        return PowerState(
+            ProcessorMaximumAc: 95,
+            ProcessorMaximumDc: 95,
+            BoostModeAc: 0,
+            BoostModeDc: 0);
     }
 
     private static PowerStateSnapshot PowerState(
@@ -1107,6 +1292,10 @@ public sealed class MainViewModelTests
 
         public PowerStateSnapshot? LastExpectedStateBefore { get; private set; }
 
+        public bool SaveRestoreSnapshotBeforeGuardedApplyResult { get; set; }
+
+        public Exception? GuardedApplyException { get; set; }
+
         public void QueueReadGate(AsyncGate gate)
         {
             _readGates.Enqueue(gate);
@@ -1156,11 +1345,17 @@ public sealed class MainViewModelTests
             LastGuardedSettings = requestedSettings;
             LastExpectedStateBefore = expectedStateBefore;
 
-            if (_applyResult.IsSuccessful && RestoreSnapshotStore is not null)
+            if ((_applyResult.IsSuccessful || SaveRestoreSnapshotBeforeGuardedApplyResult)
+                && RestoreSnapshotStore is not null)
             {
                 await RestoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
                     expectedStateBefore,
                     cancellationToken);
+            }
+
+            if (GuardedApplyException is not null)
+            {
+                throw GuardedApplyException;
             }
 
             return _applyResult;

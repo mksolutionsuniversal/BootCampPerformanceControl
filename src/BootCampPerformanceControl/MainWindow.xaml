@@ -124,22 +124,30 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Active scheme GUID" />
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ActivePowerScheme}" />
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="CPU Maximum AC" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ProcessorMaximumAc}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Detected profile state" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding DetectedProfileState}" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="CPU Maximum DC" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ProcessorMaximumDc}" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Restore snapshot" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding RestoreSnapshotStatus}" />
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Turbo/Boost AC" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding BoostModeAc}" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="CPU Maximum AC" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ProcessorMaximumAc}" />
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Turbo/Boost DC" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding BoostModeDc}" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="CPU Maximum DC" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ProcessorMaximumDc}" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Turbo/Boost AC" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding BoostModeAc}" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Turbo/Boost DC" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding BoostModeDc}" />
                     </Grid>
                 </GroupBox>
 
