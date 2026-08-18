@@ -1,0 +1,51 @@
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider    = %ProviderName%
+DriverVer   = 08/18/2026,0.1.0.0
+CatalogFile = BootCampSmc.cat
+PnpLockdown = 1
+
+[Manufacturer]
+%ProviderName% = Models,NTamd64
+
+[Models.NTamd64]
+%DeviceDescription% = BootCampSmc_Install,ACPI\APP0001
+
+[DestinationDirs]
+BootCampSmc_CopyFiles = 13
+
+[BootCampSmc_Install.NT]
+CopyFiles = BootCampSmc_CopyFiles
+
+[BootCampSmc_CopyFiles]
+BootCampSmc.sys
+
+[BootCampSmc_Install.NT.Services]
+AddService = BootCampSmc,0x00000002,BootCampSmc_Service
+
+[BootCampSmc_Service]
+DisplayName   = %ServiceDescription%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\BootCampSmc.sys
+
+[BootCampSmc_Install.NT.Wdf]
+KmdfService = BootCampSmc,BootCampSmc_Wdf
+
+[BootCampSmc_Wdf]
+KmdfLibraryVersion = 1.31
+
+[SourceDisksNames]
+1 = %DiskName%,,,
+
+[SourceDisksFiles]
+BootCampSmc.sys = 1
+
+[Strings]
+ProviderName        = "MK Universal Solutions Ltd"
+DeviceDescription   = "BootCamp Performance Control Apple SMC"
+ServiceDescription  = "BootCamp Performance Control Apple SMC KMDF Driver"
+DiskName             = "BootCamp Performance Control Driver Package"
