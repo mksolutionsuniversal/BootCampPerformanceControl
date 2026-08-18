@@ -1,5 +1,7 @@
 #include "BootCampSmc.h"
 
+#define BOOTCAMP_SMC_MMIO_STATUS_OFFSET ((SIZE_T)0x4005u)
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(INIT, DriverEntry)
 #pragma alloc_text(PAGE, BootCampSmcEvtDeviceAdd)
@@ -212,6 +214,16 @@ BootCampSmcEvtDevicePrepareHardware(
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
 
+    if ((SIZE_T)context->MemoryLength <= BOOTCAMP_SMC_MMIO_STATUS_OFFSET)
+    {
+        KdPrintEx((
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: translated MEMORY resource is too small for the bounded Gate 4C status observation; length=0x%lX.\n",
+            context->MemoryLength));
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
+    }
+
     context->MmioLength = (SIZE_T)context->MemoryLength;
     context->MmioBase = MmMapIoSpaceEx(
         context->MemoryStart,
@@ -232,8 +244,24 @@ BootCampSmcEvtDevicePrepareHardware(
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: read-only non-cached MMIO mapping established for 0x%I64X bytes; no register was read or written.\n",
+        "BootCampSmc: read-only non-cached MMIO mapping established for 0x%I64X bytes.\n",
         (ULONGLONG)context->MmioLength));
+
+    {
+        volatile UCHAR* statusRegister;
+        UCHAR statusValue;
+
+        statusRegister = (volatile UCHAR*)(
+            (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_STATUS_OFFSET);
+
+        statusValue = READ_REGISTER_UCHAR(statusRegister);
+
+        DbgPrintEx(
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_INFO_LEVEL,
+            "BootCampSmc: Gate 4C single read-only MMIO observation offset=0x4005 value=0x%02X; no register was written.\n",
+            statusValue);
+    }
 
     return STATUS_SUCCESS;
 }
@@ -260,7 +288,7 @@ BootCampSmcEvtDeviceReleaseHardware(
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: hardware resources released and MMIO mapping removed; no register was read or written.\n"));
+        "BootCampSmc: hardware resources released and MMIO mapping removed; no register was written.\n"));
 
     return STATUS_SUCCESS;
 }
