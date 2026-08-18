@@ -2,7 +2,7 @@ using BootCampPerformanceControl.FanControl.Smc;
 
 namespace BootCampPerformanceControl.FanControl;
 
-internal sealed class FanCapabilityProbe
+internal sealed class FanCapabilityProbe : IFanCapabilityProbe
 {
     private readonly AppleSmcProtocol _protocol;
     private readonly FanSafetyPolicy _safetyPolicy;
