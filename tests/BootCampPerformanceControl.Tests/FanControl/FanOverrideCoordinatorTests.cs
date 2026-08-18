@@ -357,8 +357,11 @@ public sealed class FanOverrideCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task RestoreAppleAutoAsync(CancellationToken cancellationToken)
+        public Task RestoreAppleAutoAsync(
+            FanOverrideOwnershipMarker ownershipMarker,
+            CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(ownershipMarker);
             cancellationToken.ThrowIfCancellationRequested();
             RestoreCalls++;
             _events?.Add("restore");
