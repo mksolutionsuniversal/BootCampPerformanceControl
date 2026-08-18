@@ -99,6 +99,7 @@ try
 
     var exitCode = 0;
     var applied = false;
+    var proceedWithApply = true;
 
     try
     {
@@ -112,37 +113,45 @@ try
         if (startupRecovery.Action == FanOverrideRecoveryAction.Blocked)
         {
             Console.Error.WriteLine("REFUSED: existing ownership state could not be recovered safely.");
-            return 4;
+            exitCode = 4;
+            proceedWithApply = false;
         }
 
-        var preApplyCapability = await probe.ProbeAsync(model, cancellationSource.Token);
-        PrintCapability("PRE-APPLY", preApplyCapability);
-
-        var result = await coordinator.ApplyMaximumSafeRpmAsync(
-            model,
-            preApplyCapability,
-            cancellationSource.Token);
-
-        if (!result.IsApplied || result.Marker is null)
+        if (proceedWithApply)
         {
-            Console.Error.WriteLine($"REFUSED: {result.Message}");
-            return 5;
+            var preApplyCapability = await probe.ProbeAsync(model, cancellationSource.Token);
+            PrintCapability("PRE-APPLY", preApplyCapability);
+
+            var result = await coordinator.ApplyMaximumSafeRpmAsync(
+                model,
+                preApplyCapability,
+                cancellationSource.Token);
+
+            if (!result.IsApplied || result.Marker is null)
+            {
+                Console.Error.WriteLine($"REFUSED: {result.Message}");
+                exitCode = 5;
+                proceedWithApply = false;
+            }
         }
 
-        applied = true;
-        Console.WriteLine();
-        Console.WriteLine("MAXIMUM SAFE RPM APPLY: VERIFIED");
-        Console.WriteLine("Ownership marker is active.");
-
-        // Briefly allow the physical fans to ramp, then observe actual RPM.
-        await Task.Delay(TimeSpan.FromSeconds(2), cancellationSource.Token);
-        var maximumCapability = await probe.ProbeAsync(model, cancellationSource.Token);
-        PrintCapability("MAXIMUM", maximumCapability);
-
-        if (!IsVerifiedMaximumState(maximumCapability))
+        if (proceedWithApply)
         {
-            throw new InvalidOperationException(
-                "Maximum state readback after the ramp delay did not remain at the verified manual targets.");
+            applied = true;
+            Console.WriteLine();
+            Console.WriteLine("MAXIMUM SAFE RPM APPLY: VERIFIED");
+            Console.WriteLine("Ownership marker is active.");
+
+            // Briefly allow the physical fans to ramp, then observe actual RPM.
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationSource.Token);
+            var maximumCapability = await probe.ProbeAsync(model, cancellationSource.Token);
+            PrintCapability("MAXIMUM", maximumCapability);
+
+            if (!IsVerifiedMaximumState(maximumCapability))
+            {
+                throw new InvalidOperationException(
+                    "Maximum state readback after the ramp delay did not remain at the verified manual targets.");
+            }
         }
     }
     catch (OperationCanceledException exception)
