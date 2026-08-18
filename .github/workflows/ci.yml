@@ -20,14 +20,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Enforce BootCampSmc Gate 4A safety boundary
+      - name: Enforce BootCampSmc Gate 4C safety boundary
         shell: pwsh
         run: |
           $forbiddenPatterns = @(
             '\bMmMapIoSpace\s*\(',
             'PAGE_READWRITE',
             'PAGE_EXECUTE',
-            'READ_REGISTER_',
             'WRITE_REGISTER_',
             'READ_PORT_',
             'WRITE_PORT_',
@@ -53,7 +52,7 @@ jobs:
           $matches = $files | Select-String -Pattern $forbiddenPatterns
 
           if ($matches) {
-            Write-Error 'BootCampSmc Gate 4A violation: writable/executable MMIO, register/port access, interrupt connection, memory-copy access, or device-control surface was introduced.'
+            Write-Error 'BootCampSmc Gate 4C violation: writable/executable MMIO, register/port writes, port reads, interrupt connection, memory-copy access, or device-control surface was introduced.'
             $matches | ForEach-Object {
               Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
             }
@@ -66,19 +65,41 @@ jobs:
           $mapCalls = @($source | Select-String -Pattern '\bMmMapIoSpaceEx\s*\(')
           $unmapCalls = @($source | Select-String -Pattern '\bMmUnmapIoSpace\s*\(')
           $readOnlyProtection = @($source | Select-String -SimpleMatch 'PAGE_READONLY | PAGE_NOCACHE')
+          $allRegisterReads = @($files | Select-String -Pattern '\bREAD_REGISTER_')
+          $ucharRegisterReads = @($files | Select-String -Pattern '\bREAD_REGISTER_UCHAR\s*\(')
+          $statusOffsetDefinitions = @($source | Select-String -SimpleMatch '#define BOOTCAMP_SMC_MMIO_STATUS_OFFSET ((SIZE_T)0x4005u)')
+          $boundedLengthChecks = @($source | Select-String -SimpleMatch 'if ((SIZE_T)context->MemoryLength <= BOOTCAMP_SMC_MMIO_STATUS_OFFSET)')
 
           if ($mapCalls.Count -ne 1) {
-            Write-Error "Gate 4A requires exactly one MmMapIoSpaceEx call; found $($mapCalls.Count)."
+            Write-Error "Gate 4C requires exactly one MmMapIoSpaceEx call; found $($mapCalls.Count)."
             exit 1
           }
 
           if ($unmapCalls.Count -ne 1) {
-            Write-Error "Gate 4A requires exactly one MmUnmapIoSpace call; found $($unmapCalls.Count)."
+            Write-Error "Gate 4C requires exactly one MmUnmapIoSpace call; found $($unmapCalls.Count)."
             exit 1
           }
 
           if ($readOnlyProtection.Count -ne 1) {
-            Write-Error 'Gate 4A requires exactly one PAGE_READONLY | PAGE_NOCACHE mapping.'
+            Write-Error 'Gate 4C requires exactly one PAGE_READONLY | PAGE_NOCACHE mapping.'
+            exit 1
+          }
+
+          if ($allRegisterReads.Count -ne 1 -or $ucharRegisterReads.Count -ne 1) {
+            Write-Error "Gate 4C permits exactly one register read and it must be READ_REGISTER_UCHAR; all=$($allRegisterReads.Count) uchar=$($ucharRegisterReads.Count)."
+            $allRegisterReads | ForEach-Object {
+              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
+            }
+            exit 1
+          }
+
+          if ($statusOffsetDefinitions.Count -ne 1) {
+            Write-Error "Gate 4C requires exactly one fixed bounded status offset definition at 0x4005; found $($statusOffsetDefinitions.Count)."
+            exit 1
+          }
+
+          if ($boundedLengthChecks.Count -ne 1) {
+            Write-Error "Gate 4C requires an explicit MMIO length check before the status read; found $($boundedLengthChecks.Count)."
             exit 1
           }
 
@@ -86,6 +107,7 @@ jobs:
             'if \(context->MmioBase != NULL\)',
             'context->MmioBase = MmMapIoSpaceEx\(',
             'if \(context->MmioBase == NULL\)',
+            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_STATUS_OFFSET',
             'MmUnmapIoSpace\(context->MmioBase, context->MmioLength\);'
           )
 
@@ -99,14 +121,14 @@ jobs:
           )
 
           if ($unexpectedMmioReferences.Count -ne 0) {
-            Write-Error 'Gate 4A violation: MMIO mapping pointer is referenced outside map/null-check/unmap lifecycle.'
+            Write-Error 'Gate 4C violation: MMIO mapping pointer is referenced outside map/null-check/single-status-read/unmap lifecycle.'
             $unexpectedMmioReferences | ForEach-Object {
               Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
             }
             exit 1
           }
 
-          Write-Host 'BootCampSmc Gate 4A safety boundary: PASS'
+          Write-Host 'BootCampSmc Gate 4C safety boundary: PASS'
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v6
