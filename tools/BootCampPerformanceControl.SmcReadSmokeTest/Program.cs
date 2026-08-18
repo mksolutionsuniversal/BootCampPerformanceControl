@@ -1,21 +1,11 @@
 using System.ComponentModel;
 using System.Globalization;
+using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.Smc;
 using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 using BootCampPerformanceControl.HardwareDetection;
 
 const string expectedModel = VerifiedHardwareModels.MacBookPro16_1;
-string[] keys = [
-    "FNum",
-    "F0Mx",
-    "F1Mx",
-    "F0Ac",
-    "F1Ac",
-    "F0Md",
-    "F1Md",
-    "F0Tg",
-    "F1Tg"
-];
 
 Console.WriteLine("BootCamp Performance Control - SMC Read Smoke Test");
 Console.WriteLine("READ ONLY: this tool does not issue SMC write requests.");
@@ -29,7 +19,7 @@ try
 
     Console.WriteLine($"Model: {model}");
 
-    if (!string.Equals(model, expectedModel, StringComparison.OrdinalIgnoreCase))
+    if (!string.Equals(model, expectedModel, StringComparison.Ordinal))
     {
         Console.Error.WriteLine(
             $"Refusing this integration test because the verified research target is '{expectedModel}'.");
@@ -37,14 +27,28 @@ try
     }
 
     await using var transport = CrystalIdeaAppleSmcTransport.OpenInstalledDriver();
-    var protocol = new AppleSmcProtocol(transport);
+    var probe = new FanCapabilityProbe(
+        new AppleSmcProtocol(transport),
+        new FanSafetyPolicy());
 
-    var transportProtocol = await protocol.GetProtocolAsync(CancellationToken.None);
-    Console.WriteLine($"Protocol: {transportProtocol} ({(int)transportProtocol})");
+    var capability = await probe.ProbeAsync(model, CancellationToken.None);
 
-    if (transportProtocol != SmcTransportProtocol.Mmio)
+    if (capability.Protocol.HasValue)
     {
-        Console.Error.WriteLine("Unexpected SMC transport protocol. No key reads will be attempted.");
+        Console.WriteLine($"Protocol: {capability.Protocol.Value} ({(int)capability.Protocol.Value})");
+    }
+
+    if (!capability.IsReadSupported ||
+        !capability.IsHardwareSafetyGateSatisfied ||
+        capability.Snapshot is null)
+    {
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("FAN SAFETY GATE: BLOCKED");
+        foreach (var failure in capability.Failures)
+        {
+            Console.Error.WriteLine($"- {failure}");
+        }
+
         return 3;
     }
 
@@ -52,12 +56,16 @@ try
     Console.WriteLine("Key   Len Type Attr Raw         Decoded");
     Console.WriteLine("----  --- ---- ---- ----------- ----------------");
 
-    foreach (var key in keys)
+    foreach (var value in capability.Snapshot.Values)
     {
-        var value = await protocol.ReadKeyAsync(key, CancellationToken.None);
         Console.WriteLine(FormatValue(value));
     }
 
+    Console.WriteLine();
+    Console.WriteLine("Fan capability:");
+    Console.WriteLine("READ SUPPORT:         SUPPORTED");
+    Console.WriteLine("HARDWARE SAFETY GATE: VERIFIED");
+    Console.WriteLine("WRITE IMPLEMENTATION: NOT ENABLED");
     Console.WriteLine();
     Console.WriteLine("READ-ONLY SMC ROUND-TRIP: PASS");
     return 0;
