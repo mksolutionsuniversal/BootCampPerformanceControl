@@ -12,6 +12,7 @@ BootCamp Performance Control is an open-source Windows utility for Intel Macs ru
 BootCamp Performance Control targets Intel Macs running Windows through Boot Camp.
 
 Execution permission is capability-based:
+
 - **Platform support:** Gaming Optimised is available on supported Intel Mac platforms (`SupportedIntelMac`) when the required Windows processor power settings can be read successfully.
 - **Model validation:** Model validation metadata is informational and does not grant or deny execution permission.
 
@@ -95,3 +96,17 @@ Run the automated test suite:
 ```powershell
 dotnet test BootCampPerformanceControl.sln -c Release
 ```
+
+## Security
+
+Please see [SECURITY.md](SECURITY.md) for vulnerability reporting and hardware-safety information.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Disclaimer
+
+This is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Apple Inc. or Microsoft Corporation.
+
+Apple, Mac, MacBook Pro, Boot Camp, Windows, and Microsoft are trademarks or registered trademarks of their respective owners.
