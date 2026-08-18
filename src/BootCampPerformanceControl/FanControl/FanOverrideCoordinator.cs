@@ -120,7 +120,7 @@ internal sealed class FanOverrideCoordinator
                 // A concrete writer must return only after it has verified Apple Auto.
                 // If it throws or is canceled, the marker is intentionally retained.
                 await _writer
-                    .RestoreAppleAutoAsync(cancellationToken)
+                    .RestoreAppleAutoAsync(currentModel, cancellationToken)
                     .ConfigureAwait(false);
                 await _ownershipStore
                     .ClearAsync(cancellationToken)
