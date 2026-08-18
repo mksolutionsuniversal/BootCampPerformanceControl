@@ -3,6 +3,8 @@ using BootCampPerformanceControl.FanControl.Smc.Windows;
 
 namespace BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 
+// Research-only concrete backend. It is intentionally not exposed through a
+// production factory or composition root; deliberate device injection is required.
 internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
     IFanSmcWriteBackend,
     IAsyncDisposable
@@ -16,12 +18,6 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
     public CrystalIdeaResearchFanSmcWriteBackend(IDeviceIoControlClient device)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
-    }
-
-    public static CrystalIdeaResearchFanSmcWriteBackend OpenInstalledDriver()
-    {
-        return new CrystalIdeaResearchFanSmcWriteBackend(
-            new WindowsDeviceIoControlClient(CrystalIdeaAppleSmcTransport.DevicePath));
     }
 
     public Task SetManualModeAsync(
