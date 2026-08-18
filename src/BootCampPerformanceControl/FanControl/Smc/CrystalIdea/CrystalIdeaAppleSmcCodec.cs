@@ -43,8 +43,7 @@ internal static class CrystalIdeaAppleSmcCodec
         {
             throw new ArgumentException(
                 $"SMC key '{key}' requires exactly {expectedLength} data byte(s).",
-                nameof(data))
-            ;
+                nameof(data));
         }
 
         var request = new byte[AppleSmcProtocol.KeyLength + 1 + data.Length];
