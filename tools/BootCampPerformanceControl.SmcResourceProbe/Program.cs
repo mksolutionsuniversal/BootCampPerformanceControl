@@ -4,11 +4,14 @@ using Microsoft.Win32;
 
 const string appleSmcRegistryPath = @"SYSTEM\CurrentControlSet\Enum\ACPI\APP0001";
 const string appleSmcInstancePrefix = @"ACPI\APP0001\";
+const string classRegistryPath = @"SYSTEM\CurrentControlSet\Control\Class";
 
 const uint CrSuccess = 0;
 const uint CmLocateDevNodeNormal = 0;
 const uint ResTypeAll = 0;
 const uint ResTypeMemory = 1;
+const uint ResTypeIo = 2;
+const uint ResTypeIrq = 4;
 const uint AllocLogConf = 2;
 const uint BootLogConf = 3;
 
@@ -68,8 +71,12 @@ foreach (var instanceName in instanceNames)
     PrintRegistryValue(instanceKey, "Mfg");
     PrintRegistryValue(instanceKey, "ConfigFlags");
     PrintRegistryValue(instanceKey, "Capabilities");
+    PrintRegistryValue(instanceKey, "UpperFilters");
+    PrintRegistryValue(instanceKey, "LowerFilters");
 
+    DumpRegistrySubKey(instanceKey, "Control", "DEVICE INSTANCE Control");
     DumpRegistryLogConf(instanceKey);
+    DumpDriverInstallRegistry(instanceKey);
 
     uint devInst = 0;
     var locateResult = NativeMethods.CM_Locate_DevNodeW(
@@ -86,13 +93,28 @@ foreach (var instanceName in instanceNames)
         continue;
     }
 
+    var statusResult = NativeMethods.CM_Get_DevNode_Status(
+        out var devNodeStatus,
+        out var problemNumber,
+        devInst,
+        0);
+
+    Console.WriteLine(
+        $"CM_Get_DevNode_Status: CONFIGRET=0x{statusResult:X8}; "
+        + $"Status=0x{devNodeStatus:X8}; Problem=0x{problemNumber:X8} ({problemNumber})");
+
+    if (statusResult != CrSuccess)
+    {
+        exitCode = 7;
+    }
+
     DumpLogicalConfiguration("ALLOCATED", devInst, AllocLogConf);
     DumpLogicalConfiguration("BOOT", devInst, BootLogConf);
 }
 
 Console.WriteLine();
 Console.WriteLine("RESOURCE PROBE COMPLETE");
-Console.WriteLine("No device handle was opened and no MMIO register was mapped or accessed.");
+Console.WriteLine("No device handle was opened and no MMIO or I/O-port register was accessed.");
 return exitCode;
 
 static void DumpLogicalConfiguration(
@@ -170,21 +192,17 @@ static void DumpLogicalConfiguration(
             Console.WriteLine(
                 $"[{index}] ResourceId=0x{resourceId:X8}; Size={size}; Raw={FormatHex(data)}");
 
-            if (resourceId == ResTypeMemory)
+            switch (resourceId)
             {
-                if (WindowsMemoryResourceDescriptor.TryParse(data, out var descriptor) &&
-                    descriptor is not null)
-                {
-                    Console.WriteLine(
-                        $"    MEMORY: Base=0x{descriptor.AllocatedBase:X16}; "
-                        + $"End=0x{descriptor.AllocatedEnd:X16}; "
-                        + $"Length=0x{descriptor.Length:X} ({descriptor.Length} bytes); "
-                        + $"Flags=0x{descriptor.Flags:X8}; Type=0x{descriptor.Type:X8}; Count={descriptor.Count}");
-                }
-                else
-                {
-                    Console.WriteLine("    MEMORY: descriptor was shorter than the documented MEM_DES layout.");
-                }
+                case ResTypeMemory:
+                    PrintMemoryDescriptor(data);
+                    break;
+                case ResTypeIo:
+                    PrintIoPortDescriptor(data);
+                    break;
+                case ResTypeIrq:
+                    PrintIrqDescriptor(data);
+                    break;
             }
 
             index++;
@@ -201,23 +219,147 @@ static void DumpLogicalConfiguration(
     }
 }
 
-static void DumpRegistryLogConf(RegistryKey instanceKey)
+static void PrintMemoryDescriptor(ReadOnlySpan<byte> data)
 {
-    using var logConf = instanceKey.OpenSubKey("LogConf", writable: false);
-
-    Console.WriteLine();
-    Console.WriteLine("--- REGISTRY LogConf ---");
-
-    if (logConf is null)
+    if (!WindowsMemoryResourceDescriptor.TryParse(data, out var descriptor) ||
+        descriptor is null)
     {
-        Console.WriteLine("LogConf subkey: not present or not readable.");
+        Console.WriteLine("    MEMORY: descriptor was shorter than the documented MEM_DES layout.");
         return;
     }
 
-    var valueNames = logConf.GetValueNames();
+    Console.WriteLine(
+        $"    MEMORY: Base=0x{descriptor.AllocatedBase:X16}; "
+        + $"End=0x{descriptor.AllocatedEnd:X16}; "
+        + $"Length=0x{descriptor.Length:X} ({descriptor.Length} bytes); "
+        + $"Flags=0x{descriptor.Flags:X8}; Type=0x{descriptor.Type:X8}; Count={descriptor.Count}");
+}
+
+static void PrintIoPortDescriptor(ReadOnlySpan<byte> data)
+{
+    if (!WindowsIoPortResourceDescriptor.TryParse(data, out var descriptor) ||
+        descriptor is null)
+    {
+        Console.WriteLine("    IO: descriptor was shorter than the documented IO_DES layout.");
+        return;
+    }
+
+    Console.WriteLine(
+        $"    IO: Base=0x{descriptor.AllocatedBase:X}; "
+        + $"End=0x{descriptor.AllocatedEnd:X}; "
+        + $"Length=0x{descriptor.Length:X} ({descriptor.Length} ports); "
+        + $"Flags=0x{descriptor.Flags:X8}; Type=0x{descriptor.Type:X8}; Count={descriptor.Count}");
+}
+
+static void PrintIrqDescriptor(ReadOnlySpan<byte> data)
+{
+    if (!WindowsIrqResourceDescriptor.TryParse(data, out var descriptor) ||
+        descriptor is null)
+    {
+        Console.WriteLine("    IRQ: descriptor was shorter than the documented x64 IRQ_DES layout.");
+        return;
+    }
+
+    Console.WriteLine(
+        $"    IRQ: Number={descriptor.AllocatedNumber}; Group={descriptor.Group}; "
+        + $"Affinity=0x{descriptor.Affinity:X16}; Flags=0x{descriptor.Flags:X4}; "
+        + $"Type=0x{descriptor.Type:X8}; Count={descriptor.Count}");
+}
+
+static void DumpDriverInstallRegistry(RegistryKey instanceKey)
+{
+    var driverReference = instanceKey.GetValue(
+        "Driver",
+        null,
+        RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+
+    Console.WriteLine();
+    Console.WriteLine("--- DRIVER INSTALL REGISTRY ---");
+
+    if (string.IsNullOrWhiteSpace(driverReference))
+    {
+        Console.WriteLine("Driver reference: not present.");
+        return;
+    }
+
+    Console.WriteLine($"Driver reference: {driverReference}");
+
+    using var driverKey = Registry.LocalMachine.OpenSubKey(
+        $@"{classRegistryPath}\{driverReference}",
+        writable: false);
+
+    if (driverKey is null)
+    {
+        Console.WriteLine("Driver install key: not present or not readable.");
+        return;
+    }
+
+    foreach (var name in new[]
+    {
+        "InfPath",
+        "InfSection",
+        "InfSectionExt",
+        "ProviderName",
+        "DriverVersion",
+        "DriverDateData",
+        "MatchingDeviceId",
+        "DriverDesc",
+        "UpperFilters",
+        "LowerFilters"
+    })
+    {
+        PrintRegistryValue(driverKey, name);
+    }
+
+    var separatorIndex = driverReference.IndexOf('\\');
+    if (separatorIndex <= 0)
+    {
+        return;
+    }
+
+    var classGuid = driverReference[..separatorIndex];
+    using var classKey = Registry.LocalMachine.OpenSubKey(
+        $@"{classRegistryPath}\{classGuid}",
+        writable: false);
+
+    if (classKey is null)
+    {
+        return;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("--- DEVICE CLASS FILTERS ---");
+    PrintRegistryValue(classKey, "Class");
+    PrintRegistryValue(classKey, "ClassDesc");
+    PrintRegistryValue(classKey, "UpperFilters");
+    PrintRegistryValue(classKey, "LowerFilters");
+}
+
+static void DumpRegistryLogConf(RegistryKey instanceKey)
+{
+    DumpRegistrySubKey(instanceKey, "LogConf", "REGISTRY LogConf");
+}
+
+static void DumpRegistrySubKey(
+    RegistryKey parentKey,
+    string subKeyName,
+    string label)
+{
+    using var subKey = parentKey.OpenSubKey(subKeyName, writable: false);
+
+    Console.WriteLine();
+    Console.WriteLine($"--- {label} ---");
+
+    if (subKey is null)
+    {
+        Console.WriteLine($"{subKeyName} subkey: not present or not readable.");
+        return;
+    }
+
+    var valueNames = subKey.GetValueNames();
     if (valueNames.Length == 0)
     {
-        Console.WriteLine("LogConf contains no values.");
+        Console.WriteLine($"{subKeyName} contains no values.");
         return;
     }
 
@@ -228,8 +370,8 @@ static void DumpRegistryLogConf(RegistryKey instanceKey)
 
         try
         {
-            value = logConf.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
-            kind = logConf.GetValueKind(valueName);
+            value = subKey.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            kind = subKey.GetValueKind(valueName);
         }
         catch (Exception exception)
         {
@@ -286,6 +428,13 @@ internal static class NativeMethods
     internal static extern uint CM_Locate_DevNodeW(
         ref uint pdnDevInst,
         string pDeviceId,
+        uint ulFlags);
+
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Get_DevNode_Status(
+        out uint pulStatus,
+        out uint pulProblemNumber,
+        uint dnDevInst,
         uint ulFlags);
 
     [DllImport("cfgmgr32.dll")]
