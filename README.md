@@ -4,7 +4,7 @@ BootCamp Performance Control is an open-source Windows utility for Intel Macs ru
 
 ## Alpha warning
 
-This is an alpha release: `0.1.0-alpha`.
+This is an alpha release: `0.1.0-alpha.1`.
 
 Use it only if you understand that hardware and power-management behavior can vary across Boot Camp installations. This alpha is model-conservative: the first enabled profile has been built strictly for the verified MacBookPro16,1 path, and unsupported or unverified models do not receive model-specific writes. When an original processor-state snapshot is available, use Restore to return to the pre-application processor state.
 
@@ -15,7 +15,7 @@ Use it only if you understand that hardware and power-management behavior can va
 - Operating system: Windows 10 Boot Camp
 - Verified test CPU: Intel Core i9-9980HK
 
-Enabled in `0.1.0-alpha`:
+Enabled in `0.1.0-alpha.1`:
 
 - Gaming Optimised
   - CPU Maximum State: 95%
@@ -33,7 +33,7 @@ Enabled in `0.1.0-alpha`:
 - Restore returns to the saved original values, not assumed defaults
 - Unsupported or unverified models do not receive model-specific writes
 
-## Not implemented or not enabled in 0.1.0-alpha
+## Not implemented or not enabled in 0.1.0-alpha.1
 
 - Custom fan control
 - Balanced execution
@@ -70,11 +70,11 @@ Or publish directly using the `win-x64-alpha` profile:
 ```powershell
 dotnet publish src/BootCampPerformanceControl/BootCampPerformanceControl.csproj `
   /p:PublishProfile=win-x64-alpha `
-  -o artifacts/BootCampPerformanceControl-0.1.0-alpha-win-x64
+  -o artifacts/BootCampPerformanceControl-0.1.0-alpha.1-win-x64
 ```
 
 The published output will be placed in:
-`artifacts/BootCampPerformanceControl-0.1.0-alpha-win-x64/`
+`artifacts/BootCampPerformanceControl-0.1.0-alpha.1-win-x64/`
 
 The publish output is intentionally a standalone folder and not an installer.
 
