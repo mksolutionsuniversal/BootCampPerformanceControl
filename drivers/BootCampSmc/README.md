@@ -66,42 +66,69 @@ Physical validation on `MacBookPro16,1` proved that:
 - the staged test package, stopped service metadata and Driver Store files can be removed cleanly,
 - final rollback state is Apple `oem120.inf`, PnP `OK`, problem code `0`.
 
-## Gate 4A - read-only MMIO map/unmap lifecycle: current phase
+## Gate 4A - read-only MMIO map/unmap lifecycle: complete
 
-Gate 4A is deliberately narrower than a register-read experiment.
+Physical A/B/A validation on `MacBookPro16,1` proved the PnP-controlled mapping lifecycle:
+
+- exactly one non-empty translated `CmResourceTypeMemory` resource is required,
+- exactly that system-assigned range is mapped with `MmMapIoSpaceEx`,
+- the mapping uses `PAGE_READONLY | PAGE_NOCACHE`,
+- mapping failure fails closed,
+- the mapping is retained only until `EvtDeviceReleaseHardware`,
+- `MmUnmapIoSpace` removes the mapping on release,
+- no mapped address was dereferenced,
+- no register, port or interrupt operation occurred,
+- hot rollback to Apple's NULL driver completed successfully.
+
+## Gate 4B - MMIO register-layout research: complete for the first bounded read
+
+Static interoperability research recovered the active T2-era MMIO transaction layout used by the physically validated Windows research path.
+
+The exact first-read candidate was then independently corroborated against the open-source Linux T2 Apple SMC MMIO implementation without copying implementation code.
+
+For the first bounded observation, both sources agree that:
+
+- offset `0x4005` is an 8-bit MMIO status location,
+- it is read directly during initialization/transaction polling,
+- the MMIO resource must extend beyond offset `0x4005`,
+- reading this location does not require issuing an SMC command.
+
+Additional transaction offsets and command behavior have been recorded for later gates, but are intentionally not enabled in `BootCampSmc.sys` yet.
+
+## Gate 4C - first read-only MMIO observation: current phase
+
+Gate 4C deliberately permits exactly one bounded hardware-register read after the Gate 4A mapping succeeds.
 
 The driver may:
 
-- enumerate only the translated resource list received by `EvtDevicePrepareHardware`,
-- require exactly one non-empty translated `CmResourceTypeMemory` resource,
-- fail closed if the memory-resource shape is unexpected,
-- map exactly that system-assigned physical range with `MmMapIoSpaceEx`,
-- request `PAGE_READONLY | PAGE_NOCACHE`,
-- retain the mapping only until `EvtDeviceReleaseHardware`,
-- unmap it with `MmUnmapIoSpace`.
+- consume only the translated memory resource delivered by PnP,
+- require exactly one non-empty memory resource,
+- fail closed unless the range includes offset `0x4005`,
+- map the range with `PAGE_READONLY | PAGE_NOCACHE`,
+- execute exactly one `READ_REGISTER_UCHAR` at `MmioBase + 0x4005`,
+- log only the resulting byte value,
+- unmap the range during `EvtDeviceReleaseHardware`.
 
-Gate 4A must not:
+Gate 4C must not:
 
-- dereference the mapped address,
-- call `READ_REGISTER_*` or `WRITE_REGISTER_*`,
+- call any `WRITE_REGISTER_*` routine,
 - read or write I/O ports,
 - connect the IRQ,
 - expose a device interface or IOCTL,
 - issue an SMC command,
-- hard-code an MMIO base address or register offset.
+- copy data from arbitrary MMIO offsets,
+- hard-code a physical MMIO base address.
 
-The purpose of Gate 4A is only to prove the PnP-controlled map/unmap lifecycle on the physical machine.
+The CI safety guard enforces this single-read boundary.
 
-## Gate 4B - first read-only MMIO observation
-
-Only after Gate 4A physically passes may a later change introduce the first bounded read from the mapped range.
-
-That experiment must establish the required register layout independently. No register offset is accepted merely because it appears in a proprietary binary or because it is conventional on another Mac generation.
+Physical validation must use the same controlled A/B/A procedure as earlier gates and must restore Apple's `oem120.inf` NULL driver afterward.
 
 ## Gate 5 - constrained SMC read transport
 
-Only after read-only MMIO behavior is independently established:
+Only after Gate 4C physically passes:
 
+- introduce the minimum MMIO writes required to issue read-only SMC commands,
+- use only independently corroborated transaction fields and command values,
 - implement the minimum read operations required by the existing `ISmcTransport` contract,
 - compare returned metadata and values with the physically validated research path,
 - keep arbitrary physical-memory and arbitrary SMC access unavailable.
@@ -116,9 +143,10 @@ Only after read parity is established:
 
 ## Safety rules
 
-- No hard-coded MMIO base address.
-- No register offset is accepted solely because it appears in a third-party binary.
-- No kernel write is enabled before read-only validation is complete.
+- No hard-coded physical MMIO base address.
+- No register offset is accepted solely because it appears in a third-party proprietary binary or because it is conventional on another Mac generation.
+- No kernel MMIO write is enabled before Gate 4C physical validation is complete.
 - No T1/classic support is inferred from the T2-era `MacBookPro16,1` result.
 - No proprietary driver or proprietary source code is redistributed or copied.
+- Open-source interoperability references may corroborate protocol facts, but implementation code must remain original and license-compatible.
 - Failure to identify a safe backend means fan writes stay disabled.
