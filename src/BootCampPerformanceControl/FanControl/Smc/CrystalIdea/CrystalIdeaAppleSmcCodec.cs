@@ -26,6 +26,33 @@ internal static class CrystalIdeaAppleSmcCodec
         return request;
     }
 
+    public static byte[] BuildWhitelistedFanWriteRequest(
+        string key,
+        ReadOnlySpan<byte> data)
+    {
+        var expectedLength = key switch
+        {
+            "F0Md" or "F1Md" => 1,
+            "F0Tg" or "F1Tg" => 4,
+            _ => throw new ArgumentException(
+                "Only the verified F0Md, F1Md, F0Tg and F1Tg fan keys may be written.",
+                nameof(key))
+        };
+
+        if (data.Length != expectedLength)
+        {
+            throw new ArgumentException(
+                $"SMC key '{key}' requires exactly {expectedLength} data byte(s).",
+                nameof(data));
+        }
+
+        var request = new byte[AppleSmcProtocol.KeyLength + 1 + data.Length];
+        EncodeKey(key).CopyTo(request, 0);
+        request[AppleSmcProtocol.KeyLength] = checked((byte)data.Length);
+        data.CopyTo(request.AsSpan(AppleSmcProtocol.KeyLength + 1));
+        return request;
+    }
+
     public static SmcTransportProtocol ParseProtocol(ReadOnlySpan<byte> response)
     {
         if (response.Length != 1)
