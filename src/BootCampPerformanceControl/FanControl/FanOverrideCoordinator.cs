@@ -117,10 +117,10 @@ internal sealed class FanOverrideCoordinator
                 break;
 
             case FanOverrideRecoveryAction.RestoreAppleAuto:
-                // A concrete writer must return only after it has verified Apple Auto.
-                // If it throws or is canceled, the marker is intentionally retained.
+                // The writer re-checks ownership immediately before the first restore
+                // write and returns only after Apple Auto readback verification.
                 await _writer
-                    .RestoreAppleAutoAsync(cancellationToken)
+                    .RestoreAppleAutoAsync(marker, cancellationToken)
                     .ConfigureAwait(false);
                 await _ownershipStore
                     .ClearAsync(cancellationToken)
