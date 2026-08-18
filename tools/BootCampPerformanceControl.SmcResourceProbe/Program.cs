@@ -152,7 +152,7 @@ static void DumpLogicalConfiguration(
                 continue;
             }
 
-            var data = new byte[size];
+            var data = new byte[checked((int)size)];
             var dataResult = NativeMethods.CM_Get_Res_Des_Data(
                 resourceHandle,
                 data,
@@ -280,44 +280,44 @@ static string FormatHex(ReadOnlySpan<byte> data)
         : $"{hex}... (+{data.Length - maxBytes} bytes)";
 }
 
-internal static partial class NativeMethods
+internal static class NativeMethods
 {
-    [LibraryImport("cfgmgr32.dll", StringMarshalling = StringMarshalling.Utf16)]
-    internal static partial uint CM_Locate_DevNodeW(
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    internal static extern uint CM_Locate_DevNodeW(
         ref uint pdnDevInst,
         string pDeviceId,
         uint ulFlags);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Get_First_Log_Conf(
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Get_First_Log_Conf(
         out nint plcLogConf,
         uint dnDevInst,
         uint ulFlags);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Get_Next_Res_Des(
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Get_Next_Res_Des(
         out nint prdResDes,
         nint rdResDes,
         uint forResource,
         out uint pResourceId,
         uint ulFlags);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Get_Res_Des_Data_Size(
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Get_Res_Des_Data_Size(
         out uint pulSize,
         nint rdResDes,
         uint ulFlags);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Get_Res_Des_Data(
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Get_Res_Des_Data(
         nint rdResDes,
         [Out] byte[] buffer,
         uint bufferLen,
         uint ulFlags);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Free_Res_Des_Handle(nint rdResDes);
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Free_Res_Des_Handle(nint rdResDes);
 
-    [LibraryImport("cfgmgr32.dll")]
-    internal static partial uint CM_Free_Log_Conf_Handle(nint lcLogConf);
+    [DllImport("cfgmgr32.dll")]
+    internal static extern uint CM_Free_Log_Conf_Handle(nint lcLogConf);
 }
