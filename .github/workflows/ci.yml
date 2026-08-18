@@ -20,6 +20,42 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Enforce BootCampSmc Gate 2 safety boundary
+        shell: pwsh
+        run: |
+          $patterns = @(
+            'MmMapIoSpace',
+            'READ_REGISTER_',
+            'WRITE_REGISTER_',
+            'READ_PORT_',
+            'WRITE_PORT_',
+            '__inbyte',
+            '__outbyte',
+            'WdfInterruptCreate',
+            'WdfIoQueueCreate',
+            'WdfDeviceCreateDeviceInterface',
+            'CTL_CODE',
+            'IOCTL_'
+          )
+
+          $files = Get-ChildItem `
+            -Path '.\drivers\BootCampSmc' `
+            -File `
+            -Include '*.c','*.h' `
+            -Recurse
+
+          $matches = $files | Select-String -Pattern $patterns
+
+          if ($matches) {
+            Write-Error 'BootCampSmc Gate 2 violation: register/port access, interrupt connection, or device-control surface was introduced.'
+            $matches | ForEach-Object {
+              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
+            }
+            exit 1
+          }
+
+          Write-Host 'BootCampSmc Gate 2 safety boundary: PASS'
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v6
         with:
