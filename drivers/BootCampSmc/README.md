@@ -2,81 +2,96 @@
 
 `BootCampSmc.sys` is the planned original open-source Windows kernel transport for BootCamp Performance Control.
 
-This directory intentionally does **not** contain an installable driver yet.
+The current implementation is a **Gate 2 KMDF function-driver skeleton**. It is source-complete enough to build as a driver package, but it must not be installed until the project passes the remaining build/package review steps documented below.
 
 ## Independently verified interoperability facts
 
 On the physically tested `MacBookPro16,1` under Windows 10 Boot Camp:
 
-- the relevant ACPI device is exposed under `ACPI\APP0001`,
+- the relevant ACPI device is `ACPI\APP0001`,
+- Apple installs the device through `oem120.inf` using `NullDeviceInstall.NT`,
+- the Apple services section contains `AddService = ,2`, which is the Windows NULL-driver form,
+- there is no device service, no device/class upper filter and no device/class lower filter,
+- the boot resource set is:
+  - I/O ports `0x300-0x31F` (32 ports),
+  - memory `0xFE0B0000-0xFE0BFFFF` (64 KiB),
+  - IRQ 6,
+- before a function driver is bound, no allocated logical configuration is reported,
 - the research oracle reported protocol `MMIO`,
-- static interoperability research observed memory-resource discovery and MMIO mapping behavior,
-- the user-mode SMC protocol for fan read/write operations has been independently recovered and physically validated,
+- the user-mode SMC fan read/write protocol has been independently recovered and physically validated,
 - Maximum Safe RPM and Apple Auto round-trip behavior is physically validated,
 - arbitrary SMC writes are outside project scope.
 
-These facts are sufficient to define the desired high-level transport contract, but they are **not** sufficient to safely hard-code a physical address, register layout, or PnP binding strategy.
+The observed boot addresses are discovery evidence only. Production code must consume the system-assigned translated resources delivered by PnP and must not hard-code the boot resource addresses.
 
-## Current phase: resource discovery only
+## Gate 1 - PnP/resource identity: complete
 
-Before creating an INF or mapping any register, the project must determine the actual Windows device-stack and resource assignment for `ACPI\APP0001` on the verified target.
+`BootCampPerformanceControl.SmcResourceProbe` established the existing device-stack and firmware resource identity without opening a device handle or touching registers.
 
-`BootCampPerformanceControl.SmcResourceProbe` therefore collects, read-only:
+Architecture decision:
 
-- ACPI device instance IDs,
-- registry `Service`, `Driver`, class and hardware metadata,
-- `LogConf` registry data,
-- allocated logical resources,
-- boot logical resources,
-- decoded physical memory ranges for `ResType_Mem` descriptors.
+- `BootCampSmc.sys` is a normal KMDF **function driver** for `ACPI\APP0001`,
+- it is not a filter driver,
+- it is not a software-only driver,
+- it must receive hardware resources through `EvtDevicePrepareHardware`.
 
-The probe does not:
+## Gate 2 - KMDF skeleton: current phase
 
-- open `\\.\APPLESMC`,
-- install a driver,
-- claim an ACPI device,
-- map physical memory,
-- read or write MMIO registers,
-- issue SMC commands.
+The current skeleton:
 
-## Driver implementation gates
+- binds only to `ACPI\APP0001`,
+- uses normal KMDF PnP callbacks,
+- receives raw and translated resource lists in `EvtDevicePrepareHardware`,
+- records the first translated port, memory and interrupt descriptors in device context,
+- logs resource metadata for diagnostics,
+- clears the cached metadata in `EvtDeviceReleaseHardware`,
+- exposes no SMC device interface or SMC IOCTL,
+- maps no physical memory,
+- reads no MMIO register,
+- writes no MMIO register,
+- reads no I/O port,
+- writes no I/O port,
+- connects no interrupt,
+- performs no SMC transaction.
 
-### Gate 1 - PnP/resource identity
+The driver project is intentionally separate from the .NET solution because normal application CI must not depend on a local WDK installation.
 
-Required evidence:
+### Gate 2 validation required before installation
 
-- exact `ACPI\APP0001` instance metadata,
-- existing service/function-driver relationship,
-- allocated and boot memory resources,
-- confirmation that the resource assignment is stable and belongs to the Apple SMC device.
+Before any physical driver installation:
 
-No INF binding is allowed before this gate is reviewed.
+1. Build `BootCampSmc.vcxproj` with an installed Windows Driver Kit.
+2. Require zero compiler warnings and zero errors.
+3. Run Microsoft INF/package validation tools against `BootCampSmc.inf`.
+4. Inspect the generated package and signing state.
+5. Re-audit the source to confirm that no register-access primitive exists.
+6. Prepare an explicit uninstall/rollback command that restores the Apple NULL-driver package for `ACPI\APP0001` if the test driver does not start cleanly.
+7. Only then perform the first physical PnP bind test.
 
-### Gate 2 - KMDF skeleton
+The first physical test is allowed to prove only that:
 
-After Gate 1, create a minimal KMDF driver that:
+- the driver binds to `ACPI\APP0001`,
+- PnP starts it without a problem code,
+- `EvtDevicePrepareHardware` receives translated port/memory/interrupt resources,
+- the translated resources correspond to the already observed firmware resource identity.
 
-- uses normal PnP callbacks,
-- records translated resources in `EvtDevicePrepareHardware`,
-- releases them in `EvtDeviceReleaseHardware`,
-- exposes diagnostics only,
-- performs no SMC protocol transactions.
+No MMIO or I/O-port access is permitted during this test.
 
-### Gate 3 - read-only MMIO mapping
+## Gate 3 - read-only MMIO mapping
 
-Only after the translated resource is unambiguous:
+Only after Gate 2 physical PnP/resource delivery is verified:
 
 - map only the assigned translated `CmResourceTypeMemory` range,
 - keep the mapping bounded to the resource length,
 - add no arbitrary physical-memory API,
-- perform no writes,
-- validate register/protocol behavior against the existing research oracle.
+- perform no register writes,
+- independently establish the required register/protocol behavior before implementing SMC reads.
 
-### Gate 4 - constrained SMC read transport
+## Gate 4 - constrained SMC read transport
 
 Implement only the read operations required by the existing `ISmcTransport` contract and compare returned values with the physically validated research path.
 
-### Gate 5 - constrained fan writes
+## Gate 5 - constrained fan writes
 
 Only after read parity is established:
 
@@ -89,6 +104,6 @@ Only after read parity is established:
 - No hard-coded MMIO base address.
 - No register offset is accepted solely because it appears in a third-party binary.
 - No kernel write is enabled before a read-only validation phase.
-- No T1/classic support is inferred from the T2-era MacBookPro16,1 result.
+- No T1/classic support is inferred from the T2-era `MacBookPro16,1` result.
 - No proprietary driver or proprietary source code is redistributed or copied.
 - Failure to identify a safe backend means fan writes stay disabled.
