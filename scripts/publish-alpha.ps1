@@ -8,7 +8,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $ProjectFile = Join-Path $RepoRoot "src\BootCampPerformanceControl\BootCampPerformanceControl.csproj"
 $PublishProfile = Join-Path $RepoRoot "src\BootCampPerformanceControl\Properties\PublishProfiles\win-x64-alpha.pubxml"
-$OutputDir = Join-Path $RepoRoot "artifacts\BootCampPerformanceControl-0.1.0-alpha-win-x64"
+$OutputDir = Join-Path $RepoRoot "artifacts\BootCampPerformanceControl-0.1.0-alpha.1-win-x64"
 
 if (-not (Test-Path -LiteralPath $ProjectFile)) {
     throw "Project file not found: $ProjectFile"
@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $PublishProfile)) {
     throw "Publish profile not found: $PublishProfile"
 }
 
-Write-Host "=== BootCamp Performance Control 0.1.0-alpha Publish (win-x64) ===" -ForegroundColor Cyan
+Write-Host "=== BootCamp Performance Control 0.1.0-alpha.1 Publish (win-x64) ===" -ForegroundColor Cyan
 Write-Host "Repository root: $RepoRoot"
 Write-Host "Project file:    $ProjectFile"
 Write-Host "Publish profile: $PublishProfile"
