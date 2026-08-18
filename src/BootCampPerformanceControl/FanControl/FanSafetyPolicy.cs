@@ -50,7 +50,7 @@ internal sealed class FanSafetyPolicy
         var compatible = failures.Count == 0;
         return new FanControlCapabilityResult(
             IsReadSupported: compatible,
-            IsHardwareVerifiedForFutureWrite: compatible,
+            IsHardwareSafetyGateSatisfied: compatible,
             failures,
             protocol,
             snapshot);
@@ -78,7 +78,7 @@ internal sealed class FanSafetyPolicy
 
         return new FanControlCapabilityResult(
             IsReadSupported: false,
-            IsHardwareVerifiedForFutureWrite: false,
+            IsHardwareSafetyGateSatisfied: false,
             Array.Empty<string>(),
             protocol,
             Snapshot: null);
