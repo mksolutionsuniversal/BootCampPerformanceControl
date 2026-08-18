@@ -256,11 +256,11 @@ BootCampSmcEvtDevicePrepareHardware(
 
         statusValue = READ_REGISTER_UCHAR(statusRegister);
 
-        KdPrintEx((
+        DbgPrintEx(
             DPFLTR_IHVDRIVER_ID,
             DPFLTR_INFO_LEVEL,
             "BootCampSmc: Gate 4C single read-only MMIO observation offset=0x4005 value=0x%02X; no register was written.\n",
-            statusValue));
+            statusValue);
     }
 
     return STATUS_SUCCESS;
