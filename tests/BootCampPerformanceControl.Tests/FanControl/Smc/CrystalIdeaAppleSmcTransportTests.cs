@@ -53,7 +53,7 @@ public sealed class CrystalIdeaAppleSmcTransportTests
     }
 
     [Fact]
-    public async Task ReadKeyAsync_UsesConfirmedReadRequest()
+    public async Task ReadKeyAsync_UsesConfirmedReadRequestAndFullOutputBuffer()
     {
         using var device = new FakeDeviceIoControlClient
         {
@@ -63,7 +63,7 @@ public sealed class CrystalIdeaAppleSmcTransportTests
                 Assert.Equal(
                     new byte[] { 0x46, 0x30, 0x4D, 0x78, 0x04 },
                     input.ToArray());
-                Assert.Equal(4, outputBufferLength);
+                Assert.Equal(AppleSmcProtocol.MaximumValueLength, outputBufferLength);
                 return [0x00, 0x80, 0xAF, 0x45];
             }
         };
@@ -72,6 +72,29 @@ public sealed class CrystalIdeaAppleSmcTransportTests
         var result = await transport.ReadKeyAsync("F0Mx", 4, CancellationToken.None);
 
         Assert.Equal(new byte[] { 0x00, 0x80, 0xAF, 0x45 }, result.ToArray());
+        Assert.Equal(1, device.InvocationCount);
+    }
+
+    [Fact]
+    public async Task ReadKeyAsync_UsesFullOutputBufferForSingleByteValue()
+    {
+        using var device = new FakeDeviceIoControlClient
+        {
+            Handler = (controlCode, input, outputBufferLength) =>
+            {
+                Assert.Equal(CrystalIdeaAppleSmcIoctl.ReadKey, controlCode);
+                Assert.Equal(
+                    new byte[] { 0x46, 0x4E, 0x75, 0x6D, 0x01 },
+                    input.ToArray());
+                Assert.Equal(AppleSmcProtocol.MaximumValueLength, outputBufferLength);
+                return [0x02];
+            }
+        };
+        await using var transport = new CrystalIdeaAppleSmcTransport(device);
+
+        var result = await transport.ReadKeyAsync("FNum", 1, CancellationToken.None);
+
+        Assert.Equal(new byte[] { 0x02 }, result.ToArray());
         Assert.Equal(1, device.InvocationCount);
     }
 
