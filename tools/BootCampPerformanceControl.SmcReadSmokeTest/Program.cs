@@ -27,11 +27,13 @@ try
     }
 
     await using var transport = CrystalIdeaAppleSmcTransport.OpenInstalledDriver();
-    var probe = new FanCapabilityProbe(
-        new AppleSmcProtocol(transport),
-        new FanSafetyPolicy());
+    var controller = new FanController(
+        new FanCapabilityProbe(
+            new AppleSmcProtocol(transport),
+            new FanSafetyPolicy()));
 
-    var capability = await probe.ProbeAsync(model, CancellationToken.None);
+    var controllerResult = await controller.ReadStatusAsync(model, CancellationToken.None);
+    var capability = controllerResult.Capability;
 
     if (capability.Protocol.HasValue)
     {
@@ -49,6 +51,7 @@ try
             Console.Error.WriteLine($"- {failure}");
         }
 
+        Console.Error.WriteLine(controllerResult.Status.DisplayText);
         return 3;
     }
 
@@ -66,6 +69,8 @@ try
     Console.WriteLine("READ SUPPORT:         SUPPORTED");
     Console.WriteLine("HARDWARE SAFETY GATE: VERIFIED");
     Console.WriteLine("WRITE IMPLEMENTATION: NOT ENABLED");
+    Console.WriteLine();
+    Console.WriteLine(controllerResult.Status.DisplayText);
     Console.WriteLine();
     Console.WriteLine("READ-ONLY SMC ROUND-TRIP: PASS");
     return 0;
