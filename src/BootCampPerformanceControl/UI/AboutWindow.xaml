@@ -45,14 +45,14 @@
             <TextBlock Text="info@mkus.co.uk"
                        Style="{StaticResource BodyTextStyle}" />
 
-            <TextBlock Text="Current verified model:"
+            <TextBlock Text="Performance-validated model:"
                        Style="{StaticResource SectionHeadingStyle}" />
             <TextBlock Text="MacBookPro16,1"
                        Style="{StaticResource BodyTextStyle}" />
 
             <TextBlock Text="Fan control:"
                        Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="Not included in this alpha build"
+            <TextBlock Text="Not included in version 0.2.0"
                        Style="{StaticResource BodyTextStyle}"
                        Margin="0,0,0,16" />
         </StackPanel>

@@ -14,22 +14,6 @@ public sealed record ModelVerificationResult(
 
     public bool IsSupportedIntelMac => PlatformSupport == PlatformSupportStatus.SupportedIntelMac;
 
-    public bool IsVerified => ValidationLevel == ModelValidationLevel.PerformanceValidated
-        || ValidationLevel == ModelValidationLevel.FunctionallyValidated;
-
-    public HardwareVerificationStatus Status => PlatformSupport switch
-    {
-        PlatformSupportStatus.SupportedIntelMac => ValidationLevel switch
-        {
-            ModelValidationLevel.PerformanceValidated or ModelValidationLevel.FunctionallyValidated =>
-                HardwareVerificationStatus.Verified,
-            _ => HardwareVerificationStatus.UnverifiedAppleModel
-        },
-        PlatformSupportStatus.UnsupportedNonIntel => HardwareVerificationStatus.UnverifiedAppleModel,
-        PlatformSupportStatus.UnsupportedNonApple => HardwareVerificationStatus.NonAppleHardware,
-        _ => HardwareVerificationStatus.Unknown
-    };
-
     public static ModelVerificationResult Unknown()
     {
         return new ModelVerificationResult(

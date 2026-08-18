@@ -18,7 +18,6 @@ public sealed class HardwareDetectionServiceTests
         Assert.True(result.IsApple);
         Assert.True(result.IsIntelProcessor);
         Assert.True(result.IsSupportedIntelMac);
-        Assert.True(result.IsVerified);
         Assert.Contains("performance-validated", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 

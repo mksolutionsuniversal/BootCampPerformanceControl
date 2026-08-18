@@ -31,8 +31,6 @@ public sealed class ProfileCatalog : IProfileCatalog
             return new PerformanceProfile(
                 "gaming-optimised",
                 "Gaming Optimised",
-                ProfileScope.Generic,
-                TargetModel: null,
                 IsAvailableForDetectedModel: true,
                 powerTarget,
                 [
@@ -47,8 +45,6 @@ public sealed class ProfileCatalog : IProfileCatalog
         return new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.Generic,
-            TargetModel: null,
             IsAvailableForDetectedModel: false,
             powerTarget,
             [],
@@ -60,8 +56,6 @@ public sealed class ProfileCatalog : IProfileCatalog
         return new PerformanceProfile(
             "restore",
             "Restore Original Settings",
-            ProfileScope.Generic,
-            TargetModel: null,
             isAvailableForDetectedModel,
             new ProcessorPowerProfileTarget(
                 ProcessorMaximumAc: null,

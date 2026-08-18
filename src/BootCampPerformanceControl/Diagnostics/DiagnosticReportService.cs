@@ -83,7 +83,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         var powerState = await ReadPowerStateAsync(cancellationToken)
             .ConfigureAwait(false);
         var restoreSnapshotPresent = ReadRestoreSnapshotPresence(cancellationToken);
-        var profileSupport = ResolveProfileSupport(verificationResult);
+        var profileSupport = ResolveProfileSupport(verificationResult, powerState);
 
         return new DiagnosticReportResult(
             BuildReport(
@@ -169,7 +169,9 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
     }
 
-    private DiagnosticProfileSupport ResolveProfileSupport(ModelVerificationResult verificationResult)
+    private DiagnosticProfileSupport ResolveProfileSupport(
+        ModelVerificationResult verificationResult,
+        PowerStateSnapshot? powerState)
     {
         try
         {
@@ -183,24 +185,30 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
             if (profile is null)
             {
                 return new DiagnosticProfileSupport(
-                    GamingOptimisedVerified: false,
-                    HardwareWritesAllowed: false);
+                    PlatformSupported: false,
+                    PowerStateReadable: powerState is not null,
+                    GamingOptimisedEligible: false);
             }
 
             var resolution = _profileExecutionResolver.ResolveProcessorSettings(
                 profile,
                 verificationResult);
 
+            var isPlatformSupported = profile.IsAvailableForDetectedModel && resolution.IsExecutable;
+            var isPowerStateReadable = powerState is not null;
+
             return new DiagnosticProfileSupport(
-                GamingOptimisedVerified: profile.IsAvailableForDetectedModel && resolution.IsExecutable,
-                HardwareWritesAllowed: resolution.IsExecutable);
+                PlatformSupported: isPlatformSupported,
+                PowerStateReadable: isPowerStateReadable,
+                GamingOptimisedEligible: isPlatformSupported && isPowerStateReadable);
         }
         catch (Exception exception)
         {
             _logger.Error("Diagnostic report generation failed while resolving profile support.", exception);
             return new DiagnosticProfileSupport(
-                GamingOptimisedVerified: false,
-                HardwareWritesAllowed: false);
+                PlatformSupported: false,
+                PowerStateReadable: false,
+                GamingOptimisedEligible: false);
         }
     }
 
@@ -247,15 +255,13 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         builder.AppendLine("-------");
         builder.AppendLine($"Original restore snapshot present: {FormatYesNo(restoreSnapshotPresent)}");
         builder.AppendLine();
-        builder.AppendLine("Profile Support");
-        builder.AppendLine("---------------");
-        builder.AppendLine($"Apple hardware detected: {FormatYesNo(verificationResult.IsApple)}");
-        builder.AppendLine($"Model verified: {FormatYesNo(verificationResult.IsVerified)}");
-        builder.AppendLine($"Model verification status: {verificationResult.Status}");
-        builder.AppendLine($"Model verification message: {FormatValue(verificationResult.Message)}");
-        builder.AppendLine($"Gaming Optimised verified: {FormatYesNo(profileSupport.GamingOptimisedVerified)}");
-        builder.AppendLine(
-            $"Model-specific processor power writes allowed: {FormatYesNo(profileSupport.HardwareWritesAllowed)}");
+        builder.AppendLine("Platform & Profile Support");
+        builder.AppendLine("--------------------------");
+        builder.AppendLine($"Platform support: {verificationResult.PlatformSupport}");
+        builder.AppendLine($"Model validation: {verificationResult.ValidationLevel}");
+        builder.AppendLine($"Verification message: {FormatValue(verificationResult.Message)}");
+        builder.AppendLine($"Processor power settings readable: {FormatYesNo(profileSupport.PowerStateReadable)}");
+        builder.AppendLine($"Gaming Optimised eligible: {FormatYesNo(profileSupport.GamingOptimisedEligible)}");
 
         return builder.ToString();
     }
@@ -299,18 +305,20 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
             parts.Add(caption);
         }
 
-        if (!string.Equals(version, Unknown, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(buildNumber, Unknown, StringComparison.OrdinalIgnoreCase))
+        var versionParts = new List<string>();
+        if (!string.Equals(version, Unknown, StringComparison.OrdinalIgnoreCase))
         {
-            parts.Add($"{version} (Build {buildNumber})");
+            versionParts.Add(version);
         }
-        else if (!string.Equals(version, Unknown, StringComparison.OrdinalIgnoreCase))
+
+        if (!string.Equals(buildNumber, Unknown, StringComparison.OrdinalIgnoreCase))
         {
-            parts.Add(version);
+            versionParts.Add($"(Build {buildNumber})");
         }
-        else if (!string.Equals(buildNumber, Unknown, StringComparison.OrdinalIgnoreCase))
+
+        if (versionParts.Count > 0)
         {
-            parts.Add($"Build {buildNumber}");
+            parts.Add(string.Join(" ", versionParts));
         }
 
         if (!string.Equals(architecture, Unknown, StringComparison.OrdinalIgnoreCase))
@@ -319,6 +327,56 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
 
         return parts.Count == 0 ? Unknown : string.Join(", ", parts);
+    }
+
+    private static string FormatPowerScheme(PowerStateSnapshot? powerState)
+    {
+        return powerState?.SchemeId.ToString() ?? Unknown;
+    }
+
+    private static string FormatPercentage(uint? value)
+    {
+        return value.HasValue ? $"{value.Value}%" : Unknown;
+    }
+
+    private static string FormatUInt32(uint? value)
+    {
+        return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : Unknown;
+    }
+
+    private static string FormatYesNo(bool? value)
+    {
+        return value switch
+        {
+            true => "Yes",
+            false => "No",
+            null => Unknown
+        };
+    }
+
+    private static string FormatValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Unknown;
+        }
+
+        var trimmedValue = value.Trim();
+        var redactedValue = RedactPrivacySensitiveValues(trimmedValue);
+        return string.IsNullOrWhiteSpace(redactedValue) ? Unknown : redactedValue;
+    }
+
+    private static string RedactPrivacySensitiveValues(string value)
+    {
+        var redactedValue = EmailAddressRegex.Replace(value, "[Redacted email]");
+        redactedValue = WindowsPathRegex.Replace(redactedValue, "[Redacted path]");
+        redactedValue = UserHomePathRegex.Replace(redactedValue, "[Redacted path]");
+        redactedValue = UncPathRegex.Replace(redactedValue, "[Redacted path]");
+        redactedValue = IpAddressRegex.Replace(redactedValue, "[Redacted IP address]");
+        redactedValue = MacAddressRegex.Replace(redactedValue, "[Redacted MAC address]");
+        redactedValue = WindowsProductKeyRegex.Replace(redactedValue, "[Redacted Windows product key]");
+        redactedValue = DomainUserRegex.Replace(redactedValue, "[Redacted domain user]");
+        return CommonWindowsHostNameRegex.Replace(redactedValue, "[Redacted hostname]");
     }
 
     private static string GetApplicationVersion()
@@ -353,57 +411,8 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         return string.IsNullOrWhiteSpace(fileNameSegment) ? Unknown : fileNameSegment;
     }
 
-    private static string FormatPowerScheme(PowerStateSnapshot? powerState)
-    {
-        return powerState?.SchemeId.ToString() ?? Unknown;
-    }
-
-    private static string FormatPercentage(uint? value)
-    {
-        return value is null ? Unknown : $"{value.Value.ToString(CultureInfo.InvariantCulture)}%";
-    }
-
-    private static string FormatUInt32(uint? value)
-    {
-        return value?.ToString(CultureInfo.InvariantCulture) ?? Unknown;
-    }
-
-    private static string FormatYesNo(bool? value)
-    {
-        return value switch
-        {
-            true => "Yes",
-            false => "No",
-            _ => Unknown
-        };
-    }
-
-    private static string FormatValue(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return Unknown;
-        }
-
-        var trimmedValue = value.Trim();
-        var redactedValue = RedactPrivacySensitiveValues(trimmedValue);
-        return string.IsNullOrWhiteSpace(redactedValue) ? Unknown : redactedValue;
-    }
-
-    private static string RedactPrivacySensitiveValues(string value)
-    {
-        var redactedValue = EmailAddressRegex.Replace(value, "[Redacted email]");
-        redactedValue = WindowsPathRegex.Replace(redactedValue, "[Redacted path]");
-        redactedValue = UserHomePathRegex.Replace(redactedValue, "[Redacted path]");
-        redactedValue = UncPathRegex.Replace(redactedValue, "[Redacted path]");
-        redactedValue = IpAddressRegex.Replace(redactedValue, "[Redacted IP address]");
-        redactedValue = MacAddressRegex.Replace(redactedValue, "[Redacted MAC address]");
-        redactedValue = WindowsProductKeyRegex.Replace(redactedValue, "[Redacted Windows product key]");
-        redactedValue = DomainUserRegex.Replace(redactedValue, "[Redacted domain user]");
-        return CommonWindowsHostNameRegex.Replace(redactedValue, "[Redacted hostname]");
-    }
-
     private sealed record DiagnosticProfileSupport(
-        bool GamingOptimisedVerified,
-        bool HardwareWritesAllowed);
+        bool PlatformSupported,
+        bool PowerStateReadable,
+        bool GamingOptimisedEligible);
 }

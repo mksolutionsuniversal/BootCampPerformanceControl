@@ -46,6 +46,7 @@ public static class AppCompositionRoot
             processorProfileStateEvaluator,
             diagnosticReportService,
             new WpfDiagnosticReportFileSaveService(),
-            logger);
+            logger,
+            new WpfUserConfirmationService());
     }
 }

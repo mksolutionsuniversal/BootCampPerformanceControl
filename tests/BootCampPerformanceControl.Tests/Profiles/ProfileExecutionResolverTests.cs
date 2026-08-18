@@ -116,8 +116,6 @@ public sealed class ProfileExecutionResolverTests
         var profile = new PerformanceProfile(
             profileId,
             profileId,
-            ProfileScope.Generic,
-            TargetModel: null,
             IsAvailableForDetectedModel: true,
             new ProcessorPowerProfileTarget(95, 95, 0, 0, ProfileUnspecifiedValueSource.None),
             [],
@@ -137,8 +135,6 @@ public sealed class ProfileExecutionResolverTests
         var profile = new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.Generic,
-            TargetModel: null,
             IsAvailableForDetectedModel: true,
             new ProcessorPowerProfileTarget(
                 ProcessorMaximumAc: 99,
@@ -163,8 +159,6 @@ public sealed class ProfileExecutionResolverTests
         var profile = new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.Generic,
-            TargetModel: null,
             IsAvailableForDetectedModel: true,
             new ProcessorPowerProfileTarget(
                 ProcessorMaximumAc: null,

@@ -152,8 +152,6 @@ public sealed class ProcessorProfileStateEvaluatorTests
         return new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.Generic,
-            TargetModel: null,
             isAvailableForDetectedModel,
             target,
             [],
