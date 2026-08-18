@@ -9,9 +9,6 @@ internal interface IFanOverrideWriter
         CancellationToken cancellationToken);
 
     // Implementations must return only after both fan modes have been re-read
-    // and verified as Apple Auto for the supplied model. Throw or cancel if
-    // verification is incomplete.
-    Task RestoreAppleAutoAsync(
-        string model,
-        CancellationToken cancellationToken);
+    // and verified as Apple Auto. Throw or cancel if verification is incomplete.
+    Task RestoreAppleAutoAsync(CancellationToken cancellationToken);
 }
