@@ -4,9 +4,9 @@ namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanController
 {
-    private readonly FanCapabilityProbe _capabilityProbe;
+    private readonly IFanCapabilityProbe _capabilityProbe;
 
-    public FanController(FanCapabilityProbe capabilityProbe)
+    public FanController(IFanCapabilityProbe capabilityProbe)
     {
         _capabilityProbe = capabilityProbe ?? throw new ArgumentNullException(nameof(capabilityProbe));
     }
