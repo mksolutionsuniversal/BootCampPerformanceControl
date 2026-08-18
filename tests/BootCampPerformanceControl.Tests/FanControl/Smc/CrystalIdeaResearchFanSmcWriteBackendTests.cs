@@ -61,16 +61,17 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     }
 
     [Theory]
-    [InlineData(FanIndex.Fan0, 5200f)]
-    [InlineData(FanIndex.Fan0, 3000f)]
-    [InlineData(FanIndex.Fan1, 5616f)]
-    [InlineData(FanIndex.Fan1, 3000f)]
+    [InlineData(0, 5200f)]
+    [InlineData(0, 3000f)]
+    [InlineData(1, 5616f)]
+    [InlineData(1, 3000f)]
     public async Task SetTargetRpmAsync_RejectsAnyNonMaximumTargetBeforeDeviceAccess(
-        FanIndex fan,
+        int fanValue,
         float targetRpm)
     {
         using var device = new FakeDeviceIoControlClient();
         await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        var fan = (FanIndex)fanValue;
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => backend.SetTargetRpmAsync(
@@ -82,15 +83,16 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     }
 
     [Theory]
-    [InlineData(FanIndex.Fan0, 0x30)]
-    [InlineData(FanIndex.Fan1, 0x31)]
+    [InlineData(0, 0x30)]
+    [InlineData(1, 0x31)]
     public async Task SetAppleAutoAsync_WritesOnlyPerFanModeZero(
-        FanIndex fan,
+        int fanValue,
         byte fanAscii)
     {
         using var device = ExpectSingleWrite(
             new byte[] { 0x46, fanAscii, 0x4D, 0x64, 0x01, 0x00 });
         await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        var fan = (FanIndex)fanValue;
 
         await backend.SetAppleAutoAsync(fan, CancellationToken.None);
 
