@@ -18,6 +18,9 @@ typedef struct _BOOTCAMP_SMC_DEVICE_CONTEXT
 
     PHYSICAL_ADDRESS MemoryStart;
     ULONG MemoryLength;
+    ULONG MemoryResourceCount;
+    PVOID MmioBase;
+    SIZE_T MmioLength;
 
     ULONG InterruptLevel;
     ULONG InterruptVector;
