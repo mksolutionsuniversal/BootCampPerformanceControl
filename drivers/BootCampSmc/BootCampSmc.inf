@@ -8,9 +8,9 @@ CatalogFile = BootCampSmc.cat
 PnpLockdown = 1
 
 [Manufacturer]
-%ProviderName% = Models,NTamd64
+%ProviderName% = Models,NTamd64.10.0...19041
 
-[Models.NTamd64]
+[Models.NTamd64.10.0...19041]
 %DeviceDescription% = BootCampSmc_Install,ACPI\APP0001
 
 [DestinationDirs]
