@@ -10,6 +10,8 @@ Please do not report security-sensitive vulnerabilities in a public GitHub issue
 
 Use GitHub private vulnerability reporting when available.
 
+If private vulnerability reporting is unavailable, please report security-sensitive issues by email to security@mkus.co.uk.
+
 Security reports should include:
 
 - the affected version,
