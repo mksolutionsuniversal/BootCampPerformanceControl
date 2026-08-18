@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace BootCampPerformanceControl.FanControl.Smc;
 
 internal sealed class AppleSmcProtocol

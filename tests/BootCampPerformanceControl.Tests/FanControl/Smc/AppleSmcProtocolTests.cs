@@ -1,3 +1,4 @@
+using System.IO;
 using BootCampPerformanceControl.FanControl.Smc;
 
 namespace BootCampPerformanceControl.Tests.FanControl.Smc;
