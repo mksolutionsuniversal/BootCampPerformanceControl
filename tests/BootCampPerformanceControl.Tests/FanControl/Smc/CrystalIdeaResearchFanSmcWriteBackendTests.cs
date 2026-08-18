@@ -7,6 +7,12 @@ namespace BootCampPerformanceControl.Tests.FanControl.Smc;
 public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
 {
     [Fact]
+    public void WriteIoctl_MatchesConfirmedValue()
+    {
+        Assert.Equal(0x220004u, CrystalIdeaAppleSmcIoctl.WriteKey);
+    }
+
+    [Fact]
     public async Task SetManualModeAsync_Fan0_UsesConfirmedWriteRequest()
     {
         using var device = ExpectSingleWrite(
@@ -52,6 +58,27 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
         await backend.SetTargetRpmAsync(FanIndex.Fan1, 5200f, CancellationToken.None);
 
         Assert.Equal(1, device.InvocationCount);
+    }
+
+    [Theory]
+    [InlineData(FanIndex.Fan0, 5200f)]
+    [InlineData(FanIndex.Fan0, 3000f)]
+    [InlineData(FanIndex.Fan1, 5616f)]
+    [InlineData(FanIndex.Fan1, 3000f)]
+    public async Task SetTargetRpmAsync_RejectsAnyNonMaximumTargetBeforeDeviceAccess(
+        FanIndex fan,
+        float targetRpm)
+    {
+        using var device = new FakeDeviceIoControlClient();
+        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => backend.SetTargetRpmAsync(
+                fan,
+                targetRpm,
+                CancellationToken.None));
+
+        Assert.Equal(0, device.InvocationCount);
     }
 
     [Theory]
@@ -136,6 +163,28 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
             () => CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
                 "F0Md",
                 new byte[] { 0, 1 }));
+    }
+
+    [Fact]
+    public async Task WriteOutputByte_IsNotTreatedAsVerification()
+    {
+        using var device = new FakeDeviceIoControlClient
+        {
+            Handler = (controlCode, input, outputBufferLength) =>
+            {
+                Assert.Equal(CrystalIdeaAppleSmcIoctl.WriteKey, controlCode);
+                Assert.Equal(
+                    new byte[] { 0x46, 0x30, 0x4D, 0x64, 0x01, 0x00 },
+                    input.ToArray());
+                Assert.Equal(1, outputBufferLength);
+                return [0x00];
+            }
+        };
+        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+
+        await backend.SetAppleAutoAsync(FanIndex.Fan0, CancellationToken.None);
+
+        Assert.Equal(1, device.InvocationCount);
     }
 
     [Fact]
