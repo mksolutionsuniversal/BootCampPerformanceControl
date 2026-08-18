@@ -17,7 +17,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.True(result.IsReadSupported);
-        Assert.True(result.IsHardwareVerifiedForFutureWrite);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
         Assert.Empty(result.Failures);
         Assert.Equal(SmcTransportProtocol.Mmio, result.Protocol);
         Assert.NotNull(result.Snapshot);
@@ -34,7 +34,7 @@ public sealed class FanCapabilityProbeTests
         var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("not verified", StringComparison.Ordinal));
         Assert.Equal(0, transport.ProtocolCalls);
         Assert.Equal(0, transport.KeyInfoCalls);
@@ -55,7 +55,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Equal(SmcTransportProtocol.Unknown, result.Protocol);
         Assert.Equal(1, transport.ProtocolCalls);
         Assert.Equal(0, transport.KeyInfoCalls);
@@ -74,7 +74,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("exactly 2 fans", StringComparison.Ordinal));
     }
 
@@ -90,7 +90,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("F0Mx", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("metadata mismatch", StringComparison.Ordinal));
     }
@@ -107,7 +107,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("verified compatibility range", StringComparison.Ordinal));
     }
 
@@ -123,7 +123,7 @@ public sealed class FanCapabilityProbeTests
             CancellationToken.None);
 
         Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareVerifiedForFutureWrite);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("implausible RPM", StringComparison.Ordinal));
     }
 
