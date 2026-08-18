@@ -297,10 +297,16 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void ProfileButtons_GamingOptimisedIsDisabledForUnverifiedHardware()
+    public void ProfileButtons_GamingOptimisedIsDisabledForUnsupportedHardware()
     {
+        var unsupportedResult = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not Apple hardware.");
         var viewModel = CreateViewModel(
-            new FakeHardwareDetectionService(UnverifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(unsupportedResult),
             new FakePowerManagementService(InitialPowerState()));
 
         viewModel.RefreshCommand.Execute(null);
@@ -308,13 +314,11 @@ public sealed class MainViewModelTests
         var gaming = GetProfile(viewModel, "gaming-optimised");
         Assert.False(gaming.IsEnabled);
         Assert.Null(gaming.Command);
-        Assert.Contains("verified compatible", gaming.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("requires a verified compatible", gaming.ToolTip, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Theory]
-    [InlineData("balanced")]
-    [InlineData("full-performance")]
-    public void ProfileButtons_NonGamingProfilesRemainDisabled(string profileId)
+    [Fact]
+    public void ProfileButtons_ContainsOnlyGamingOptimisedAndRestore()
     {
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
@@ -322,10 +326,11 @@ public sealed class MainViewModelTests
 
         viewModel.RefreshCommand.Execute(null);
 
-        var profile = GetProfile(viewModel, profileId);
-        Assert.False(profile.IsEnabled);
-        Assert.Null(profile.Command);
-        Assert.Contains("not yet connected", profile.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, viewModel.ProfileButtons.Count);
+        Assert.Contains(viewModel.ProfileButtons, profile => profile.ProfileId == "gaming-optimised");
+        Assert.Contains(viewModel.ProfileButtons, profile => profile.ProfileId == "restore");
+        Assert.DoesNotContain(viewModel.ProfileButtons, profile => profile.ProfileId == "balanced");
+        Assert.DoesNotContain(viewModel.ProfileButtons, profile => profile.ProfileId == "full-performance");
     }
 
     [Fact]
@@ -366,9 +371,15 @@ public sealed class MainViewModelTests
     [Fact]
     public void GamingButton_ReverifiesThroughProfileApplyServiceBeforeAnyWrite()
     {
+        var unsupportedSecondResult = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Hardware changed to unsupported.");
         var hardwareDetectionService = new FakeHardwareDetectionService(
             VerifiedMacBookPro16_1(),
-            UnverifiedMacBookPro16_1());
+            unsupportedSecondResult);
         var powerManagementService = new FakePowerManagementService(InitialPowerState());
         var logger = new TestApplicationLogger();
         var viewModel = CreateViewModel(
@@ -1099,9 +1110,8 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
     }
 
@@ -1110,9 +1120,8 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
             "Matching model string without verification.");
     }
 

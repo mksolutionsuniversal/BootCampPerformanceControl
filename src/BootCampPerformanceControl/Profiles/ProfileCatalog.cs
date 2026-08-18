@@ -6,20 +6,18 @@ public sealed class ProfileCatalog : IProfileCatalog
 {
     public IReadOnlyList<PerformanceProfile> GetProfiles(ModelVerificationResult verificationResult)
     {
-        var genericProfilesAvailable = verificationResult.IsApple
-            && verificationResult.IsVerified
-            && verificationResult.Status == HardwareVerificationStatus.Verified;
+        ArgumentNullException.ThrowIfNull(verificationResult);
+
+        var isSupported = verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac;
 
         return
         [
-            CreateGamingOptimisedProfile(verificationResult),
-            CreateBalancedProfile(genericProfilesAvailable),
-            CreateFullPerformanceProfile(genericProfilesAvailable),
-            CreateRestoreProfile(genericProfilesAvailable)
+            CreateGamingOptimisedProfile(isSupported),
+            CreateRestoreProfile(isSupported)
         ];
     }
 
-    private static PerformanceProfile CreateGamingOptimisedProfile(ModelVerificationResult verificationResult)
+    private static PerformanceProfile CreateGamingOptimisedProfile(bool isSupported)
     {
         var powerTarget = new ProcessorPowerProfileTarget(
             ProcessorMaximumAc: 95,
@@ -28,16 +26,13 @@ public sealed class ProfileCatalog : IProfileCatalog
             BoostModeDc: 0,
             ProfileUnspecifiedValueSource.None);
 
-        if (verificationResult.IsApple
-            && verificationResult.IsVerified
-            && verificationResult.Status == HardwareVerificationStatus.Verified
-            && string.Equals(verificationResult.Model, VerifiedHardwareModels.MacBookPro16_1, StringComparison.OrdinalIgnoreCase))
+        if (isSupported)
         {
             return new PerformanceProfile(
                 "gaming-optimised",
                 "Gaming Optimised",
-                ProfileScope.VerifiedModelSpecific,
-                VerifiedHardwareModels.MacBookPro16_1,
+                ProfileScope.Generic,
+                TargetModel: null,
                 IsAvailableForDetectedModel: true,
                 powerTarget,
                 [
@@ -46,66 +41,25 @@ public sealed class ProfileCatalog : IProfileCatalog
                     new ProfileSettingMetadata("Boost Mode AC", "0 (Disabled)"),
                     new ProfileSettingMetadata("Boost Mode DC", "0 (Disabled)")
                 ],
-                $"Verified {VerifiedHardwareModels.MacBookPro16_1} gaming power target. It is not connected to the UI.");
+                "Optimises Windows processor power settings for gaming by capping maximum processor state to 95% and disabling CPU Boost.");
         }
 
         return new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.VerifiedModelSpecific,
-            VerifiedHardwareModels.MacBookPro16_1,
+            ProfileScope.Generic,
+            TargetModel: null,
             IsAvailableForDetectedModel: false,
             powerTarget,
             [],
-            "Model-specific gaming metadata is unavailable until the detected model is verified.");
-    }
-
-    private static PerformanceProfile CreateBalancedProfile(bool isAvailableForDetectedModel)
-    {
-        return new PerformanceProfile(
-            "balanced",
-            "Balanced",
-            ProfileScope.Generic,
-            TargetModel: null,
-            isAvailableForDetectedModel,
-            new ProcessorPowerProfileTarget(
-                ProcessorMaximumAc: null,
-                ProcessorMaximumDc: null,
-                BoostModeAc: null,
-                BoostModeDc: null,
-                ProfileUnspecifiedValueSource.ConfigurablePlaceholder),
-            [new ProfileSettingMetadata("Processor settings", "Configurable placeholder")],
-            "Balanced remains an intentionally unconfigured metadata placeholder.");
-    }
-
-    private static PerformanceProfile CreateFullPerformanceProfile(bool isAvailableForDetectedModel)
-    {
-        return new PerformanceProfile(
-            "full-performance",
-            "Full Performance",
-            ProfileScope.Generic,
-            TargetModel: null,
-            isAvailableForDetectedModel,
-            new ProcessorPowerProfileTarget(
-                ProcessorMaximumAc: 100,
-                ProcessorMaximumDc: 100,
-                BoostModeAc: null,
-                BoostModeDc: null,
-                ProfileUnspecifiedValueSource.OriginalRestoreSnapshot),
-            [
-                new ProfileSettingMetadata("CPU Maximum AC", "100%"),
-                new ProfileSettingMetadata("CPU Maximum DC", "100%"),
-                new ProfileSettingMetadata("Boost Mode AC", "Original snapshot value"),
-                new ProfileSettingMetadata("Boost Mode DC", "Original snapshot value")
-            ],
-            "Full Performance keeps boost behaviour derived from the saved original state; no boost value is invented.");
+            "Gaming Optimised is available for supported Intel Mac models.");
     }
 
     private static PerformanceProfile CreateRestoreProfile(bool isAvailableForDetectedModel)
     {
         return new PerformanceProfile(
             "restore",
-            "Restore",
+            "Restore Original Settings",
             ProfileScope.Generic,
             TargetModel: null,
             isAvailableForDetectedModel,

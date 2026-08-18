@@ -8,10 +8,22 @@ public sealed class ProfileExecutionResolverTests
 {
     private readonly ProfileExecutionResolver _resolver = new();
 
-    [Fact]
-    public void ResolveProcessorSettings_GamingOptimisedWithVerifiedAppleMacBookPro16_1_IsExecutable()
+    [Theory]
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1, ModelValidationLevel.PerformanceValidated)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3, ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("MacBookPro15,1", ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("MacBookPro11,5", ModelValidationLevel.CommunityTested)]
+    [InlineData("MacBookPro15,2", ModelValidationLevel.FunctionallyValidated)]
+    public void ResolveProcessorSettings_GamingOptimised_IsExecutableOnAnySupportedIntelMacRegardlessOfValidationLevel(
+        string model,
+        ModelValidationLevel validationLevel)
     {
-        var verification = VerifiedMacBookPro16_1();
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            model,
+            PlatformSupportStatus.SupportedIntelMac,
+            validationLevel,
+            "Supported.");
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
         var result = _resolver.ResolveProcessorSettings(profile, verification);
@@ -28,84 +40,13 @@ public sealed class ProfileExecutionResolverTests
     }
 
     [Fact]
-    public void ResolveProcessorSettings_GamingOptimisedWithDifferentMacModel_IsNotExecutable()
-    {
-        var verification = new ModelVerificationResult(
-            "Apple Inc.",
-            "MacBookPro15,1",
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Different Apple model.");
-        var profile = GetCatalogProfile("gaming-optimised", verification);
-
-        var result = _resolver.ResolveProcessorSettings(profile, verification);
-
-        Assert.False(result.IsExecutable);
-        Assert.Null(result.Settings);
-        Assert.False(string.IsNullOrWhiteSpace(result.FailureReason));
-    }
-
-    [Fact]
-    public void ResolveProcessorSettings_GamingOptimisedWithUnverifiedMatchingModel_IsNotExecutable()
-    {
-        var verification = new ModelVerificationResult(
-            "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Matching model string without verification.");
-        var profile = GetCatalogProfile("gaming-optimised", verification);
-
-        var result = _resolver.ResolveProcessorSettings(profile, verification);
-
-        Assert.False(result.IsExecutable);
-        Assert.Null(result.Settings);
-        Assert.Contains("verified", result.FailureReason, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ResolveProcessorSettings_GamingOptimisedWithExecutableMetadataButUnverifiedHardware_IsNotExecutable()
-    {
-        var verification = new ModelVerificationResult(
-            "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Matching model string without verification.");
-        var profile = new PerformanceProfile(
-            "gaming-optimised",
-            "Gaming Optimised",
-            ProfileScope.VerifiedModelSpecific,
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsAvailableForDetectedModel: true,
-            new ProcessorPowerProfileTarget(
-                ProcessorMaximumAc: 95,
-                ProcessorMaximumDc: 95,
-                BoostModeAc: 0,
-                BoostModeDc: 0,
-                ProfileUnspecifiedValueSource.None),
-            [],
-            "Manually constructed executable-looking profile metadata.");
-
-        var result = _resolver.ResolveProcessorSettings(profile, verification);
-
-        Assert.False(result.IsExecutable);
-        Assert.Null(result.Settings);
-        Assert.Contains("verification", result.FailureReason, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ResolveProcessorSettings_GamingOptimisedWithNonAppleManufacturer_IsNotExecutable()
+    public void ResolveProcessorSettings_GamingOptimisedWithUnsupportedNonApple_IsNotExecutable()
     {
         var verification = new ModelVerificationResult(
             "PC Manufacturer",
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: false,
-            IsVerified: false,
-            HardwareVerificationStatus.NonAppleHardware,
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple hardware.");
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
@@ -113,41 +54,49 @@ public sealed class ProfileExecutionResolverTests
 
         Assert.False(result.IsExecutable);
         Assert.Null(result.Settings);
-        Assert.False(string.IsNullOrWhiteSpace(result.FailureReason));
+        Assert.Contains("Apple hardware", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ResolveProcessorSettings_Balanced_IsNotExecutableYet()
+    public void ResolveProcessorSettings_GamingOptimisedWithUnsupportedNonIntel_IsNotExecutable()
     {
-        var verification = VerifiedMacBookPro16_1();
-        var profile = GetCatalogProfile("balanced", verification);
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            "MacBookPro18,1",
+            PlatformSupportStatus.UnsupportedNonIntel,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Apple Silicon.");
+        var profile = GetCatalogProfile("gaming-optimised", verification);
 
         var result = _resolver.ResolveProcessorSettings(profile, verification);
 
         Assert.False(result.IsExecutable);
         Assert.Null(result.Settings);
-        Assert.Contains("configurable placeholder", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Intel processor", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ResolveProcessorSettings_FullPerformance_IsNotExecutableYetAndDoesNotInventBoostValues()
+    public void ResolveProcessorSettings_GamingOptimisedWithDetectionIncomplete_IsNotExecutable()
     {
-        var verification = VerifiedMacBookPro16_1();
-        var profile = GetCatalogProfile("full-performance", verification);
+        var verification = new ModelVerificationResult(
+            "Unknown",
+            "Unknown",
+            PlatformSupportStatus.DetectionIncomplete,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Detection incomplete.");
+        var profile = GetCatalogProfile("gaming-optimised", verification);
 
         var result = _resolver.ResolveProcessorSettings(profile, verification);
 
         Assert.False(result.IsExecutable);
-        Assert.Null(profile.PowerTarget.BoostModeAc);
-        Assert.Null(profile.PowerTarget.BoostModeDc);
         Assert.Null(result.Settings);
-        Assert.Contains("restore snapshot", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("detection", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ResolveProcessorSettings_Restore_IsNotExecutableThroughProfileResolver()
     {
-        var verification = VerifiedMacBookPro16_1();
+        var verification = SupportedMacBookPro16_1();
         var profile = GetCatalogProfile("restore", verification);
 
         var result = _resolver.ResolveProcessorSettings(profile, verification);
@@ -157,15 +106,65 @@ public sealed class ProfileExecutionResolverTests
         Assert.Contains("Restore is not resolved", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void ResolveProcessorSettings_InvalidIncompleteProcessorTarget_IsRejectedFailClosed()
+    [Theory]
+    [InlineData("balanced")]
+    [InlineData("full-performance")]
+    [InlineData("custom-profile")]
+    public void ResolveProcessorSettings_RemovedOrUnknownProfiles_AreNotExecutable(string profileId)
     {
-        var verification = VerifiedMacBookPro16_1();
+        var verification = SupportedMacBookPro16_1();
+        var profile = new PerformanceProfile(
+            profileId,
+            profileId,
+            ProfileScope.Generic,
+            TargetModel: null,
+            IsAvailableForDetectedModel: true,
+            new ProcessorPowerProfileTarget(95, 95, 0, 0, ProfileUnspecifiedValueSource.None),
+            [],
+            "Removed profile.");
+
+        var result = _resolver.ResolveProcessorSettings(profile, verification);
+
+        Assert.False(result.IsExecutable);
+        Assert.Null(result.Settings);
+        Assert.Contains("not supported", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveProcessorSettings_MalformedTargetValues_IsRejectedFailClosed()
+    {
+        var verification = SupportedMacBookPro16_1();
         var profile = new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.VerifiedModelSpecific,
-            VerifiedHardwareModels.MacBookPro16_1,
+            ProfileScope.Generic,
+            TargetModel: null,
+            IsAvailableForDetectedModel: true,
+            new ProcessorPowerProfileTarget(
+                ProcessorMaximumAc: 99,
+                ProcessorMaximumDc: 95,
+                BoostModeAc: 0,
+                BoostModeDc: 0,
+                ProfileUnspecifiedValueSource.None),
+            [],
+            "Malformed profile metadata.");
+
+        var result = _resolver.ResolveProcessorSettings(profile, verification);
+
+        Assert.False(result.IsExecutable);
+        Assert.Null(result.Settings);
+        Assert.Contains("does not match", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveProcessorSettings_InvalidIncompleteProcessorTarget_IsRejectedFailClosed()
+    {
+        var verification = SupportedMacBookPro16_1();
+        var profile = new PerformanceProfile(
+            "gaming-optimised",
+            "Gaming Optimised",
+            ProfileScope.Generic,
+            TargetModel: null,
             IsAvailableForDetectedModel: true,
             new ProcessorPowerProfileTarget(
                 ProcessorMaximumAc: null,
@@ -192,14 +191,13 @@ public sealed class ProfileExecutionResolverTests
             profile => string.Equals(profile.Id, profileId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static ModelVerificationResult VerifiedMacBookPro16_1()
+    private static ModelVerificationResult SupportedMacBookPro16_1()
     {
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
     }
 }

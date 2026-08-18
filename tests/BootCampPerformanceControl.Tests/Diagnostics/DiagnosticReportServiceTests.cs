@@ -39,7 +39,7 @@ public sealed class DiagnosticReportServiceTests
     }
 
     [Fact]
-    public async Task GenerateAsync_WithUnverifiedAppleModel_ReportsGamingOptimisedAndWritesNotVerified()
+    public async Task GenerateAsync_WithNotIndividuallyTestedIntelMac_ReportsWritesAllowedAndModelNotVerified()
     {
         var hardwareSnapshot = VerifiedHardwareSnapshot(model: "MacBookPro15,1");
         var service = CreateService(hardwareSnapshot);
@@ -48,7 +48,20 @@ public sealed class DiagnosticReportServiceTests
 
         Assert.Contains("Mac Model: MacBookPro15,1", result.Content);
         Assert.Contains("Model verified: No", result.Content);
-        Assert.Contains("Model verification status: UnverifiedAppleModel", result.Content);
+        Assert.Contains("Gaming Optimised verified: Yes", result.Content);
+        Assert.Contains("Model-specific processor power writes allowed: Yes", result.Content);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithUnsupportedNonAppleHardware_ReportsWritesNotAllowed()
+    {
+        var hardwareSnapshot = VerifiedHardwareSnapshot(manufacturer: "PC Manufacturer", model: "Generic PC");
+        var service = CreateService(hardwareSnapshot);
+
+        var result = await service.GenerateAsync(CancellationToken.None);
+
+        Assert.Contains("Apple hardware detected: No", result.Content);
+        Assert.Contains("Model verified: No", result.Content);
         Assert.Contains("Gaming Optimised verified: No", result.Content);
         Assert.Contains("Model-specific processor power writes allowed: No", result.Content);
     }

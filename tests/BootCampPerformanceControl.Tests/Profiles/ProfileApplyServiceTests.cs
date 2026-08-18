@@ -7,9 +7,9 @@ namespace BootCampPerformanceControl.Tests.Profiles;
 public sealed class ProfileApplyServiceTests
 {
     [Fact]
-    public async Task ApplyProfileAsync_VerifiedMacBookPro16_1GamingOptimised_UsesGuardedApply()
+    public async Task ApplyProfileAsync_SupportedMacBookPro16_1GamingOptimised_UsesGuardedApply()
     {
-        var verification = VerifiedMacBookPro16_1();
+        var verification = SupportedMacBookPro16_1();
         var hardware = new FakeHardwareDetectionService(verification);
         var expectedStateBefore = CurrentPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
@@ -34,38 +34,62 @@ public sealed class ProfileApplyServiceTests
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_MatchingModelStringButUnverifiedHardware_FailsClosedBeforePowerRead()
+    public async Task ApplyProfileAsync_SupportedMacBookPro14_3GamingOptimised_UsesGuardedApply()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Matching model string without verification.");
-        var powerManagement = new FakePowerManagementService();
-        var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported 14,3.");
+        var hardware = new FakeHardwareDetectionService(verification);
+        var expectedStateBefore = CurrentPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerOperation = SuccessfulPowerOperation(expectedStateBefore, requestedSettings);
+        var powerManagement = new FakePowerManagementService(expectedStateBefore, powerOperation);
+        var service = CreateService(hardware, powerManagement);
 
         var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
-        Assert.NotNull(result.ProfileExecutionResolution);
-        Assert.Null(result.PowerOperation);
-        Assert.Equal(0, powerManagement.ReadCurrentStateCallCount);
-        Assert.Equal(0, powerManagement.GuardedApplyCallCount);
-        Assert.Equal(0, powerManagement.UnguardedApplyCallCount);
+        Assert.True(result.IsSuccessful);
+        Assert.Same(powerOperation, result.PowerOperation);
+        Assert.True(result.ProfileExecutionResolution?.IsExecutable);
+        Assert.Equal(requestedSettings, result.ProfileExecutionResolution?.Settings);
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_DifferentMacModel_FailsClosedWithoutApply()
+    public async Task ApplyProfileAsync_SupportedGenericIntelMacGamingOptimised_UsesGuardedApply()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
             "MacBookPro15,1",
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Different Apple model.");
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Generic Intel Mac.");
+        var hardware = new FakeHardwareDetectionService(verification);
+        var expectedStateBefore = CurrentPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerOperation = SuccessfulPowerOperation(expectedStateBefore, requestedSettings);
+        var powerManagement = new FakePowerManagementService(expectedStateBefore, powerOperation);
+        var service = CreateService(hardware, powerManagement);
+
+        var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Same(powerOperation, result.PowerOperation);
+        Assert.True(result.ProfileExecutionResolution?.IsExecutable);
+        Assert.Equal(requestedSettings, result.ProfileExecutionResolution?.Settings);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_UnsupportedNonIntel_FailsClosedBeforePowerRead()
+    {
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            "MacBookPro18,1",
+            PlatformSupportStatus.UnsupportedNonIntel,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Apple Silicon.");
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
 
@@ -79,14 +103,13 @@ public sealed class ProfileApplyServiceTests
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_NonAppleHardware_FailsClosedWithoutApply()
+    public async Task ApplyProfileAsync_UnsupportedNonApple_FailsClosedWithoutApply()
     {
         var verification = new ModelVerificationResult(
             "PC Manufacturer",
             "PC Model",
-            IsApple: false,
-            IsVerified: false,
-            HardwareVerificationStatus.NonAppleHardware,
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple hardware.");
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
@@ -101,41 +124,57 @@ public sealed class ProfileApplyServiceTests
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_Balanced_IsRejectedBeforePowerReadOrWrite()
+    public async Task ApplyProfileAsync_DetectionIncomplete_FailsClosedWithoutApply()
     {
+        var verification = new ModelVerificationResult(
+            "Unknown",
+            "Unknown",
+            PlatformSupportStatus.DetectionIncomplete,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Detection incomplete.");
         var powerManagement = new FakePowerManagementService();
-        var service = CreateService(
-            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
-            powerManagement);
+        var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
 
-        var result = await service.ApplyProfileAsync("balanced", CancellationToken.None);
+        var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
         Assert.Null(result.PowerOperation);
-        Assert.NotNull(result.ProfileExecutionResolution);
-        Assert.Contains(
-            "configurable placeholder",
-            result.FailureReason,
-            StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, powerManagement.ReadCurrentStateCallCount);
         Assert.Equal(0, powerManagement.GuardedApplyCallCount);
         Assert.Equal(0, powerManagement.UnguardedApplyCallCount);
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_FullPerformance_IsRejectedBeforePowerReadOrWriteAndDoesNotInventBoost()
+    public async Task ApplyProfileAsync_RemovedBalanced_IsRejectedAsNotFoundBeforePowerReadOrWrite()
     {
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(
-            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(SupportedMacBookPro16_1()),
+            powerManagement);
+
+        var result = await service.ApplyProfileAsync("balanced", CancellationToken.None);
+
+        Assert.False(result.IsSuccessful);
+        Assert.Null(result.PowerOperation);
+        Assert.Contains("not found", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, powerManagement.ReadCurrentStateCallCount);
+        Assert.Equal(0, powerManagement.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagement.UnguardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_RemovedFullPerformance_IsRejectedAsNotFoundBeforePowerReadOrWrite()
+    {
+        var powerManagement = new FakePowerManagementService();
+        var service = CreateService(
+            new FakeHardwareDetectionService(SupportedMacBookPro16_1()),
             powerManagement);
 
         var result = await service.ApplyProfileAsync("full-performance", CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
-        Assert.Null(result.ProfileExecutionResolution?.Settings);
         Assert.Null(result.PowerOperation);
-        Assert.Contains("restore snapshot", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not found", result.FailureReason, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, powerManagement.ReadCurrentStateCallCount);
         Assert.Equal(0, powerManagement.GuardedApplyCallCount);
         Assert.Equal(0, powerManagement.UnguardedApplyCallCount);
@@ -146,7 +185,7 @@ public sealed class ProfileApplyServiceTests
     {
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(
-            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(SupportedMacBookPro16_1()),
             powerManagement);
 
         var result = await service.ApplyProfileAsync("restore", CancellationToken.None);
@@ -164,7 +203,7 @@ public sealed class ProfileApplyServiceTests
     {
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(
-            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(SupportedMacBookPro16_1()),
             powerManagement);
 
         var result = await service.ApplyProfileAsync("unknown-profile", CancellationToken.None);
@@ -181,7 +220,7 @@ public sealed class ProfileApplyServiceTests
     [Fact]
     public async Task ApplyProfileAsync_BackendApplyFailure_PreservesPowerOperationFailure()
     {
-        var verification = VerifiedMacBookPro16_1();
+        var verification = SupportedMacBookPro16_1();
         var expectedStateBefore = CurrentPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
         var powerOperation = FailedPowerOperation(
@@ -209,7 +248,7 @@ public sealed class ProfileApplyServiceTests
             expectedStateBefore,
             SuccessfulPowerOperation(expectedStateBefore, requestedSettings));
         var service = CreateService(
-            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(SupportedMacBookPro16_1()),
             powerManagement);
 
         await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
@@ -229,14 +268,13 @@ public sealed class ProfileApplyServiceTests
             powerManagementService);
     }
 
-    private static ModelVerificationResult VerifiedMacBookPro16_1()
+    private static ModelVerificationResult SupportedMacBookPro16_1()
     {
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
     }
 
@@ -299,22 +337,23 @@ public sealed class ProfileApplyServiceTests
                     verificationResult.Manufacturer,
                     verificationResult.Model,
                     "x64-based PC"),
-                Processor: null,
+                Processor: new ProcessorInfo("Intel Core", "GenuineIntel", 8, 16, 2400),
                 VideoControllers: [],
                 OperatingSystem: null,
                 DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"));
         }
 
-        public int DetectCallCount { get; private set; }
-
-        public int VerifyModelCallCount { get; private set; }
-
         public HardwareSnapshot DetectedSnapshot { get; }
 
         public HardwareSnapshot? VerifiedSnapshot { get; private set; }
 
+        public int DetectCallCount { get; private set; }
+
+        public int VerifyModelCallCount { get; private set; }
+
         public Task<HardwareSnapshot> DetectAsync(CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             DetectCallCount++;
             return Task.FromResult(DetectedSnapshot);
         }
@@ -329,23 +368,15 @@ public sealed class ProfileApplyServiceTests
 
     private sealed class FakePowerManagementService : IPowerManagementService
     {
-        private readonly PowerStateSnapshot _currentState;
-        private readonly PowerOperationResult _applyResult;
-
-        public FakePowerManagementService()
-            : this(CurrentPowerState(), FailedPowerOperation(
-                CurrentPowerState(),
-                new ProcessorPowerSettings(95, 95, 0, 0),
-                "Apply should not have been called."))
-        {
-        }
+        private readonly PowerStateSnapshot? _powerState;
+        private readonly PowerOperationResult? _powerOperation;
 
         public FakePowerManagementService(
-            PowerStateSnapshot currentState,
-            PowerOperationResult applyResult)
+            PowerStateSnapshot? powerState = null,
+            PowerOperationResult? powerOperation = null)
         {
-            _currentState = currentState;
-            _applyResult = applyResult;
+            _powerState = powerState;
+            _powerOperation = powerOperation;
         }
 
         public int ReadCurrentStateCallCount { get; private set; }
@@ -360,8 +391,9 @@ public sealed class ProfileApplyServiceTests
 
         public Task<PowerStateSnapshot> ReadCurrentStateAsync(CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ReadCurrentStateCallCount++;
-            return Task.FromResult(_currentState);
+            return Task.FromResult(_powerState ?? CurrentPowerState());
         }
 
         public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
@@ -369,7 +401,7 @@ public sealed class ProfileApplyServiceTests
             CancellationToken cancellationToken)
         {
             UnguardedApplyCallCount++;
-            return Task.FromResult(_applyResult);
+            throw new InvalidOperationException("Profile apply must use guarded apply with expected state.");
         }
 
         public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
@@ -377,15 +409,16 @@ public sealed class ProfileApplyServiceTests
             PowerStateSnapshot expectedStateBefore,
             CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             GuardedApplyCallCount++;
             LastGuardedSettings = requestedSettings;
             LastExpectedStateBefore = expectedStateBefore;
-            return Task.FromResult(_applyResult);
+            return Task.FromResult(_powerOperation ?? SuccessfulPowerOperation(expectedStateBefore, requestedSettings));
         }
 
         public Task<PowerOperationResult> RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
         {
-            throw new InvalidOperationException("Restore should not be called by ProfileApplyService.");
+            throw new InvalidOperationException("Apply service must not call restore.");
         }
     }
 }

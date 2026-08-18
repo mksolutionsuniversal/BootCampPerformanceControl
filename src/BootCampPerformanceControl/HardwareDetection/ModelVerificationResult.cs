@@ -30,23 +30,6 @@ public sealed record ModelVerificationResult(
         _ => HardwareVerificationStatus.Unknown
     };
 
-    [Obsolete("Legacy constructor for compatibility during Phase 1 transition.")]
-    public ModelVerificationResult(
-        string Manufacturer,
-        string Model,
-        bool IsApple,
-        bool IsVerified,
-        HardwareVerificationStatus Status,
-        string Message)
-        : this(
-            Manufacturer,
-            Model,
-            !IsApple ? PlatformSupportStatus.UnsupportedNonApple : PlatformSupportStatus.SupportedIntelMac,
-            IsVerified ? ModelValidationLevel.PerformanceValidated : ModelValidationLevel.NotIndividuallyTested,
-            Message)
-    {
-    }
-
     public static ModelVerificationResult Unknown()
     {
         return new ModelVerificationResult(

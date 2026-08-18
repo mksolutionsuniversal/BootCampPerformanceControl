@@ -7,64 +7,75 @@ namespace BootCampPerformanceControl.Tests.Profiles;
 public sealed class ProfileCatalogTests
 {
     [Fact]
-    public void VerifiedModel_HasConservativeTypedTargetsAndExpectedButtonAvailability()
+    public void SupportedIntelMac_ReturnsExactlyGamingOptimisedAndRestoreProfiles()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
 
+        Assert.Equal(2, profiles.Count);
+
         var gaming = Assert.Single(profiles, profile => profile.Id == "gaming-optimised");
+        Assert.Equal("Gaming Optimised", gaming.DisplayName);
+        Assert.True(gaming.IsAvailableForDetectedModel);
         Assert.Equal(95U, gaming.PowerTarget.ProcessorMaximumAc);
         Assert.Equal(95U, gaming.PowerTarget.ProcessorMaximumDc);
         Assert.Equal(0U, gaming.PowerTarget.BoostModeAc);
         Assert.Equal(0U, gaming.PowerTarget.BoostModeDc);
+        Assert.Equal(ProfileUnspecifiedValueSource.None, gaming.PowerTarget.UnspecifiedValueSource);
 
-        var balanced = Assert.Single(profiles, profile => profile.Id == "balanced");
-        Assert.Equal(
-            ProfileUnspecifiedValueSource.ConfigurablePlaceholder,
-            balanced.PowerTarget.UnspecifiedValueSource);
-
-        var fullPerformance = Assert.Single(profiles, profile => profile.Id == "full-performance");
-        Assert.Equal(100U, fullPerformance.PowerTarget.ProcessorMaximumAc);
-        Assert.Equal(100U, fullPerformance.PowerTarget.ProcessorMaximumDc);
-        Assert.Null(fullPerformance.PowerTarget.BoostModeAc);
-        Assert.Null(fullPerformance.PowerTarget.BoostModeDc);
+        var restore = Assert.Single(profiles, profile => profile.Id == "restore");
+        Assert.Equal("Restore Original Settings", restore.DisplayName);
+        Assert.True(restore.IsAvailableForDetectedModel);
+        Assert.Null(restore.PowerTarget.ProcessorMaximumAc);
+        Assert.Null(restore.PowerTarget.ProcessorMaximumDc);
+        Assert.Null(restore.PowerTarget.BoostModeAc);
+        Assert.Null(restore.PowerTarget.BoostModeDc);
         Assert.Equal(
             ProfileUnspecifiedValueSource.OriginalRestoreSnapshot,
-            fullPerformance.PowerTarget.UnspecifiedValueSource);
+            restore.PowerTarget.UnspecifiedValueSource);
 
-        var buttons = profiles
-            .Select(profile => new ProfileButtonViewModel(
-                profile,
-                new AsyncCommand(_ => Task.CompletedTask),
-                isRestoreSnapshotAvailable: false))
-            .ToList();
-
-        Assert.True(Assert.Single(buttons, button => button.ProfileId == "gaming-optimised").IsEnabled);
-        Assert.All(
-            buttons.Where(button => button.ProfileId != "gaming-optimised"),
-            button => Assert.False(button.IsEnabled));
+        Assert.DoesNotContain(profiles, profile => profile.Id == "balanced");
+        Assert.DoesNotContain(profiles, profile => profile.Id == "full-performance");
     }
 
     [Fact]
-    public void NonAppleHardware_DoesNotClaimAnyProfileAvailability()
+    public void SupportedIntelMacNotIndividuallyTested_ExposesGamingOptimisedAndRestoreProfiles()
     {
         var verification = new ModelVerificationResult(
-            "PC Manufacturer",
-            "PC Model",
-            IsApple: false,
-            IsVerified: false,
-            HardwareVerificationStatus.NonAppleHardware,
-            "Not Apple hardware.");
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac.");
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
 
+        Assert.Equal(2, profiles.Count);
+        Assert.All(profiles, profile => Assert.True(profile.IsAvailableForDetectedModel));
+    }
+
+    [Theory]
+    [InlineData(PlatformSupportStatus.UnsupportedNonApple)]
+    [InlineData(PlatformSupportStatus.UnsupportedNonIntel)]
+    [InlineData(PlatformSupportStatus.DetectionIncomplete)]
+    public void UnsupportedPlatforms_DoNotClaimProfileAvailability(PlatformSupportStatus platformSupport)
+    {
+        var verification = new ModelVerificationResult(
+            "Manufacturer",
+            "Model",
+            platformSupport,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Unsupported platform.");
+
+        var profiles = new ProfileCatalog().GetProfiles(verification);
+
+        Assert.Equal(2, profiles.Count);
         Assert.All(profiles, profile => Assert.False(profile.IsAvailableForDetectedModel));
     }
 }
