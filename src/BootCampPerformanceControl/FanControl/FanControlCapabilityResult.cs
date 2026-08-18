@@ -4,7 +4,7 @@ namespace BootCampPerformanceControl.FanControl;
 
 internal sealed record FanControlCapabilityResult(
     bool IsReadSupported,
-    bool IsHardwareVerifiedForFutureWrite,
+    bool IsHardwareSafetyGateSatisfied,
     IReadOnlyList<string> Failures,
     SmcTransportProtocol? Protocol,
     FanSmcSnapshot? Snapshot)
@@ -15,7 +15,7 @@ internal sealed record FanControlCapabilityResult(
     {
         return new FanControlCapabilityResult(
             IsReadSupported: false,
-            IsHardwareVerifiedForFutureWrite: false,
+            IsHardwareSafetyGateSatisfied: false,
             failures,
             protocol,
             Snapshot: null);
