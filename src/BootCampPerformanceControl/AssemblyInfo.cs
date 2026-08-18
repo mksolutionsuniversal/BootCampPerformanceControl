@@ -4,6 +4,7 @@ using System.Windows;
 [assembly: InternalsVisibleTo("BootCampPerformanceControl.Tests")]
 [assembly: InternalsVisibleTo("BootCampPerformanceControl.SmcReadSmokeTest")]
 [assembly: InternalsVisibleTo("BootCampPerformanceControl.SmcWriteRoundTripTest")]
+[assembly: InternalsVisibleTo("BootCampPerformanceControl.SmcResourceProbe")]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None,
