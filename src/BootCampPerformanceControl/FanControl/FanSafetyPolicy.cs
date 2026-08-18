@@ -52,6 +52,7 @@ internal sealed class FanSafetyPolicy
             IsReadSupported: compatible,
             IsHardwareVerifiedForFutureWrite: compatible,
             failures,
+            protocol,
             snapshot);
     }
 
@@ -64,12 +65,14 @@ internal sealed class FanSafetyPolicy
         if (!string.Equals(model, VerifiedHardwareModels.MacBookPro16_1, StringComparison.Ordinal))
         {
             return FanControlCapabilityResult.Rejected(
+                protocol,
                 $"Fan control is not verified for model '{model}'. Expected '{VerifiedHardwareModels.MacBookPro16_1}'.");
         }
 
         if (protocol.HasValue && protocol.Value != SmcTransportProtocol.Mmio)
         {
             return FanControlCapabilityResult.Rejected(
+                protocol,
                 $"Unexpected SMC transport protocol '{protocol.Value}' ({(int)protocol.Value}); MMIO (1) is required.");
         }
 
@@ -77,6 +80,7 @@ internal sealed class FanSafetyPolicy
             IsReadSupported: false,
             IsHardwareVerifiedForFutureWrite: false,
             Array.Empty<string>(),
+            protocol,
             Snapshot: null);
     }
 
