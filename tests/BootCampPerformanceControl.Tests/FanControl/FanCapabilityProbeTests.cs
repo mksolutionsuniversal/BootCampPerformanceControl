@@ -19,7 +19,8 @@ public sealed class FanCapabilityProbeTests
         Assert.True(result.IsReadSupported);
         Assert.True(result.IsHardwareSafetyGateSatisfied);
         Assert.Empty(result.Failures);
-        Assert.Equal(SmcTransportProtocol.Mmio, result.Protocol);
+        Assert.True(result.Protocol.HasValue);
+        Assert.Equal(SmcTransportProtocol.Mmio, result.Protocol.Value);
         Assert.NotNull(result.Snapshot);
         Assert.Equal(9, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
@@ -56,7 +57,8 @@ public sealed class FanCapabilityProbeTests
 
         Assert.False(result.IsReadSupported);
         Assert.False(result.IsHardwareSafetyGateSatisfied);
-        Assert.Equal(SmcTransportProtocol.Unknown, result.Protocol);
+        Assert.True(result.Protocol.HasValue);
+        Assert.Equal(SmcTransportProtocol.Unknown, result.Protocol.Value);
         Assert.Equal(1, transport.ProtocolCalls);
         Assert.Equal(0, transport.KeyInfoCalls);
         Assert.Equal(0, transport.ReadCalls);
@@ -188,7 +190,7 @@ public sealed class FanCapabilityProbeTests
             cancellationToken.ThrowIfCancellationRequested();
             ReadCalls++;
             var entry = _entries[key];
-            Assert.Equal(entry.Raw.Length, length);
+            Assert.Equal(entry.Raw.Length, (int)length);
             return Task.FromResult<ReadOnlyMemory<byte>>(entry.Raw);
         }
 
