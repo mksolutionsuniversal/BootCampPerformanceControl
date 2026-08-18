@@ -8,7 +8,10 @@ internal interface IFanOverrideWriter
         FanMaximumSafeRpmPlan plan,
         CancellationToken cancellationToken);
 
-    // Implementations must return only after both fan modes have been re-read
-    // and verified as Apple Auto. Throw or cancel if verification is incomplete.
-    Task RestoreAppleAutoAsync(CancellationToken cancellationToken);
+    // Implementations must perform a fresh ownership/readback check immediately
+    // before restoring Apple Auto, then return only after both fan modes have been
+    // re-read and verified as Apple Auto.
+    Task RestoreAppleAutoAsync(
+        FanOverrideOwnershipMarker ownershipMarker,
+        CancellationToken cancellationToken);
 }
