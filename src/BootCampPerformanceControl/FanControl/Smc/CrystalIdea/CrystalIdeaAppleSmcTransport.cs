@@ -57,7 +57,7 @@ internal sealed class CrystalIdeaAppleSmcTransport : ISmcTransport
         var response = _device.Invoke(
             CrystalIdeaAppleSmcIoctl.ReadKey,
             request,
-            length);
+            AppleSmcProtocol.MaximumValueLength);
 
         return Task.FromResult<ReadOnlyMemory<byte>>(response);
     }
