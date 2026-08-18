@@ -38,7 +38,8 @@ internal sealed class FanOverrideCoordinator
         var preparation = _preflightPolicy.PrepareMaximumSafeRpm(model, capability);
         if (!preparation.IsAllowed || preparation.Plan is null)
         {
-            return FanOverrideExecutionResult.Blocked(preparation.Message);
+            return FanOverrideExecutionResult.Blocked(
+                preparation.FailureReason ?? "Fan override preflight was blocked.");
         }
 
         var existingMarker = await _ownershipStore
