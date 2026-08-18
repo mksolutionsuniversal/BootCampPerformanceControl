@@ -36,7 +36,13 @@ try
         return 2;
     }
 
-    await using var readTransport = CrystalIdeaAppleSmcTransport.OpenInstalledDriver();
+    // The observed AppleSMC driver permits the research flow through one device
+    // handle. Read and write adapters therefore share this single owned client.
+    using var sharedDevice = new WindowsDeviceIoControlClient(
+        CrystalIdeaAppleSmcTransport.DevicePath);
+    await using var readTransport = new CrystalIdeaAppleSmcTransport(
+        new NonOwningDeviceIoControlClient(sharedDevice));
+
     var probe = new FanCapabilityProbe(
         new AppleSmcProtocol(readTransport),
         new FanSafetyPolicy());
@@ -81,7 +87,7 @@ try
     var ownershipStore = new JsonFanOverrideOwnershipStore(logger);
 
     await using var writeBackend = new CrystalIdeaResearchFanSmcWriteBackend(
-        new WindowsDeviceIoControlClient(CrystalIdeaAppleSmcTransport.DevicePath));
+        new NonOwningDeviceIoControlClient(sharedDevice));
 
     var writer = new VerifiedFanOverrideWriter(
         writeBackend,
@@ -274,6 +280,29 @@ static void PrintCapability(string label, FanControlCapabilityResult capability)
         snapshot.Fan1Maximum.GetFloat32(),
         snapshot.Fan1Mode.GetUInt8(),
         snapshot.Fan1Target.GetFloat32()));
+}
+
+file sealed class NonOwningDeviceIoControlClient : IDeviceIoControlClient
+{
+    private readonly IDeviceIoControlClient _inner;
+
+    public NonOwningDeviceIoControlClient(IDeviceIoControlClient inner)
+    {
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    }
+
+    public byte[] Invoke(
+        uint controlCode,
+        ReadOnlyMemory<byte> input,
+        int outputBufferLength)
+    {
+        return _inner.Invoke(controlCode, input, outputBufferLength);
+    }
+
+    public void Dispose()
+    {
+        // The smoke tool owns and disposes the single shared device client.
+    }
 }
 
 file sealed class ConsoleApplicationLogger : IApplicationLogger
