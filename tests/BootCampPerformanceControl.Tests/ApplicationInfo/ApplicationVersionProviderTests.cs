@@ -10,7 +10,7 @@ public sealed class ApplicationVersionProviderTests
     {
         var version = ApplicationVersionProvider.GetInformationalVersion();
 
-        Assert.Equal("0.1.0-alpha.1", version);
+        Assert.Equal("0.2.0", version);
     }
 
     [Fact]
