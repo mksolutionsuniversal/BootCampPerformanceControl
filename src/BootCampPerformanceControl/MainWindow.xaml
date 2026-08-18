@@ -54,11 +54,6 @@
                 <TextBlock Text="BootCamp Performance Control"
                            FontSize="22"
                            FontWeight="SemiBold" />
-                <TextBlock Text="{Binding ReadOnlyMessage}"
-                           TextWrapping="Wrap"
-                           FontWeight="SemiBold"
-                           Foreground="#8A3A0A"
-                           Margin="0,4,0,0" />
                 <TextBlock Text="{Binding ApplicationVersion, StringFormat=Version {0}}"
                            Foreground="#666666"
                            Margin="0,4,0,0" />
@@ -107,13 +102,17 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Verified model" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding VerifiedModel}" />
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Platform support" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding PlatformSupport}" />
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding CompatibilityDetails}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Model validation" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ModelValidation}" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding CompatibilityDetails}" />
                     </Grid>
                 </GroupBox>
 
@@ -160,7 +159,7 @@
                     <ItemsControl ItemsSource="{Binding ProfileButtons}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <UniformGrid Columns="4" />
+                                <UniformGrid Columns="2" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -171,7 +170,7 @@
                                         ToolTip="{Binding ToolTip}"
                                         ToolTipService.ShowOnDisabled="True"
                                         MinHeight="36"
-                                        Margin="0,0,8,0" />
+                                        Margin="4" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

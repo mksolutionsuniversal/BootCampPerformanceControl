@@ -6,44 +6,86 @@ namespace BootCampPerformanceControl.Tests.Profiles;
 
 public sealed class ProcessorProfileStateEvaluatorTests
 {
-    [Fact]
-    public void Evaluate_VerifiedMacBookPro16_1WithExactGamingValues_ReturnsGamingOptimisedDetected()
+    [Theory]
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1, ModelValidationLevel.PerformanceValidated)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3, ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("MacBookPro15,1", ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("MacBookPro11,5", ModelValidationLevel.CommunityTested)]
+    [InlineData("MacBookPro15,2", ModelValidationLevel.FunctionallyValidated)]
+    public void Evaluate_SupportedIntelMacWithExactGamingValues_ReturnsGamingOptimisedDetected(
+        string model,
+        ModelValidationLevel validationLevel)
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            model,
+            PlatformSupportStatus.SupportedIntelMac,
+            validationLevel,
+            "Supported.");
 
-        var result = evaluator.Evaluate(GamingPowerState(), VerifiedMacBookPro16_1());
+        var result = evaluator.Evaluate(GamingPowerState(), verification);
 
         Assert.Equal(ProcessorProfileState.GamingOptimisedDetected, result);
     }
 
     [Fact]
-    public void Evaluate_VerifiedMacBookPro16_1WithDifferingValue_ReturnsOther()
+    public void Evaluate_SupportedIntelMacWithDifferingValue_ReturnsOther()
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
+        var verification = SupportedMacBookPro16_1();
 
         var result = evaluator.Evaluate(
             GamingPowerState() with { ProcessorMaximumDc = 94 },
-            VerifiedMacBookPro16_1());
+            verification);
 
         Assert.Equal(ProcessorProfileState.Other, result);
     }
 
     [Fact]
-    public void Evaluate_UnverifiedAppleModelWithMatchingValues_ReturnsOther()
+    public void Evaluate_UnsupportedNonAppleWithMatchingValues_ReturnsOther()
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
+        var verification = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not Apple.");
 
-        var result = evaluator.Evaluate(GamingPowerState(), UnverifiedAppleModel());
+        var result = evaluator.Evaluate(GamingPowerState(), verification);
 
         Assert.Equal(ProcessorProfileState.Other, result);
     }
 
     [Fact]
-    public void Evaluate_NonAppleHardwareWithMatchingValues_ReturnsOther()
+    public void Evaluate_UnsupportedNonIntelWithMatchingValues_ReturnsOther()
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            "MacBookPro18,1",
+            PlatformSupportStatus.UnsupportedNonIntel,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Non-Intel.");
 
-        var result = evaluator.Evaluate(GamingPowerState(), NonAppleHardware());
+        var result = evaluator.Evaluate(GamingPowerState(), verification);
+
+        Assert.Equal(ProcessorProfileState.Other, result);
+    }
+
+    [Fact]
+    public void Evaluate_DetectionIncompleteWithMatchingValues_ReturnsOther()
+    {
+        var evaluator = CreateEvaluator(new ProfileCatalog());
+        var verification = new ModelVerificationResult(
+            "Unknown",
+            "Unknown",
+            PlatformSupportStatus.DetectionIncomplete,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Incomplete.");
+
+        var result = evaluator.Evaluate(GamingPowerState(), verification);
 
         Assert.Equal(ProcessorProfileState.Other, result);
     }
@@ -53,7 +95,7 @@ public sealed class ProcessorProfileStateEvaluatorTests
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
 
-        var result = evaluator.Evaluate(powerState: null, VerifiedMacBookPro16_1());
+        var result = evaluator.Evaluate(powerState: null, SupportedMacBookPro16_1());
 
         Assert.Equal(ProcessorProfileState.Unknown, result);
     }
@@ -72,7 +114,7 @@ public sealed class ProcessorProfileStateEvaluatorTests
                         BoostModeDc: 0,
                         ProfileUnspecifiedValueSource.None))));
 
-        var result = evaluator.Evaluate(GamingPowerState(), VerifiedMacBookPro16_1());
+        var result = evaluator.Evaluate(GamingPowerState(), SupportedMacBookPro16_1());
 
         Assert.Equal(ProcessorProfileState.Other, result);
     }
@@ -91,51 +133,7 @@ public sealed class ProcessorProfileStateEvaluatorTests
                         BoostModeDc: 0,
                         ProfileUnspecifiedValueSource.None))));
 
-        var result = evaluator.Evaluate(GamingPowerState(), VerifiedMacBookPro16_1());
-
-        Assert.Equal(ProcessorProfileState.Other, result);
-    }
-
-    [Fact]
-    public void Evaluate_AvailableProfileWithWrongTargetModel_ReturnsOther()
-    {
-        var evaluator = CreateEvaluator(
-            new SingleProfileCatalog(
-                new PerformanceProfile(
-                    "gaming-optimised",
-                    "Gaming Optimised",
-                    ProfileScope.VerifiedModelSpecific,
-                    "MacBookPro15,1",
-                    IsAvailableForDetectedModel: true,
-                    new ProcessorPowerProfileTarget(
-                        ProcessorMaximumAc: 95,
-                        ProcessorMaximumDc: 95,
-                        BoostModeAc: 0,
-                        BoostModeDc: 0,
-                        ProfileUnspecifiedValueSource.None),
-                    [],
-                    "Wrong target model.")));
-
-        var result = evaluator.Evaluate(GamingPowerState(), VerifiedMacBookPro16_1());
-
-        Assert.Equal(ProcessorProfileState.Other, result);
-    }
-
-    [Fact]
-    public void Evaluate_ApparentlyVerifiedResultWithInvalidManufacturer_ReturnsOther()
-    {
-        var evaluator = CreateEvaluator(
-            new SingleProfileCatalog(
-                CreateGamingProfile(
-                    isAvailableForDetectedModel: true,
-                    new ProcessorPowerProfileTarget(
-                        ProcessorMaximumAc: 95,
-                        ProcessorMaximumDc: 95,
-                        BoostModeAc: 0,
-                        BoostModeDc: 0,
-                        ProfileUnspecifiedValueSource.None))));
-
-        var result = evaluator.Evaluate(GamingPowerState(), InvalidManufacturerVerifiedResult());
+        var result = evaluator.Evaluate(GamingPowerState(), SupportedMacBookPro16_1());
 
         Assert.Equal(ProcessorProfileState.Other, result);
     }
@@ -154,8 +152,6 @@ public sealed class ProcessorProfileStateEvaluatorTests
         return new PerformanceProfile(
             "gaming-optimised",
             "Gaming Optimised",
-            ProfileScope.VerifiedModelSpecific,
-            VerifiedHardwareModels.MacBookPro16_1,
             isAvailableForDetectedModel,
             target,
             [],
@@ -173,48 +169,14 @@ public sealed class ProcessorProfileStateEvaluatorTests
             DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"));
     }
 
-    private static ModelVerificationResult VerifiedMacBookPro16_1()
+    private static ModelVerificationResult SupportedMacBookPro16_1()
     {
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
-    }
-
-    private static ModelVerificationResult UnverifiedAppleModel()
-    {
-        return new ModelVerificationResult(
-            "Apple Inc.",
-            "MacBookPro15,1",
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
-            "Unverified.");
-    }
-
-    private static ModelVerificationResult NonAppleHardware()
-    {
-        return new ModelVerificationResult(
-            "PC Manufacturer",
-            "PC Model",
-            IsApple: false,
-            IsVerified: false,
-            HardwareVerificationStatus.NonAppleHardware,
-            "Not Apple.");
-    }
-
-    private static ModelVerificationResult InvalidManufacturerVerifiedResult()
-    {
-        return new ModelVerificationResult(
-            "Apple Computer, Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
-            "Apparently verified but invalid manufacturer.");
     }
 
     private sealed class SingleProfileCatalog : IProfileCatalog

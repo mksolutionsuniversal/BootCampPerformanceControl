@@ -2,54 +2,69 @@
 
 BootCamp Performance Control is an open-source Windows utility for Intel Macs running Windows through Boot Camp. Its purpose is to reduce unnecessary CPU heat and thermal throttling using safe Windows power-management mechanisms.
 
-## Alpha warning
+## Release status
 
-This is an alpha release: `0.1.0-alpha.1`.
+- **Latest public release:** `0.1.0-alpha.1`
+- **Current development target:** `0.2.0` (generic Intel Mac capability-based execution)
 
-Use it only if you understand that hardware and power-management behavior can vary across Boot Camp installations. This alpha is model-conservative: the first enabled profile has been built strictly for the verified MacBookPro16,1 path, and unsupported or unverified models do not receive model-specific writes. When an original processor-state snapshot is available, use Restore to return to the pre-application processor state.
+## Compatibility model
 
-## Current alpha support
+BootCamp Performance Control targets Intel Macs running Windows through Boot Camp.
 
-- Primary verified model: MacBookPro16,1
-- Machine family: MacBook Pro 16-inch, 2019
-- Operating system: Windows 10 Boot Camp
-- Verified test CPU: Intel Core i9-9980HK
+Execution permission is capability-based:
+- **Platform support:** Gaming Optimised is available on supported Intel Mac platforms (`SupportedIntelMac`) when the required Windows processor power settings can be read successfully.
+- **Model validation:** Model validation metadata is informational and does not grant or deny execution permission.
 
-Enabled in `0.1.0-alpha.1`:
+### Validation metadata status
 
-- Gaming Optimised
-  - CPU Maximum State: 95%
-  - Turbo Boost: Disabled
-  - Display unchanged
-- Restore
-  - Restores the exact original processor power state saved before the first profile change
+- **MacBookPro16,1** (`PerformanceValidated`):
+  - 16-inch MacBook Pro (2019, Intel Core i9-9980HK)
+  - Full Apply / exact read-back / restart persistence / Restore round-trip tested
+  - Thermal and performance workload testing completed
+- **MacBookPro14,3** (`NotIndividuallyTested`):
+  - 15-inch MacBook Pro (2017)
+  - Application startup and processor power setting application have been observed
+  - Full controlled Restore round-trip has not yet been independently confirmed
+- **Other supported Intel Macs** (`NotIndividuallyTested` unless separately validated):
+  - Eligible for Gaming Optimised execution when Apple hardware, Intel CPU, and Windows processor power settings are readable
+  - A first-use confirmation warning is shown before applying Gaming Optimised on models that have not been individually performance-tested
 
-## Important safety behavior
+## Profiles
 
-- Reads the current power state before writes
-- Persists an original restore snapshot before modification
-- Verifies state after writes
-- Attempts rollback on failed verification
-- Restore returns to the saved original values, not assumed defaults
-- Unsupported or unverified models do not receive model-specific writes
+The product exposes two actions:
 
-## Not implemented or not enabled in 0.1.0-alpha.1
+- **Gaming Optimised**
+  - Maximum Processor State AC/DC: `95%` / `95%` (`PROCTHROTTLEMAX`)
+  - CPU Boost AC/DC: `Disabled (0)` / `Disabled (0)` (`PERFBOOSTMODE`)
+- **Restore Original Settings**
+  - Restores the exact original saved processor power settings captured before changes were applied
 
-- Custom fan control
-- Balanced execution
-- Full Performance execution
+## Safety behavior
+
+BootCamp Performance Control follows strict fail-closed safety principles:
+
+- Reads current Windows processor power state before any writes
+- Captures and persists an original Restore snapshot before any modification
+- Uses expected-state preconditions to detect concurrent configuration changes
+- Performs exact read-back verification after writing Windows processor power settings
+- Executes an automatic rollback attempt if write or read-back verification fails
+- Restores exact original saved values rather than assumed factory defaults
+- Model validation is not a write-permission gate
+
+## Out of scope / Not included in 0.2.0
+
+- Fan control (planned for a future release; not included in version 0.2.0)
 - Custom refresh-rate or display changes
-- Undervolting
-- MSR writes
+- CPU undervolting
+- MSR (Model-Specific Register) writes
 - Kernel-mode drivers
 - Firmware modifications
 
 ## Requirements
 
-- Windows 10 running through Boot Camp on an Intel Mac
+- Intel Mac running Windows (Windows 10 / Windows 11) through Boot Camp
 - .NET 8 SDK to build from source
-- Administrator rights may be required by Windows power-management operations
-- A verified supported model is required before model-specific writes are enabled
+- Administrator permissions (required for Windows power-management operations)
 
 ## Build
 
@@ -59,24 +74,15 @@ Build the solution:
 dotnet build BootCampPerformanceControl.sln -c Release
 ```
 
-Create the self-contained Windows x64 alpha publish using the publish script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/publish-alpha.ps1
-```
-
-Or publish directly using the `win-x64-alpha` profile:
+Create a self-contained Windows x64 release publish:
 
 ```powershell
 dotnet publish src/BootCampPerformanceControl/BootCampPerformanceControl.csproj `
-  /p:PublishProfile=win-x64-alpha `
-  -o artifacts/BootCampPerformanceControl-0.1.0-alpha.1-win-x64
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -o artifacts/BootCampPerformanceControl-0.2.0-win-x64
 ```
-
-The published output will be placed in:
-`artifacts/BootCampPerformanceControl-0.1.0-alpha.1-win-x64/`
-
-The publish output is intentionally a standalone folder and not an installer.
 
 ## Test
 
@@ -85,15 +91,3 @@ Run the automated test suite:
 ```powershell
 dotnet test BootCampPerformanceControl.sln -c Release
 ```
-
-## Current project status
-
-The first alpha focuses on a small verified control surface:
-
-- Read hardware and current Windows power state
-- Enable Gaming Optimised only for verified MacBookPro16,1 hardware
-- Save the original power snapshot before the first profile write
-- Enable Restore only when an original snapshot exists
-- Keep Balanced, Full Performance, fan control, and display changes disabled
-
-Do not assume support for other Intel Mac models until they have explicit verification and tests.

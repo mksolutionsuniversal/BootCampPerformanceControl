@@ -297,10 +297,16 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void ProfileButtons_GamingOptimisedIsDisabledForUnverifiedHardware()
+    public void ProfileButtons_GamingOptimisedIsDisabledForUnsupportedHardware()
     {
+        var unsupportedResult = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not Apple hardware.");
         var viewModel = CreateViewModel(
-            new FakeHardwareDetectionService(UnverifiedMacBookPro16_1()),
+            new FakeHardwareDetectionService(unsupportedResult),
             new FakePowerManagementService(InitialPowerState()));
 
         viewModel.RefreshCommand.Execute(null);
@@ -308,13 +314,11 @@ public sealed class MainViewModelTests
         var gaming = GetProfile(viewModel, "gaming-optimised");
         Assert.False(gaming.IsEnabled);
         Assert.Null(gaming.Command);
-        Assert.Contains("verified compatible", gaming.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Gaming Optimised is available for supported Intel Mac models.", gaming.ToolTip);
     }
 
-    [Theory]
-    [InlineData("balanced")]
-    [InlineData("full-performance")]
-    public void ProfileButtons_NonGamingProfilesRemainDisabled(string profileId)
+    [Fact]
+    public void ProfileButtons_ContainsOnlyGamingOptimisedAndRestore()
     {
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
@@ -322,10 +326,11 @@ public sealed class MainViewModelTests
 
         viewModel.RefreshCommand.Execute(null);
 
-        var profile = GetProfile(viewModel, profileId);
-        Assert.False(profile.IsEnabled);
-        Assert.Null(profile.Command);
-        Assert.Contains("not yet connected", profile.ToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, viewModel.ProfileButtons.Count);
+        Assert.Contains(viewModel.ProfileButtons, profile => profile.ProfileId == "gaming-optimised");
+        Assert.Contains(viewModel.ProfileButtons, profile => profile.ProfileId == "restore");
+        Assert.DoesNotContain(viewModel.ProfileButtons, profile => profile.ProfileId == "balanced");
+        Assert.DoesNotContain(viewModel.ProfileButtons, profile => profile.ProfileId == "full-performance");
     }
 
     [Fact]
@@ -366,9 +371,15 @@ public sealed class MainViewModelTests
     [Fact]
     public void GamingButton_ReverifiesThroughProfileApplyServiceBeforeAnyWrite()
     {
+        var unsupportedSecondResult = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Hardware changed to unsupported.");
         var hardwareDetectionService = new FakeHardwareDetectionService(
             VerifiedMacBookPro16_1(),
-            UnverifiedMacBookPro16_1());
+            unsupportedSecondResult);
         var powerManagementService = new FakePowerManagementService(InitialPowerState());
         var logger = new TestApplicationLogger();
         var viewModel = CreateViewModel(
@@ -503,6 +514,174 @@ public sealed class MainViewModelTests
         Assert.Equal("0 (Disabled)", viewModel.BoostModeDc);
         Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
         Assert.False(viewModel.IsBusy);
+    }
+
+    [Fact]
+    public void Compatibility_DisplaysPlatformSupportAndModelValidationIndependently()
+    {
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro16_1,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
+            "Performance validated model.");
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            new FakePowerManagementService(InitialPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+
+        Assert.Equal("Supported Intel Mac", viewModel.PlatformSupport);
+        Assert.Equal("Performance validated", viewModel.ModelValidation);
+        Assert.Equal("Performance validated model.", viewModel.CompatibilityDetails);
+    }
+
+    [Fact]
+    public void Compatibility_DisplaysNotIndividuallyTestedIntelMac()
+    {
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac.");
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            new FakePowerManagementService(InitialPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+
+        Assert.Equal("Supported Intel Mac", viewModel.PlatformSupport);
+        Assert.Equal("Not individually tested", viewModel.ModelValidation);
+    }
+
+    [Fact]
+    public void Compatibility_DisplaysUnsupportedNonApple()
+    {
+        var verification = new ModelVerificationResult(
+            "PC Manufacturer",
+            "PC Model",
+            PlatformSupportStatus.UnsupportedNonApple,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not Apple.");
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            new FakePowerManagementService(InitialPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+
+        Assert.Equal("Unsupported - non-Apple hardware", viewModel.PlatformSupport);
+        Assert.Equal("Not individually tested", viewModel.ModelValidation);
+    }
+
+    [Fact]
+    public async Task ProfileButtons_GamingOptimisedDisabledWhenPowerReadFails()
+    {
+        var powerManagementService = new FakePowerManagementService();
+        powerManagementService.QueueReadException(new InvalidOperationException("Power read failed."));
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gaming = GetProfile(viewModel, "gaming-optimised");
+        Assert.False(gaming.IsEnabled);
+        Assert.Null(gaming.Command);
+        Assert.Contains("requires current processor power settings to be read successfully", gaming.ToolTip);
+    }
+
+    [Fact]
+    public void GamingButton_NotIndividuallyTested_ShowsConfirmationDialog_CancelAbortsApplyWithoutWrites()
+    {
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not individually tested.");
+        var confirmationService = new FakeUserConfirmationService { Result = false };
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            powerManagementService,
+            logger: logger,
+            userConfirmationService: confirmationService);
+
+        viewModel.RefreshCommand.Execute(null);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+
+        Assert.Equal(1, confirmationService.CallCount);
+        Assert.Equal(VerifiedHardwareModels.MacBookPro14_3, confirmationService.LastModelName);
+        Assert.Equal("Profile application canceled.", viewModel.StatusMessage);
+        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task GamingButton_NotIndividuallyTested_ShowsConfirmationDialog_ConfirmAllowsApplyAndRemembersSession()
+    {
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Not individually tested.");
+        var confirmationService = new FakeUserConfirmationService { Result = true };
+        var expectedStateBefore = InitialPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var refreshedState = GamingOptimisedPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(expectedStateBefore, requestedSettings),
+            InitialPowerState(),
+            expectedStateBefore,
+            refreshedState);
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            powerManagementService,
+            userConfirmationService: confirmationService);
+
+        viewModel.RefreshCommand.Execute(null);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, confirmationService.CallCount);
+        Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
+        Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        // Second apply in same session should NOT prompt again
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, confirmationService.CallCount);
+        Assert.Equal(2, powerManagementService.GuardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task GamingButton_PerformanceValidated_DoesNotShowConfirmationDialog()
+    {
+        var confirmationService = new FakeUserConfirmationService { Result = true };
+        var expectedStateBefore = InitialPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var refreshedState = GamingOptimisedPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(expectedStateBefore, requestedSettings),
+            InitialPowerState(),
+            expectedStateBefore,
+            refreshedState);
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            userConfirmationService: confirmationService);
+
+        viewModel.RefreshCommand.Execute(null);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, confirmationService.CallCount);
+        Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
     }
 
     [Fact]
@@ -919,12 +1098,16 @@ public sealed class MainViewModelTests
     [Fact]
     public async Task RefreshProfileRebuildWhileBusy_DoesNotCreateExecutableGamingCommand()
     {
-        var powerReadGate = new AsyncGate();
         var powerManagementService = new FakePowerManagementService(InitialPowerState());
-        powerManagementService.QueueReadGate(powerReadGate);
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
             powerManagementService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var powerReadGate = new AsyncGate();
+        powerManagementService.QueueReadGate(powerReadGate);
 
         viewModel.RefreshCommand.Execute(null);
         await powerReadGate.WaitUntilEnteredAsync();
@@ -942,12 +1125,16 @@ public sealed class MainViewModelTests
     [Fact]
     public async Task Commands_BecomeExecutableAgainAfterBusyReturnsFalse()
     {
-        var powerReadGate = new AsyncGate();
         var powerManagementService = new FakePowerManagementService(InitialPowerState());
-        powerManagementService.QueueReadGate(powerReadGate);
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
             powerManagementService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var powerReadGate = new AsyncGate();
+        powerManagementService.QueueReadGate(powerReadGate);
 
         viewModel.RefreshCommand.Execute(null);
         await powerReadGate.WaitUntilEnteredAsync();
@@ -1049,7 +1236,8 @@ public sealed class MainViewModelTests
         IRestoreSnapshotStore? restoreSnapshotStore = null,
         TestApplicationLogger? logger = null,
         FakeDiagnosticReportService? diagnosticReportService = null,
-        FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null)
+        FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
+        IUserConfirmationService? userConfirmationService = null)
     {
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
@@ -1072,7 +1260,8 @@ public sealed class MainViewModelTests
                 profileExecutionResolver),
             diagnosticReportService ?? new FakeDiagnosticReportService(),
             diagnosticReportFileSaveService ?? new FakeDiagnosticReportFileSaveService(),
-            logger ?? new TestApplicationLogger());
+            logger ?? new TestApplicationLogger(),
+            userConfirmationService);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)
@@ -1099,9 +1288,8 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: true,
-            HardwareVerificationStatus.Verified,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.PerformanceValidated,
             "Verified.");
     }
 
@@ -1110,9 +1298,8 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            IsApple: true,
-            IsVerified: false,
-            HardwareVerificationStatus.UnverifiedAppleModel,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
             "Matching model string without verification.");
     }
 
@@ -1502,6 +1689,20 @@ public sealed class MainViewModelTests
         public void Release()
         {
             _release.TrySetResult();
+        }
+    }
+
+    private sealed class FakeUserConfirmationService : IUserConfirmationService
+    {
+        public bool Result { get; set; } = true;
+        public int CallCount { get; private set; }
+        public string? LastModelName { get; private set; }
+
+        public bool ConfirmUntestedModelApply(string modelName)
+        {
+            CallCount++;
+            LastModelName = modelName;
+            return Result;
         }
     }
 }

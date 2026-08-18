@@ -11,13 +11,14 @@ public sealed class ProfileButtonViewModel
     public ProfileButtonViewModel(
         PerformanceProfile profile,
         ICommand command,
-        bool isRestoreSnapshotAvailable = false)
+        bool isRestoreSnapshotAvailable = false,
+        bool isPowerStateReadable = false)
     {
         ProfileId = profile.Id;
         DisplayName = profile.DisplayName;
-        IsEnabled = IsProfileEnabled(profile, isRestoreSnapshotAvailable);
+        IsEnabled = IsProfileEnabled(profile, isRestoreSnapshotAvailable, isPowerStateReadable);
         Command = IsEnabled ? command : null;
-        ToolTip = CreateToolTip(profile, IsEnabled, isRestoreSnapshotAvailable);
+        ToolTip = CreateToolTip(profile, IsEnabled, isRestoreSnapshotAvailable, isPowerStateReadable);
     }
 
     public string ProfileId { get; }
@@ -32,14 +33,15 @@ public sealed class ProfileButtonViewModel
 
     private static bool IsProfileEnabled(
         PerformanceProfile profile,
-        bool isRestoreSnapshotAvailable)
+        bool isRestoreSnapshotAvailable,
+        bool isPowerStateReadable)
     {
         if (string.Equals(
                 profile.Id,
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return profile.IsAvailableForDetectedModel;
+            return profile.IsAvailableForDetectedModel && isPowerStateReadable;
         }
 
         if (string.Equals(
@@ -56,7 +58,8 @@ public sealed class ProfileButtonViewModel
     private static string CreateToolTip(
         PerformanceProfile profile,
         bool isEnabled,
-        bool isRestoreSnapshotAvailable)
+        bool isRestoreSnapshotAvailable,
+        bool isPowerStateReadable)
     {
         if (isEnabled)
         {
@@ -76,7 +79,15 @@ public sealed class ProfileButtonViewModel
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return $"{profile.DisplayName} requires a verified compatible MacBookPro16,1 before it can be applied.";
+            if (!profile.IsAvailableForDetectedModel)
+            {
+                return "Gaming Optimised is available for supported Intel Mac models.";
+            }
+
+            if (!isPowerStateReadable)
+            {
+                return "Gaming Optimised requires current processor power settings to be read successfully.";
+            }
         }
 
         if (string.Equals(
@@ -89,6 +100,6 @@ public sealed class ProfileButtonViewModel
                 : "No original restore snapshot exists yet.";
         }
 
-        return $"{profile.DisplayName} is not yet connected for execution.";
+        return $"{profile.DisplayName} is not available.";
     }
 }

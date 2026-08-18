@@ -10,6 +10,5 @@ public sealed record ProcessorPowerProfileTarget(
 public enum ProfileUnspecifiedValueSource
 {
     None,
-    ConfigurablePlaceholder,
     OriginalRestoreSnapshot
 }

@@ -5,7 +5,7 @@ namespace BootCampPerformanceControl.Tests.HardwareDetection;
 public sealed class ModelSupportRegistryTests
 {
     [Fact]
-    public void Find_MacBookPro16_1_ReturnsProcessorPowerControlVerifiedDefinition()
+    public void Find_MacBookPro16_1_ReturnsPerformanceValidatedDefinition()
     {
         var registry = new ModelSupportRegistry();
 
@@ -13,7 +13,19 @@ public sealed class ModelSupportRegistryTests
 
         Assert.NotNull(definition);
         Assert.Equal(VerifiedHardwareModels.MacBookPro16_1, definition.ModelIdentifier);
-        Assert.True(definition.ProcessorPowerControlVerified);
+        Assert.Equal(ModelValidationLevel.PerformanceValidated, definition.ValidationLevel);
+    }
+
+    [Fact]
+    public void Find_MacBookPro14_3_ReturnsNotIndividuallyTestedDefinition()
+    {
+        var registry = new ModelSupportRegistry();
+
+        var definition = registry.Find(VerifiedHardwareModels.MacBookPro14_3);
+
+        Assert.NotNull(definition);
+        Assert.Equal(VerifiedHardwareModels.MacBookPro14_3, definition.ModelIdentifier);
+        Assert.Equal(ModelValidationLevel.NotIndividuallyTested, definition.ValidationLevel);
     }
 
     [Fact]
@@ -25,11 +37,11 @@ public sealed class ModelSupportRegistryTests
 
         Assert.NotNull(definition);
         Assert.Equal(VerifiedHardwareModels.MacBookPro16_1, definition.ModelIdentifier);
-        Assert.True(definition.ProcessorPowerControlVerified);
+        Assert.Equal(ModelValidationLevel.PerformanceValidated, definition.ValidationLevel);
     }
 
     [Fact]
-    public void Find_UnknownAppleModel_ReturnsNoVerifiedDefinition()
+    public void Find_UnknownAppleModel_ReturnsNull()
     {
         var registry = new ModelSupportRegistry();
 
@@ -39,16 +51,20 @@ public sealed class ModelSupportRegistryTests
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData(" ")]
-    [InlineData("Unknown")]
-    public void Find_BlankOrUnknownModel_CannotBecomeVerified(string? modelIdentifier)
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1, ModelValidationLevel.PerformanceValidated)]
+    [InlineData("macbookpro16,1", ModelValidationLevel.PerformanceValidated)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3, ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("MacBookPro15,1", ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData(null, ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("", ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData(" ", ModelValidationLevel.NotIndividuallyTested)]
+    [InlineData("Unknown", ModelValidationLevel.NotIndividuallyTested)]
+    public void GetValidationLevel_ReturnsExpectedLevel(string? modelIdentifier, ModelValidationLevel expectedLevel)
     {
         var registry = new ModelSupportRegistry();
 
-        var definition = registry.Find(modelIdentifier);
+        var level = registry.GetValidationLevel(modelIdentifier);
 
-        Assert.True(definition?.ProcessorPowerControlVerified != true);
+        Assert.Equal(expectedLevel, level);
     }
 }

@@ -33,13 +33,16 @@ public sealed class DiagnosticReportServiceTests
         Assert.Contains("  - Intel(R) UHD Graphics 630", result.Content);
         Assert.Contains("  - AMD Radeon Pro 5500M", result.Content);
         Assert.Contains($"Active Power Scheme: {schemeId}", result.Content);
-        Assert.Contains("Model verified: Yes", result.Content);
-        Assert.Contains("Gaming Optimised verified: Yes", result.Content);
-        Assert.Contains("Model-specific processor power writes allowed: Yes", result.Content);
+        Assert.Contains("Platform support: SupportedIntelMac", result.Content);
+        Assert.Contains("Model validation: PerformanceValidated", result.Content);
+        Assert.Contains("Processor power settings readable: Yes", result.Content);
+        Assert.Contains("Gaming Optimised eligible: Yes", result.Content);
+        Assert.DoesNotContain("Model verified:", result.Content);
+        Assert.DoesNotContain("Model-specific processor power writes allowed:", result.Content);
     }
 
     [Fact]
-    public async Task GenerateAsync_WithUnverifiedAppleModel_ReportsGamingOptimisedAndWritesNotVerified()
+    public async Task GenerateAsync_WithNotIndividuallyTestedIntelMac_ReportsPlatformSupportAndValidationLevel()
     {
         var hardwareSnapshot = VerifiedHardwareSnapshot(model: "MacBookPro15,1");
         var service = CreateService(hardwareSnapshot);
@@ -47,10 +50,46 @@ public sealed class DiagnosticReportServiceTests
         var result = await service.GenerateAsync(CancellationToken.None);
 
         Assert.Contains("Mac Model: MacBookPro15,1", result.Content);
-        Assert.Contains("Model verified: No", result.Content);
-        Assert.Contains("Model verification status: UnverifiedAppleModel", result.Content);
-        Assert.Contains("Gaming Optimised verified: No", result.Content);
-        Assert.Contains("Model-specific processor power writes allowed: No", result.Content);
+        Assert.Contains("Platform support: SupportedIntelMac", result.Content);
+        Assert.Contains("Model validation: NotIndividuallyTested", result.Content);
+        Assert.Contains("Processor power settings readable: Yes", result.Content);
+        Assert.Contains("Gaming Optimised eligible: Yes", result.Content);
+        Assert.DoesNotContain("Model verified:", result.Content);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithUnsupportedNonAppleHardware_ReportsNotEligible()
+    {
+        var hardwareSnapshot = VerifiedHardwareSnapshot(manufacturer: "PC Manufacturer", model: "Generic PC");
+        var service = CreateService(hardwareSnapshot);
+
+        var result = await service.GenerateAsync(CancellationToken.None);
+
+        Assert.Contains("Platform support: UnsupportedNonApple", result.Content);
+        Assert.Contains("Model validation: NotIndividuallyTested", result.Content);
+        Assert.Contains("Gaming Optimised eligible: No", result.Content);
+        Assert.DoesNotContain("Model verified:", result.Content);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithSupportedIntelMacWhenPowerReadFails_ReportsNotEligible()
+    {
+        var hardwareSnapshot = VerifiedHardwareSnapshot();
+        var powerManagementService = new FakeFailingPowerManagementService();
+        var service = new DiagnosticReportService(
+            new FakeHardwareDetectionService(hardwareSnapshot),
+            powerManagementService,
+            new FakeRestoreSnapshotStore(),
+            new ProfileCatalog(),
+            new ProfileExecutionResolver(),
+            new TestApplicationLogger());
+
+        var result = await service.GenerateAsync(CancellationToken.None);
+
+        Assert.Contains("Platform support: SupportedIntelMac", result.Content);
+        Assert.Contains("Model validation: PerformanceValidated", result.Content);
+        Assert.Contains("Processor power settings readable: No", result.Content);
+        Assert.Contains("Gaming Optimised eligible: No", result.Content);
     }
 
     [Fact]
@@ -363,6 +402,34 @@ public sealed class DiagnosticReportServiceTests
         public Task<PowerOperationResult> RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
         {
             RestoreOriginalSettingsCallCount++;
+            throw new InvalidOperationException("Diagnostics must not restore processor settings.");
+        }
+    }
+
+    private sealed class FakeFailingPowerManagementService : IPowerManagementService
+    {
+        public Task<PowerStateSnapshot> ReadCurrentStateAsync(CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Power read failed.");
+        }
+
+        public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
+            ProcessorPowerSettings requestedSettings,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Diagnostics must not apply processor settings.");
+        }
+
+        public Task<PowerOperationResult> ApplyProcessorSettingsAsync(
+            ProcessorPowerSettings requestedSettings,
+            PowerStateSnapshot expectedStateBefore,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Diagnostics must not apply processor settings.");
+        }
+
+        public Task<PowerOperationResult> RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
+        {
             throw new InvalidOperationException("Diagnostics must not restore processor settings.");
         }
     }

@@ -6,6 +6,6 @@ public sealed class UnavailableFanControlService : IFanControlService
     {
         return new FanControlStatus(
             IsAvailable: false,
-            DisplayText: "Fan Control: Not available");
+            DisplayText: "Fan Control: Planned for a future release");
     }
 }

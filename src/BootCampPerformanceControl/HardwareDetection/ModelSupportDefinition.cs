@@ -2,4 +2,5 @@ namespace BootCampPerformanceControl.HardwareDetection;
 
 public sealed record ModelSupportDefinition(
     string ModelIdentifier,
-    bool ProcessorPowerControlVerified);
+    ModelValidationLevel ValidationLevel,
+    string? Notes = null);

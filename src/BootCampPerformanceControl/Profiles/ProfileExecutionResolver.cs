@@ -5,7 +5,6 @@ namespace BootCampPerformanceControl.Profiles;
 
 public sealed class ProfileExecutionResolver
 {
-    private const string AppleIncManufacturer = "Apple Inc.";
     private static readonly ProcessorPowerSettings GamingOptimisedSettings = new(
         ProcessorMaximumAc: 95,
         ProcessorMaximumDc: 95,
@@ -44,56 +43,26 @@ public sealed class ProfileExecutionResolver
         PerformanceProfile profile,
         ModelVerificationResult verificationResult)
     {
-        if (profile.Scope != ProfileScope.VerifiedModelSpecific)
+        if (verificationResult.PlatformSupport != PlatformSupportStatus.SupportedIntelMac)
         {
             return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised requires verified model-specific profile metadata.");
-        }
-
-        if (!string.Equals(
-                profile.TargetModel,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return ProfileExecutionResolution.NotExecutable(
-                $"Gaming Optimised targets only {VerifiedHardwareModels.MacBookPro16_1}.");
+                verificationResult.PlatformSupport switch
+                {
+                    PlatformSupportStatus.UnsupportedNonApple =>
+                        "Gaming Optimised requires Apple hardware.",
+                    PlatformSupportStatus.UnsupportedNonIntel =>
+                        "Gaming Optimised requires an Intel processor on Apple hardware.",
+                    PlatformSupportStatus.DetectionIncomplete =>
+                        "Gaming Optimised requires complete hardware detection.",
+                    _ =>
+                        "Gaming Optimised requires a supported Intel Mac platform."
+                });
         }
 
         if (!profile.IsAvailableForDetectedModel)
         {
             return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised is not marked available for the detected verified model.");
-        }
-
-        if (!string.Equals(
-                verificationResult.Manufacturer,
-                AppleIncManufacturer,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised requires manufacturer Apple Inc.");
-        }
-
-        if (!verificationResult.IsApple)
-        {
-            return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised requires verified Apple hardware.");
-        }
-
-        if (!string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return ProfileExecutionResolution.NotExecutable(
-                $"Gaming Optimised requires model {VerifiedHardwareModels.MacBookPro16_1}.");
-        }
-
-        if (verificationResult.Status != HardwareVerificationStatus.Verified
-            || !verificationResult.IsVerified)
-        {
-            return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised requires hardware verification status Verified.");
+                "Gaming Optimised is not marked available for the detected platform.");
         }
 
         var settings = new ProcessorPowerSettings(
@@ -105,7 +74,7 @@ public sealed class ProfileExecutionResolver
         if (settings != GamingOptimisedSettings)
         {
             return ProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised metadata does not match the verified 95/95/0/0 power target.");
+                "Gaming Optimised metadata does not match the 95/95/0/0 power target.");
         }
 
         return ProfileExecutionResolution.Executable(settings);
@@ -116,8 +85,6 @@ public sealed class ProfileExecutionResolver
         return profile.PowerTarget.UnspecifiedValueSource switch
         {
             ProfileUnspecifiedValueSource.None => ValidateCompleteProcessorTarget(profile),
-            ProfileUnspecifiedValueSource.ConfigurablePlaceholder =>
-                "Profile execution is not available for configurable placeholder processor targets.",
             ProfileUnspecifiedValueSource.OriginalRestoreSnapshot =>
                 "Profile execution is not available for unresolved original restore snapshot values.",
             _ => "Profile execution is not available for an unsupported processor value source."

@@ -22,13 +22,18 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IDiagnosticReportService _diagnosticReportService;
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
     private readonly IApplicationLogger _logger;
+    private readonly IUserConfirmationService _userConfirmationService;
+    private readonly HashSet<string> _acknowledgedUntestedModels = new(StringComparer.OrdinalIgnoreCase);
+
     private ModelVerificationResult _lastVerificationResult = ModelVerificationResult.Unknown();
+    private bool _lastPowerStateReadSucceeded;
     private string _macModel = "Not detected";
     private string _cpu = "Not detected";
     private string _coreThreadCount = "Not detected";
     private string _gpu = "Not detected";
     private string _windowsVersion = "Not detected";
-    private string _verifiedModel = "No";
+    private string _platformSupport = "Not checked";
+    private string _modelValidation = "Not checked";
     private string _compatibilityDetails = "Not checked";
     private string _activePowerScheme = "Not read";
     private string _processorMaximumAc = "Not read";
@@ -51,8 +56,20 @@ public sealed class MainViewModel : ViewModelBase
         ProcessorProfileStateEvaluator processorProfileStateEvaluator,
         IDiagnosticReportService diagnosticReportService,
         IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
-        IApplicationLogger logger)
+        IApplicationLogger logger,
+        IUserConfirmationService? userConfirmationService = null)
     {
+        ArgumentNullException.ThrowIfNull(hardwareDetectionService);
+        ArgumentNullException.ThrowIfNull(powerManagementService);
+        ArgumentNullException.ThrowIfNull(fanControlService);
+        ArgumentNullException.ThrowIfNull(profileCatalog);
+        ArgumentNullException.ThrowIfNull(profileApplyService);
+        ArgumentNullException.ThrowIfNull(restoreSnapshotStore);
+        ArgumentNullException.ThrowIfNull(processorProfileStateEvaluator);
+        ArgumentNullException.ThrowIfNull(diagnosticReportService);
+        ArgumentNullException.ThrowIfNull(diagnosticReportFileSaveService);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _hardwareDetectionService = hardwareDetectionService;
         _powerManagementService = powerManagementService;
         _profileCatalog = profileCatalog;
@@ -62,7 +79,9 @@ public sealed class MainViewModel : ViewModelBase
         _diagnosticReportService = diagnosticReportService;
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
+        _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
         _fanControlStatus = fanControlService.GetStatus().DisplayText;
+
         RefreshRestoreSnapshotStatus();
         RefreshCommand = new AsyncCommand(
             RefreshAsync,
@@ -74,7 +93,7 @@ public sealed class MainViewModel : ViewModelBase
             canExecute: () => !IsBusy,
             onCanceled: OnExportDiagnosticReportCanceled,
             onException: OnExportDiagnosticReportException);
-        UpdateProfiles(_lastVerificationResult);
+        UpdateProfiles(_lastVerificationResult, isPowerStateReadable: false);
     }
 
     public ICommand RefreshCommand { get; }
@@ -84,8 +103,6 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<ProfileButtonViewModel> ProfileButtons { get; } = [];
 
     public string ApplicationVersion { get; } = ApplicationVersionProvider.GetInformationalVersion();
-
-    public string ReadOnlyMessage => "Only verified Gaming Optimised execution is enabled in this milestone.";
 
     public string MacModel
     {
@@ -117,10 +134,16 @@ public sealed class MainViewModel : ViewModelBase
         private set => SetProperty(ref _windowsVersion, value);
     }
 
-    public string VerifiedModel
+    public string PlatformSupport
     {
-        get => _verifiedModel;
-        private set => SetProperty(ref _verifiedModel, value);
+        get => _platformSupport;
+        private set => SetProperty(ref _platformSupport, value);
+    }
+
+    public string ModelValidation
+    {
+        get => _modelValidation;
+        private set => SetProperty(ref _modelValidation, value);
     }
 
     public string CompatibilityDetails
@@ -213,9 +236,8 @@ public sealed class MainViewModel : ViewModelBase
                 _lastVerificationResult = verificationResult;
                 ApplyHardware(hardwareSnapshot);
                 ApplyCompatibility(verificationResult);
-                UpdateProfiles(verificationResult);
                 _logger.Info(
-                    $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Verified: {verificationResult.IsVerified}.");
+                    $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Platform support: {verificationResult.PlatformSupport}. Validation level: {verificationResult.ValidationLevel}.");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -223,7 +245,6 @@ public sealed class MainViewModel : ViewModelBase
                 ApplyHardwareFailure();
                 ApplyCompatibility(verificationResult);
                 _lastVerificationResult = verificationResult;
-                UpdateProfiles(verificationResult);
                 _logger.Error("Hardware detection failed.", exception);
             }
 
@@ -231,6 +252,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 _logger.Info("Power-state read started.");
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                _lastPowerStateReadSucceeded = true;
                 ApplyPowerState(currentPowerState);
                 ApplyDetectedProfileState(currentPowerState, verificationResult);
                 RefreshRestoreSnapshotStatus();
@@ -239,9 +261,12 @@ public sealed class MainViewModel : ViewModelBase
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 errors++;
+                _lastPowerStateReadSucceeded = false;
                 ApplyPowerFailure();
                 _logger.Error("Power-state read failed.", exception);
             }
+
+            UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
 
             StatusMessage = errors == 0
                 ? "Refresh completed."
@@ -311,6 +336,23 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task ApplyProfileAsync(string profileId, CancellationToken cancellationToken)
     {
+        if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
+            && _lastVerificationResult.ValidationLevel == ModelValidationLevel.NotIndividuallyTested)
+        {
+            if (!_acknowledgedUntestedModels.Contains(_lastVerificationResult.Model))
+            {
+                var confirmed = _userConfirmationService.ConfirmUntestedModelApply(_lastVerificationResult.Model);
+                if (!confirmed)
+                {
+                    StatusMessage = "Profile application canceled.";
+                    _logger.Info($"Profile application canceled by user for untested model: {_lastVerificationResult.Model}.");
+                    return;
+                }
+
+                _acknowledgedUntestedModels.Add(_lastVerificationResult.Model);
+            }
+        }
+
         IsBusy = true;
         StatusMessage = $"Applying profile '{profileId}'...";
 
@@ -331,16 +373,17 @@ public sealed class MainViewModel : ViewModelBase
 
             _logger.Info($"Profile application succeeded: {profileId}. Re-reading power state.");
             _lastVerificationResult = result.ModelVerificationResult;
-            UpdateProfiles(_lastVerificationResult);
 
             var profileDisplayName = GetProfileDisplayName(profileId);
 
             try
             {
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                _lastPowerStateReadSucceeded = true;
                 ApplyPowerState(currentPowerState);
                 ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
                 RefreshRestoreSnapshotStatus();
+                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 StatusMessage = $"Profile '{profileId}' applied successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after profile application. Active scheme: {currentPowerState.SchemeId}.");
             }
@@ -353,8 +396,10 @@ public sealed class MainViewModel : ViewModelBase
             }
             catch (Exception exception)
             {
+                _lastPowerStateReadSucceeded = false;
                 ApplyDetectedProfileState(ProcessorProfileState.Unknown);
                 RefreshRestoreSnapshotStatus();
+                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 StatusMessage = $"Profile '{profileId}' was applied and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
                 _logger.Error(
                     $"Power-state UI refresh failed after successful profile application for '{profileId}'.",
@@ -381,7 +426,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 var failureMessage = result.FailureMessage ?? "Restore operation failed.";
                 StatusMessage = $"Restore failed: {failureMessage}";
-                UpdateProfiles(_lastVerificationResult);
+                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 _logger.Error(
                     $"Restore failed: {failureMessage}",
                     new InvalidOperationException(failureMessage));
@@ -389,14 +434,15 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             _logger.Info("Restore succeeded. Re-reading power state.");
-            UpdateProfiles(_lastVerificationResult);
 
             try
             {
                 var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                _lastPowerStateReadSucceeded = true;
                 ApplyPowerState(currentPowerState);
                 ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
                 RefreshRestoreSnapshotStatus();
+                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 StatusMessage = "Original power settings restored successfully. Power state refreshed.";
                 _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
             }
@@ -409,8 +455,10 @@ public sealed class MainViewModel : ViewModelBase
             }
             catch (Exception exception)
             {
+                _lastPowerStateReadSucceeded = false;
                 ApplyDetectedProfileState(ProcessorProfileState.Unknown);
                 RefreshRestoreSnapshotStatus();
+                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 StatusMessage = "Original power settings were restored and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
                 _logger.Error(
                     "Power-state UI refresh failed after successful restore.",
@@ -454,7 +502,7 @@ public sealed class MainViewModel : ViewModelBase
         OperationCanceledException exception)
     {
         ApplyDetectedProfileState(ProcessorProfileState.Unknown);
-        UpdateProfiles(_lastVerificationResult);
+        UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
         StatusMessage = statusMessage;
         _logger.Info($"{logMessage}: {exception.Message}");
     }
@@ -486,7 +534,8 @@ public sealed class MainViewModel : ViewModelBase
 
     private void ApplyCompatibility(ModelVerificationResult verificationResult)
     {
-        VerifiedModel = verificationResult.IsVerified ? "Yes" : "No";
+        PlatformSupport = PlatformSupportFormatter.FormatPlatformSupport(verificationResult.PlatformSupport);
+        ModelValidation = PlatformSupportFormatter.FormatModelValidation(verificationResult.ValidationLevel);
         CompatibilityDetails = verificationResult.Message;
     }
 
@@ -526,7 +575,7 @@ public sealed class MainViewModel : ViewModelBase
     private void RefreshProfileStateAfterUncertainApply()
     {
         ApplyDetectedProfileState(ProcessorProfileState.Unknown);
-        UpdateProfiles(_lastVerificationResult);
+        UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
     }
 
     private void ApplyHardwareFailure()
@@ -549,7 +598,9 @@ public sealed class MainViewModel : ViewModelBase
         RefreshRestoreSnapshotStatus();
     }
 
-    private void UpdateProfiles(ModelVerificationResult verificationResult)
+    private void UpdateProfiles(
+        ModelVerificationResult verificationResult,
+        bool isPowerStateReadable)
     {
         RefreshRestoreSnapshotStatus();
         ProfileButtons.Clear();
@@ -559,7 +610,8 @@ public sealed class MainViewModel : ViewModelBase
             ProfileButtons.Add(new ProfileButtonViewModel(
                 profile,
                 CreateProfileCommand(profile),
-                _restoreSnapshotStore.HasOriginalRestoreSnapshot));
+                _restoreSnapshotStore.HasOriginalRestoreSnapshot,
+                isPowerStateReadable));
         }
     }
 
