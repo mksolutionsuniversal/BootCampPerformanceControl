@@ -70,7 +70,7 @@ BootCampSmcEvtDeviceAdd(
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: device object created; no hardware resource has been accessed.\n"));
+        "BootCampSmc: device object created; no hardware register has been accessed.\n"));
 
     return STATUS_SUCCESS;
 }
@@ -87,6 +87,16 @@ BootCampSmcEvtDevicePrepareHardware(
     PAGED_CODE();
 
     context = BootCampSmcGetDeviceContext(Device);
+
+    if (context->MmioBase != NULL)
+    {
+        KdPrintEx((
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: refusing PrepareHardware because an MMIO mapping is already active.\n"));
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
     RtlZeroMemory(context, sizeof(*context));
 
     context->RawResourceCount = WdfCmResourceListGetCount(ResourcesRaw);
@@ -130,7 +140,7 @@ BootCampSmcEvtDevicePrepareHardware(
             KdPrintEx((
                 DPFLTR_IHVDRIVER_ID,
                 DPFLTR_INFO_LEVEL,
-                "BootCampSmc: translated PORT[%lu] start=0x%I64X length=0x%lX flags=0x%X.\n",
+                "BootCampSmc: translated PORT[%lu] start=0x%I64X length=0x%lX flags=0x%X (metadata only).\n",
                 index,
                 descriptor->u.Port.Start.QuadPart,
                 descriptor->u.Port.Length,
@@ -138,6 +148,8 @@ BootCampSmcEvtDevicePrepareHardware(
             break;
 
         case CmResourceTypeMemory:
+            ++context->MemoryResourceCount;
+
             if (!context->HasMemoryResource)
             {
                 context->HasMemoryResource = TRUE;
@@ -167,7 +179,7 @@ BootCampSmcEvtDevicePrepareHardware(
             KdPrintEx((
                 DPFLTR_IHVDRIVER_ID,
                 DPFLTR_INFO_LEVEL,
-                "BootCampSmc: translated INTERRUPT[%lu] level=%lu vector=%lu affinity=0x%I64X flags=0x%X.\n",
+                "BootCampSmc: translated INTERRUPT[%lu] level=%lu vector=%lu affinity=0x%I64X flags=0x%X (metadata only).\n",
                 index,
                 descriptor->u.Interrupt.Level,
                 descriptor->u.Interrupt.Vector,
@@ -187,10 +199,41 @@ BootCampSmcEvtDevicePrepareHardware(
         }
     }
 
+    if (context->MemoryResourceCount != 1 ||
+        !context->HasMemoryResource ||
+        context->MemoryLength == 0)
+    {
+        KdPrintEx((
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: expected exactly one non-empty translated MEMORY resource; count=%lu length=0x%lX.\n",
+            context->MemoryResourceCount,
+            context->MemoryLength));
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
+    }
+
+    context->MmioLength = (SIZE_T)context->MemoryLength;
+    context->MmioBase = MmMapIoSpaceEx(
+        context->MemoryStart,
+        context->MmioLength,
+        PAGE_READONLY | PAGE_NOCACHE);
+
+    if (context->MmioBase == NULL)
+    {
+        context->MmioLength = 0;
+
+        KdPrintEx((
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: read-only MMIO mapping failed.\n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: resource discovery complete. MMIO/port registers remain untouched.\n"));
+        "BootCampSmc: read-only non-cached MMIO mapping established for 0x%I64X bytes; no register was read or written.\n",
+        (ULONGLONG)context->MmioLength));
 
     return STATUS_SUCCESS;
 }
@@ -206,12 +249,18 @@ BootCampSmcEvtDeviceReleaseHardware(
     PAGED_CODE();
 
     context = BootCampSmcGetDeviceContext(Device);
+
+    if (context->MmioBase != NULL)
+    {
+        MmUnmapIoSpace(context->MmioBase, context->MmioLength);
+    }
+
     RtlZeroMemory(context, sizeof(*context));
 
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: hardware resources released; no MMIO mapping existed.\n"));
+        "BootCampSmc: hardware resources released and MMIO mapping removed; no register was read or written.\n"));
 
     return STATUS_SUCCESS;
 }
