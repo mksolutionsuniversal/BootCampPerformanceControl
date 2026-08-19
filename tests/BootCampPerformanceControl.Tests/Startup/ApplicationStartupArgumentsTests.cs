@@ -44,6 +44,17 @@ public sealed class ApplicationStartupArgumentsTests
         Assert.Equal(ApplicationStartupMode.Invalid, result);
     }
 
+    [Fact]
+    public void RequiresMainApplicationInstanceGuard_AppliesOnlyToNormalStartup()
+    {
+        Assert.True(ApplicationStartupArguments
+            .RequiresMainApplicationInstanceGuard(ApplicationStartupMode.Normal));
+        Assert.False(ApplicationStartupArguments
+            .RequiresMainApplicationInstanceGuard(ApplicationStartupMode.StartAppleSmcHelper));
+        Assert.False(ApplicationStartupArguments
+            .RequiresMainApplicationInstanceGuard(ApplicationStartupMode.Invalid));
+    }
+
     [Theory]
     [InlineData(AppleSmcBackendActivationOutcome.Running, 0)]
     [InlineData(AppleSmcBackendActivationOutcome.UnsupportedModel, 10)]
