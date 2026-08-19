@@ -4,19 +4,30 @@ param()
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$Version = "0.2.0"
-
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $ProjectFile = Join-Path $RepoRoot "src\BootCampPerformanceControl\BootCampPerformanceControl.csproj"
 $PublishProfile = Join-Path $RepoRoot "src\BootCampPerformanceControl\Properties\PublishProfiles\win-x64-release.pubxml"
 $ArtifactsDir = Join-Path $RepoRoot "artifacts"
-$OutputDir = Join-Path $ArtifactsDir "BootCampPerformanceControl-$Version-win-x64"
-$ZipPath = Join-Path $ArtifactsDir "BootCampPerformanceControl-$Version-win-x64.zip"
 
 if (-not (Test-Path -LiteralPath $ProjectFile)) {
     throw "Project file not found: $ProjectFile"
 }
+
+[xml]$ProjectXml = Get-Content -LiteralPath $ProjectFile -Raw
+$VersionNode = $ProjectXml.SelectSingleNode("/Project/PropertyGroup/Version")
+if ($null -eq $VersionNode) {
+    throw "Version property not found in project file: $ProjectFile"
+}
+
+$Version = [string]$VersionNode.InnerText
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw "Version property is empty in project file: $ProjectFile"
+}
+
+$Version = $Version.Trim()
+$OutputDir = Join-Path $ArtifactsDir "BootCampPerformanceControl-$Version-win-x64"
+$ZipPath = Join-Path $ArtifactsDir "BootCampPerformanceControl-$Version-win-x64.zip"
 
 if (-not (Test-Path -LiteralPath $PublishProfile)) {
     throw "Publish profile not found: $PublishProfile"
@@ -26,10 +37,11 @@ Write-Host "=== BootCamp Performance Control $Version Release Publish (win-x64) 
 Write-Host "Repository root: $RepoRoot"
 Write-Host "Project file:    $ProjectFile"
 Write-Host "Publish profile: $PublishProfile"
+Write-Host "Version:         $Version"
 Write-Host "Output path:     $OutputDir"
 Write-Host "ZIP path:        $ZipPath"
 
-# Clean only the dedicated 0.2.0 publish directory and ZIP if they already exist
+# Clean only the dedicated versioned publish directory and ZIP if they already exist
 if (Test-Path -LiteralPath $OutputDir) {
     Write-Host "Cleaning output directory: $OutputDir"
     Remove-Item -LiteralPath $OutputDir -Recurse -Force

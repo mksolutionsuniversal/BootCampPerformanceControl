@@ -6,6 +6,7 @@ BootCamp Performance Control is an open-source Windows utility for Intel Macs ru
 
 - **Current release:** `0.2.0`
 - **Previous release:** `0.1.0-alpha.1`
+- **Development candidate:** current `main` is being validated as `0.3.0-rc.1`; this is not a published stable release.
 
 ## Compatibility model
 
@@ -86,7 +87,7 @@ Or publish directly using the `win-x64-release` profile:
 ```powershell
 dotnet publish src/BootCampPerformanceControl/BootCampPerformanceControl.csproj `
   /p:PublishProfile=win-x64-release `
-  -o artifacts/BootCampPerformanceControl-0.2.0-win-x64
+  -o artifacts/BootCampPerformanceControl-win-x64
 ```
 
 ## Test
