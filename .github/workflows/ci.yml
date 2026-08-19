@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Enforce BootCampSmc Gate 5A/5B GET_KEY_INFO FNum safety boundary
+      - name: Enforce BootCampSmc Gate 5C READ_KEY FNum safety boundary
         shell: pwsh
         run: |
           $driverRoot = '.\drivers\BootCampSmc'
@@ -178,21 +178,31 @@ jobs:
             '\bMmMapIoSpace\s*\(',
             'PAGE_EXECUTE',
             'PAGE_READONLY',
-            '\bBOOTCAMP_SMC_COMMAND_READ_KEY\b',
             '\bBOOTCAMP_SMC_COMMAND_WRITE_KEY\b',
             '\bBOOTCAMP_SMC_COMMAND_GET_KEY_BY_INDEX\b',
-            '\bREAD_KEY\b',
+            '\bBOOTCAMP_SMC_COMMAND_GET_KEY_INFO\b',
             '\bWRITE_KEY\b',
             '\bGET_KEY_BY_INDEX\b',
-            '\b0x10u?\b',
+            '\bGET_KEY_INFO\b',
             '\b0x11u?\b',
             '\b0x12u?\b',
+            '\b0x13u?\b',
             '\bWRITE_REGISTER_BUFFER_',
             '\bREAD_REGISTER_BUFFER_',
             'READ_PORT_',
             'WRITE_PORT_',
             '__inbyte',
             '__outbyte',
+            '__readmsr',
+            '__writemsr',
+            '\bReadMsr\b',
+            '\bWriteMsr\b',
+            '\bMmMapIoSpaceEx\s*\([^;]*context->MemoryLength',
+            '\bMmGetPhysicalAddress\b',
+            '\bMmMapLockedPagesSpecifyCache\b',
+            '\bMmAllocateContiguousMemory',
+            '\bZwMapViewOfSection\b',
+            '\bMmCopyMemory\b',
             'MmCopyMemory',
             'RtlCopyMemory',
             '\bmemcpy\b',
@@ -200,15 +210,35 @@ jobs:
             'WdfInterruptCreate',
             'WdfIoQueueCreate',
             'WdfDeviceCreateDeviceInterface',
+            'WdfDeviceCreateSymbolicLink',
             'CTL_CODE',
-            'IOCTL_'
+            'IOCTL_',
+            'IRP_MJ_DEVICE_CONTROL',
+            'F0Md',
+            'F1Md',
+            'F0Tg',
+            'F1Tg',
+            'F0Ac',
+            'F1Ac',
+            'F0Mx',
+            'F1Mx',
+            'FS!',
+            '0x644D3046u?',
+            '0x644D3146u?',
+            '0x67543046u?',
+            '0x67543146u?',
+            '0x63413046u?',
+            '0x63413146u?',
+            '0x784D3046u?',
+            '0x784D3146u?',
+            '0x20215346u?'
           )
 
           $forbiddenMatches = @($files | Select-String -Pattern $forbiddenPatterns)
 
           if ($forbiddenMatches.Count -ne 0) {
             Fail-WithMatches `
-              'BootCampSmc Gate 5A/5B violation: forbidden command, buffer register access, port access, executable mapping, interrupt/queue/device-interface, memory-copy, or device-control surface was introduced.' `
+              'BootCampSmc Gate 5C violation: forbidden command, fan key, buffer register access, port/MSR access, executable mapping, arbitrary physical-memory helper, memory-copy, or device-control surface was introduced.' `
               $forbiddenMatches
           }
 
@@ -224,6 +254,10 @@ jobs:
             @{
               Label = 'unbounded do/while(TRUE) polling loop'
               Pattern = '(?s)\bdo\s*\{.*?\}\s*while\s*\(\s*(?:TRUE|true|1)\s*\)\s*;'
+            },
+            @{
+              Label = 'goto retry transaction path'
+              Pattern = '(?i)\bgoto\s+[A-Za-z_]*retry[A-Za-z0-9_]*\s*;'
             }
           )
 
@@ -232,7 +266,7 @@ jobs:
               $matches = @([regex]::Matches($entry.Value, $forbiddenSourcePattern.Pattern))
 
               if ($matches.Count -ne 0) {
-                Write-Error "Gate 5A/5B violation: forbidden $($forbiddenSourcePattern.Label) found in $($entry.Key)."
+                Write-Error "Gate 5C violation: forbidden $($forbiddenSourcePattern.Label) found in $($entry.Key)."
                 $matches | ForEach-Object {
                   Write-Host $_.Value.Trim()
                 }
@@ -242,38 +276,36 @@ jobs:
           }
 
           $genericSurfacePatterns = @(
-            '\bBOOTCAMP_SMC_COMMAND_(?!GET_KEY_INFO\b)[A-Z0-9_]+',
+            '\bBOOTCAMP_SMC_COMMAND_(?!READ_KEY\b)[A-Z0-9_]+',
             '\bBOOTCAMP_SMC_KEY_(?!FNUM\b)[A-Z0-9_]+',
             '\bBootCampSmc(?:Read|Write|Get)Key\b',
             '\bBootCampSmc(?:Read|Write|Get)Smc\b',
             '\bBootCampSmcIssueCommand\b',
-            '\bBootCampSmc.*Arbitrary'
+            '\bBootCampSmc.*Arbitrary',
+            '\bBootCampSmcGate5GetFNumKeyInfo\b',
+            '\bBootCampSmcGate5CReadFNum\s*\([^)]*,'
           )
 
           $genericSurfaceMatches = @($files | Select-String -Pattern $genericSurfacePatterns)
 
           if ($genericSurfaceMatches.Count -ne 0) {
             Fail-WithMatches `
-              'BootCampSmc Gate 5A/5B violation: generic arbitrary SMC key/command surface was introduced.' `
+              'BootCampSmc Gate 5C violation: generic arbitrary SMC key/command surface was introduced.' `
               $genericSurfaceMatches
           }
 
           $requiredDefinitions = @(
             @{
-              Label = 'response type offset 0x0000'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET\s+\(\(SIZE_T\)0x0000u\)\s*$'
-            },
-            @{
-              Label = 'response length offset 0x0005'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET\s+\(\(SIZE_T\)0x0005u\)\s*$'
-            },
-            @{
-              Label = 'response attributes offset 0x0006'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET\s+\(\(SIZE_T\)0x0006u\)\s*$'
+              Label = 'response byte offset 0x0000'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET\s+\(\(SIZE_T\)0x0000u\)\s*$'
             },
             @{
               Label = 'key/name offset 0x0078'
               Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_KEY_NAME_OFFSET\s+\(\(SIZE_T\)0x0078u\)\s*$'
+            },
+            @{
+              Label = 'request length offset 0x007D'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET\s+\(\(SIZE_T\)0x007Du\)\s*$'
             },
             @{
               Label = 'SMC ID offset 0x007E'
@@ -292,28 +324,32 @@ jobs:
               Pattern = '^\s*#define\s+BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH\s+\(\(SIZE_T\)0x4006u\)\s*$'
             },
             @{
-              Label = 'GET_KEY_INFO command 0x13'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_COMMAND_GET_KEY_INFO\s+\(\(UCHAR\)0x13u\)\s*$'
+              Label = 'READ_KEY command 0x10'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_COMMAND_READ_KEY\s+\(\(UCHAR\)0x10u\)\s*$'
             },
             @{
               Label = 'FNum key 0x6D754E46'
               Pattern = '^\s*#define\s+BOOTCAMP_SMC_KEY_FNUM\s+\(\(ULONG\)0x6D754E46u\)\s*$'
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) completion mask 0x20'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK\s+\(\(UCHAR\)0x20u\)\s*$'
+              Label = 'READ_KEY(FNum) completion mask 0x20'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK\s+\(\(UCHAR\)0x20u\)\s*$'
             },
             @{
-              Label = 'bounded GET_KEY_INFO(FNum) maximum poll count'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT\s+\(\(ULONG\)25u\)\s*$'
+              Label = 'bounded READ_KEY(FNum) maximum poll count'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT\s+\(\(ULONG\)25u\)\s*$'
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) poll interval 10 ms relative delay'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS\s+\(\(LONGLONG\)-100000LL\)\s*$'
+              Label = 'READ_KEY(FNum) poll interval 10 ms relative delay'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS\s+\(\(LONGLONG\)-100000LL\)\s*$'
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) successful command/result 0x00'
-              Pattern = '^\s*#define\s+BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS\s+\(\(UCHAR\)0x00u\)\s*$'
+              Label = 'READ_KEY(FNum) successful command/result 0x00'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS\s+\(\(UCHAR\)0x00u\)\s*$'
+            },
+            @{
+              Label = 'READ_KEY(FNum) request length 1'
+              Pattern = '^\s*#define\s+BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH\s+\(\(UCHAR\)0x01u\)\s*$'
             }
           )
 
@@ -321,34 +357,39 @@ jobs:
             $definitionMatches = @($sourceLines | Select-String -Pattern $definition.Pattern)
 
             if ($definitionMatches.Count -ne 1) {
-              Fail "Gate 5A/5B requires exactly one fixed definition for $($definition.Label); found $($definitionMatches.Count)."
+              Fail "Gate 5C requires exactly one fixed definition for $($definition.Label); found $($definitionMatches.Count)."
             }
           }
 
           $requiredTokenUses = @(
             @{
-              Label = 'GET_KEY_INFO(FNum) completion mask'
-              Token = 'BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK'
+              Label = 'READ_KEY(FNum) completion mask'
+              Token = 'BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK'
               MinimumCount = 3
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) maximum poll count'
-              Token = 'BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT'
+              Label = 'READ_KEY(FNum) maximum poll count'
+              Token = 'BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT'
               MinimumCount = 2
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) poll interval'
-              Token = 'BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS'
+              Label = 'READ_KEY(FNum) poll interval'
+              Token = 'BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS'
               MinimumCount = 2
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) timeout path'
+              Label = 'READ_KEY(FNum) timeout path'
               Token = 'STATUS_IO_TIMEOUT'
               MinimumCount = 1
             },
             @{
-              Label = 'GET_KEY_INFO(FNum) successful command/result'
-              Token = 'BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS'
+              Label = 'READ_KEY(FNum) successful command/result'
+              Token = 'BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS'
+              MinimumCount = 2
+            },
+            @{
+              Label = 'READ_KEY(FNum) request length'
+              Token = 'BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH'
               MinimumCount = 2
             }
           )
@@ -357,22 +398,22 @@ jobs:
             $tokenMatches = @($sourceLines | Select-String -SimpleMatch $tokenUse.Token)
 
             if ($tokenMatches.Count -lt $tokenUse.MinimumCount) {
-              Fail "Gate 5A/5B requires $($tokenUse.Label) token '$($tokenUse.Token)' at least $($tokenUse.MinimumCount) time(s); found $($tokenMatches.Count)."
+              Fail "Gate 5C requires $($tokenUse.Label) token '$($tokenUse.Token)' at least $($tokenUse.MinimumCount) time(s); found $($tokenMatches.Count)."
             }
           }
 
           $commandDefinitions = @($sourceLines | Select-String -Pattern '^\s*#define\s+BOOTCAMP_SMC_COMMAND_')
           $keyDefinitions = @($sourceLines | Select-String -Pattern '^\s*#define\s+BOOTCAMP_SMC_KEY_')
 
-          if ($commandDefinitions.Count -ne 1 -or $commandDefinitions[0].Line -notmatch 'BOOTCAMP_SMC_COMMAND_GET_KEY_INFO') {
+          if ($commandDefinitions.Count -ne 1 -or $commandDefinitions[0].Line -notmatch 'BOOTCAMP_SMC_COMMAND_READ_KEY') {
             Fail-WithMatches `
-              "Gate 5A/5B permits only the fixed GET_KEY_INFO command definition; found $($commandDefinitions.Count)." `
+              "Gate 5C permits only the fixed READ_KEY command definition; found $($commandDefinitions.Count)." `
               $commandDefinitions
           }
 
           if ($keyDefinitions.Count -ne 1 -or $keyDefinitions[0].Line -notmatch 'BOOTCAMP_SMC_KEY_FNUM') {
             Fail-WithMatches `
-              "Gate 5A/5B permits only the fixed FNum key definition; found $($keyDefinitions.Count)." `
+              "Gate 5C permits only the fixed FNum key definition; found $($keyDefinitions.Count)." `
               $keyDefinitions
           }
 
@@ -380,7 +421,7 @@ jobs:
           $boundedLengthChecks = @([regex]::Matches($source, $boundedLengthCheckPattern))
 
           if ($boundedLengthChecks.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one explicit translated-memory length check against BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH; found $($boundedLengthChecks.Count)."
+            Fail "Gate 5C requires exactly one explicit translated-memory length check against BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH; found $($boundedLengthChecks.Count)."
           }
 
           $mapCallBlocks = Get-SourceCallBlocks 'MmMapIoSpaceEx'
@@ -394,31 +435,31 @@ jobs:
           $delayCallBlocks = Get-SourceCallBlocks 'KeDelayExecutionThread'
 
           if ($mapCallBlocks.Count -ne 1) {
-            Write-Error "Gate 5A/5B requires exactly one MmMapIoSpaceEx call site across drivers/BootCampSmc C/H files; found $($mapCallBlocks.Count)."
+            Write-Error "Gate 5C requires exactly one MmMapIoSpaceEx call site across drivers/BootCampSmc C/H files; found $($mapCallBlocks.Count)."
             Show-CallBlocks $mapCallBlocks
             exit 1
           }
 
           if ($unmapCallBlocks.Count -ne 1) {
-            Write-Error "Gate 5A/5B requires exactly one MmUnmapIoSpace call site across drivers/BootCampSmc C/H files; found $($unmapCallBlocks.Count)."
+            Write-Error "Gate 5C requires exactly one MmUnmapIoSpace call site across drivers/BootCampSmc C/H files; found $($unmapCallBlocks.Count)."
             Show-CallBlocks $unmapCallBlocks
             exit 1
           }
 
           if ($mapCallBlocks[0].Path -ne $driverSourceFullPath) {
-            Write-Error 'Gate 5A/5B requires the single MmMapIoSpaceEx call site to reside in BootCampSmc.c.'
+            Write-Error 'Gate 5C requires the single MmMapIoSpaceEx call site to reside in BootCampSmc.c.'
             Show-CallBlocks $mapCallBlocks
             exit 1
           }
 
           if ($mapCallBlocks[0].Value -notmatch '(?s)^MmMapIoSpaceEx\s*\(\s*context->MemoryStart\s*,\s*BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH\s*,\s*PAGE_READWRITE\s*\|\s*PAGE_NOCACHE\s*\)\s*;$') {
-            Write-Error 'Gate 5A/5B requires the actual MmMapIoSpaceEx call to map exactly BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH with PAGE_READWRITE | PAGE_NOCACHE.'
+            Write-Error 'Gate 5C requires the actual MmMapIoSpaceEx call to map exactly BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH with PAGE_READWRITE | PAGE_NOCACHE.'
             Show-CallBlocks $mapCallBlocks
             exit 1
           }
 
           if ($unmapCallBlocks[0].Value -notmatch '(?s)^MmUnmapIoSpace\s*\(\s*context->MmioBase\s*,\s*context->MmioLength\s*\)\s*;$') {
-            Write-Error 'Gate 5A/5B requires MmUnmapIoSpace to use context->MmioBase and context->MmioLength.'
+            Write-Error 'Gate 5C requires MmUnmapIoSpace to use context->MmioBase and context->MmioLength.'
             Show-CallBlocks $unmapCallBlocks
             exit 1
           }
@@ -436,11 +477,11 @@ jobs:
             })
 
           if ($mmioLengthAssignmentMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one context->MmioLength assignment to BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH; found $($mmioLengthAssignmentMatches.Count)."
+            Fail "Gate 5C requires exactly one context->MmioLength assignment to BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH; found $($mmioLengthAssignmentMatches.Count)."
           }
 
           if ($unexpectedMmioLengthAssignments.Count -ne 0) {
-            Fail 'Gate 5A/5B permits context->MmioLength assignments only to BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH or zero.'
+            Fail 'Gate 5C permits context->MmioLength assignments only to BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH or zero.'
           }
 
           $boundedLengthCheckIndex = $boundedLengthChecks[0].Index
@@ -454,7 +495,7 @@ jobs:
               $mmioLengthAssignmentMatches[0].Index -gt $mapCallBlocks[0].Index -or
               $lastPreMapMmioLengthAssignment.Count -ne 1 -or
               $lastPreMapMmioLengthAssignment[0].Index -ne $mmioLengthAssignmentMatches[0].Index) {
-            Fail 'Gate 5A/5B requires the resource-length check, fixed context->MmioLength assignment, and MmMapIoSpaceEx call in that order.'
+            Fail 'Gate 5C requires the resource-length check, fixed context->MmioLength assignment, and MmMapIoSpaceEx call in that order.'
           }
 
           $hardwareAccessBlocks = @($mapCallBlocks) + @($allRegisterWriteCallBlocks) + @($allRegisterReadCallBlocks)
@@ -463,7 +504,7 @@ jobs:
             ForEach-Object { $_.Index })
 
           if ($hardwareAccessIndexes.Count -ne 0 -and $boundedLengthCheckIndex -gt ($hardwareAccessIndexes | Measure-Object -Minimum).Minimum) {
-            Fail 'Gate 5A/5B requires the explicit MMIO length check to appear before MmMapIoSpaceEx and hardware register access.'
+            Fail 'Gate 5C requires the explicit MMIO length check to appear before MmMapIoSpaceEx and hardware register access.'
           }
 
           $allRegisterCallBlocks = @($allRegisterWriteCallBlocks) + @($allRegisterReadCallBlocks)
@@ -471,39 +512,47 @@ jobs:
             Where-Object { $_.Path -ne $driverSourceFullPath })
 
           if ($registerCallsOutsideDriverSource.Count -ne 0) {
-            Write-Error 'Gate 5A/5B requires all READ_REGISTER_* and WRITE_REGISTER_* call sites to reside in BootCampSmc.c.'
+            Write-Error 'Gate 5C requires all READ_REGISTER_* and WRITE_REGISTER_* call sites to reside in BootCampSmc.c.'
             Show-CallBlocks $registerCallsOutsideDriverSource
             exit 1
           }
 
-          if ($allRegisterWriteCallBlocks.Count -ne 4 -or $ulongRegisterWrites.Count -ne 1 -or $ucharRegisterWrites.Count -ne 3) {
-            Write-Error "Gate 5A/5B requires exactly one WRITE_REGISTER_ULONG and three WRITE_REGISTER_UCHAR call sites, with no other WRITE_REGISTER_* variants; all=$($allRegisterWriteCallBlocks.Count) ulong=$($ulongRegisterWrites.Count) uchar=$($ucharRegisterWrites.Count)."
+          if ($allRegisterWriteCallBlocks.Count -ne 5 -or $ulongRegisterWrites.Count -ne 1 -or $ucharRegisterWrites.Count -ne 4) {
+            Write-Error "Gate 5C requires exactly one WRITE_REGISTER_ULONG and four WRITE_REGISTER_UCHAR call sites, with no other WRITE_REGISTER_* variants; all=$($allRegisterWriteCallBlocks.Count) ulong=$($ulongRegisterWrites.Count) uchar=$($ucharRegisterWrites.Count)."
             Show-CallBlocks $allRegisterWriteCallBlocks
             exit 1
           }
 
-          if ($allRegisterReadCallBlocks.Count -ne 6 -or $ulongRegisterReads.Count -ne 1 -or $ucharRegisterReads.Count -ne 5) {
-            Write-Error "Gate 5A/5B requires exactly one READ_REGISTER_ULONG and five READ_REGISTER_UCHAR call sites, with no other READ_REGISTER_* variants; all=$($allRegisterReadCallBlocks.Count) ulong=$($ulongRegisterReads.Count) uchar=$($ucharRegisterReads.Count)."
+          if ($allRegisterReadCallBlocks.Count -ne 4 -or $ulongRegisterReads.Count -ne 0 -or $ucharRegisterReads.Count -ne 4) {
+            Write-Error "Gate 5C requires zero READ_REGISTER_ULONG and four READ_REGISTER_UCHAR call sites, with no other READ_REGISTER_* variants; all=$($allRegisterReadCallBlocks.Count) ulong=$($ulongRegisterReads.Count) uchar=$($ucharRegisterReads.Count)."
             Show-CallBlocks $allRegisterReadCallBlocks
             exit 1
           }
 
           if ($delayCallBlocks.Count -ne 1) {
-            Write-Error "Gate 5A/5B requires exactly one KeDelayExecutionThread call site; found $($delayCallBlocks.Count)."
+            Write-Error "Gate 5C requires exactly one KeDelayExecutionThread call site; found $($delayCallBlocks.Count)."
             Show-CallBlocks $delayCallBlocks
             exit 1
           }
 
           if ($delayCallBlocks[0].Path -ne $driverSourceFullPath) {
-            Write-Error 'Gate 5A/5B requires the KeDelayExecutionThread call site to reside in BootCampSmc.c.'
+            Write-Error 'Gate 5C requires the KeDelayExecutionThread call site to reside in BootCampSmc.c.'
             Show-CallBlocks $delayCallBlocks
             exit 1
           }
 
           if ($delayCallBlocks[0].Value -notmatch '(?s)^\s*KeDelayExecutionThread\s*\(\s*KernelMode\s*,\s*FALSE\s*,\s*&pollInterval\s*\)\s*;$') {
-            Write-Error 'Gate 5A/5B requires KeDelayExecutionThread(KernelMode, FALSE, &pollInterval) for the fixed polling delay.'
+            Write-Error 'Gate 5C requires KeDelayExecutionThread(KernelMode, FALSE, &pollInterval) for the fixed polling delay.'
             Show-CallBlocks $delayCallBlocks
             exit 1
+          }
+
+          $transactionCallMatches = @([regex]::Matches(
+            $source,
+            '(?m)^\s*status\s*=\s*BootCampSmcGate5CReadFNum\s*\(\s*context\s*\)\s*;\s*$'))
+
+          if ($transactionCallMatches.Count -ne 1) {
+            Fail "Gate 5C requires exactly one PrepareHardware call to BootCampSmcGate5CReadFNum(context); found $($transactionCallMatches.Count)."
           }
 
           function Get-RegisterCallBlocks($FunctionName) {
@@ -577,7 +626,7 @@ jobs:
             $targetedCallBlocks = @(Get-CallsTargetingOffset $CallBlocks $OffsetName)
 
             if ($targetedCallBlocks.Count -ne $Expected) {
-              Write-Error "Gate 5A/5B requires $Expected $Label call site(s); found $($targetedCallBlocks.Count)."
+              Write-Error "Gate 5C requires $Expected $Label call site(s); found $($targetedCallBlocks.Count)."
               Show-CallBlocks $CallBlocks
               exit 1
             }
@@ -588,7 +637,7 @@ jobs:
             $matchingCallBlocks = @($targetedCallBlocks | Where-Object { $_.Value -match $ValuePattern })
 
             if ($matchingCallBlocks.Count -ne $Expected) {
-              Write-Error "Gate 5A/5B requires $Expected $Label call site(s); found $($matchingCallBlocks.Count)."
+              Write-Error "Gate 5C requires $Expected $Label call site(s); found $($matchingCallBlocks.Count)."
               Show-CallBlocks $CallBlocks
               exit 1
             }
@@ -606,7 +655,7 @@ jobs:
             })
 
             if ($matchingContainers.Count -ne 1) {
-              Fail "Gate 5A/5B requires exactly one $Label containing the intended call site; found $($matchingContainers.Count)."
+              Fail "Gate 5C requires exactly one $Label containing the intended call site; found $($matchingContainers.Count)."
             }
 
             return $matchingContainers[0]
@@ -618,7 +667,7 @@ jobs:
               $next = $OrderedBlocks[$index + 1]
 
               if ($current.Block.Index -ge $next.Block.Index) {
-                Fail "Gate 5A/5B requires '$($current.Label)' before '$($next.Label)'."
+                Fail "Gate 5C requires '$($current.Label)' before '$($next.Label)'."
               }
             }
           }
@@ -644,6 +693,13 @@ jobs:
             1
 
           Assert-CallTargetAndValueCount `
+            'WRITE_REGISTER_UCHAR request length 1 at offset 0x007D' `
+            $writeUcharCallBlocks `
+            'BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET' `
+            'BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH' `
+            1
+
+          Assert-CallTargetAndValueCount `
             'WRITE_REGISTER_UCHAR SMC ID 0 at offset 0x007E' `
             $writeUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET' `
@@ -651,16 +707,10 @@ jobs:
             1
 
           Assert-CallTargetAndValueCount `
-            'WRITE_REGISTER_UCHAR GET_KEY_INFO command at command/result offset 0x007F' `
+            'WRITE_REGISTER_UCHAR READ_KEY command at command/result offset 0x007F' `
             $writeUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET' `
-            'BOOTCAMP_SMC_COMMAND_GET_KEY_INFO' `
-            1
-
-          Assert-CallTargetCount `
-            'READ_REGISTER_ULONG response type read at offset 0x0000' `
-            $readUlongCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET' `
+            'BOOTCAMP_SMC_COMMAND_READ_KEY' `
             1
 
           Assert-CallTargetCount `
@@ -670,21 +720,15 @@ jobs:
             2
 
           Assert-CallTargetCount `
-            'READ_REGISTER_UCHAR response length read at offset 0x0005' `
-            $readUcharCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET' `
-            1
-
-          Assert-CallTargetCount `
-            'READ_REGISTER_UCHAR response attributes read at offset 0x0006' `
-            $readUcharCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET' `
-            1
-
-          Assert-CallTargetCount `
             'READ_REGISTER_UCHAR command/result read at offset 0x007F' `
             $readUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET' `
+            1
+
+          Assert-CallTargetCount `
+            'READ_REGISTER_UCHAR response byte read at offset 0x0000' `
+            $readUcharCallBlocks `
+            'BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET' `
             1
 
           $keyWriteBlocks = @(Get-CallsTargetingOffsetAndValue `
@@ -697,6 +741,11 @@ jobs:
             'BOOTCAMP_SMC_MMIO_STATUS_OFFSET' `
             $zeroUcharValuePattern |
             Sort-Object -Property Index)
+          $requestLengthWriteBlocks = @(Get-CallsTargetingOffsetAndValue `
+            $writeUcharCallBlocks `
+            'BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET' `
+            'BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH' |
+            Sort-Object -Property Index)
           $smcIdWriteBlocks = @(Get-CallsTargetingOffsetAndValue `
             $writeUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET' `
@@ -705,7 +754,7 @@ jobs:
           $commandWriteBlocks = @(Get-CallsTargetingOffsetAndValue `
             $writeUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET' `
-            'BOOTCAMP_SMC_COMMAND_GET_KEY_INFO' |
+            'BOOTCAMP_SMC_COMMAND_READ_KEY' |
             Sort-Object -Property Index)
           $statusReadBlocks = @(Get-CallsTargetingOffset `
             $readUcharCallBlocks `
@@ -715,17 +764,9 @@ jobs:
             $readUcharCallBlocks `
             'BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET' |
             Sort-Object -Property Index)
-          $responseTypeReadBlocks = @(Get-CallsTargetingOffset `
-            $readUlongCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET' |
-            Sort-Object -Property Index)
-          $responseLengthReadBlocks = @(Get-CallsTargetingOffset `
+          $responseByteReadBlocks = @(Get-CallsTargetingOffset `
             $readUcharCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET' |
-            Sort-Object -Property Index)
-          $responseAttributesReadBlocks = @(Get-CallsTargetingOffset `
-            $readUcharCallBlocks `
-            'BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET' |
+            'BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET' |
             Sort-Object -Property Index)
 
           Assert-StrictSourceOrder @(
@@ -742,11 +783,15 @@ jobs:
               Block = $keyWriteBlocks[0]
             },
             [pscustomobject]@{
+              Label = 'WRITE_REGISTER_UCHAR request length 1 at BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET'
+              Block = $requestLengthWriteBlocks[0]
+            },
+            [pscustomobject]@{
               Label = 'WRITE_REGISTER_UCHAR zero at BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET'
               Block = $smcIdWriteBlocks[0]
             },
             [pscustomobject]@{
-              Label = 'WRITE_REGISTER_UCHAR GET_KEY_INFO at BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET'
+              Label = 'WRITE_REGISTER_UCHAR READ_KEY at BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET'
               Block = $commandWriteBlocks[0]
             },
             [pscustomobject]@{
@@ -758,16 +803,8 @@ jobs:
               Block = $resultReadBlocks[0]
             },
             [pscustomobject]@{
-              Label = 'READ_REGISTER_ULONG response type at BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET'
-              Block = $responseTypeReadBlocks[0]
-            },
-            [pscustomobject]@{
-              Label = 'READ_REGISTER_UCHAR response length at BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET'
-              Block = $responseLengthReadBlocks[0]
-            },
-            [pscustomobject]@{
-              Label = 'READ_REGISTER_UCHAR response attributes at BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET'
-              Block = $responseAttributesReadBlocks[0]
+              Label = 'READ_REGISTER_UCHAR response byte at BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET'
+              Block = $responseByteReadBlocks[0]
             }
           )
 
@@ -787,15 +824,15 @@ jobs:
             $statusClearWriteBlocks[0]
 
           if ($conditionalStaleStatusClear.Index -le $initialStatusAssignment.Index) {
-            Fail 'Gate 5A/5B requires the stale-status clear conditional to appear after the initial status read.'
+            Fail 'Gate 5C requires the stale-status clear conditional to appear after the initial status read.'
           }
 
           $boundedPollLoopMatches = @([regex]::Matches(
             $source,
-            '(?s)\bfor\s*\(\s*(?:ULONG\s+)?pollIndex\s*=\s*(?:0|0u|\(\s*ULONG\s*\)\s*0u?)\s*;\s*pollIndex\s*<\s*BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT\s*;\s*(?:\+\+pollIndex|pollIndex\+\+|pollIndex\s*\+=\s*(?:1|1u)|pollIndex\s*=\s*pollIndex\s*\+\s*(?:1|1u))\s*\)'))
+            '(?s)\bfor\s*\(\s*(?:ULONG\s+)?pollIndex\s*=\s*(?:0|0u|\(\s*ULONG\s*\)\s*0u?)\s*;\s*pollIndex\s*<\s*BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT\s*;\s*(?:\+\+pollIndex|pollIndex\+\+|pollIndex\s*\+=\s*(?:1|1u)|pollIndex\s*=\s*pollIndex\s*\+\s*(?:1|1u))\s*\)'))
 
           if ($boundedPollLoopMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one bounded pollIndex loop using BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT and advancing pollIndex; found $($boundedPollLoopMatches.Count)."
+            Fail "Gate 5C requires exactly one bounded pollIndex loop using BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT and advancing pollIndex; found $($boundedPollLoopMatches.Count)."
           }
 
           $pollLoopBodySearchIndex = $boundedPollLoopMatches[0].Index + $boundedPollLoopMatches[0].Length
@@ -804,7 +841,7 @@ jobs:
             '^\s*\{')
 
           if (-not $pollLoopOpenBraceMatch.Success) {
-            Fail 'Gate 5A/5B requires the bounded pollIndex loop to use an explicit braced body.'
+            Fail 'Gate 5C requires the bounded pollIndex loop to use an explicit braced body.'
           }
 
           $pollLoopOpenBraceIndex = $pollLoopBodySearchIndex +
@@ -813,7 +850,7 @@ jobs:
           $boundedPollLoopEndIndex = Get-CBlockEndIndex $source $pollLoopOpenBraceIndex
 
           if ($boundedPollLoopEndIndex -lt 0) {
-            Fail 'Gate 5A/5B could not resolve the end of the bounded pollIndex loop body.'
+            Fail 'Gate 5C could not resolve the end of the bounded pollIndex loop body.'
           }
 
           $pollingStatusAssignmentMatches = @([regex]::Matches(
@@ -825,14 +862,14 @@ jobs:
             $statusReadBlocks[1]
           $completionMaskMatches = @([regex]::Matches(
             $source,
-            '(?s)\bif\s*\(\s*(?:\(\s*)*status\s*&\s*BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK\s*(?:\)\s*)*(?:!=\s*(?:0|0u|\(\s*UCHAR\s*\)\s*0u?))?\s*\)\s*\{\s*break\s*;\s*\}') |
+            '(?s)\bif\s*\(\s*(?:\(\s*)*status\s*&\s*BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK\s*(?:\)\s*)*(?:!=\s*(?:0|0u|\(\s*UCHAR\s*\)\s*0u?))?\s*\)\s*\{\s*break\s*;\s*\}') |
             Where-Object {
               $_.Index -gt $pollingStatusAssignment.Index -and
                 $_.Index -lt $resultReadBlocks[0].Index
             })
 
           if ($completionMaskMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one polling completion test using status & BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK before the command/result read; found $($completionMaskMatches.Count)."
+            Fail "Gate 5C requires exactly one polling completion test using status & BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK before the command/result read; found $($completionMaskMatches.Count)."
           }
 
           $pollIntervalDeclarationMatches = @([regex]::Matches(
@@ -840,18 +877,18 @@ jobs:
             '(?m)^\s*LARGE_INTEGER\s+pollInterval\s*;\s*$'))
           $pollIntervalAssignmentMatches = @([regex]::Matches(
             $source,
-            '(?m)^\s*pollInterval\.QuadPart\s*=\s*BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS\s*;\s*$'))
+            '(?m)^\s*pollInterval\.QuadPart\s*=\s*BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS\s*;\s*$'))
 
           if ($pollIntervalDeclarationMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one LARGE_INTEGER pollInterval declaration; found $($pollIntervalDeclarationMatches.Count)."
+            Fail "Gate 5C requires exactly one LARGE_INTEGER pollInterval declaration; found $($pollIntervalDeclarationMatches.Count)."
           }
 
           if ($pollIntervalAssignmentMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one pollInterval.QuadPart assignment from BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS; found $($pollIntervalAssignmentMatches.Count)."
+            Fail "Gate 5C requires exactly one pollInterval.QuadPart assignment from BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS; found $($pollIntervalAssignmentMatches.Count)."
           }
 
           if ($pollIntervalAssignmentMatches[0].Index -gt $delayCallBlocks[0].Index) {
-            Fail 'Gate 5A/5B requires pollInterval.QuadPart to be set before KeDelayExecutionThread.'
+            Fail 'Gate 5C requires pollInterval.QuadPart to be set before KeDelayExecutionThread.'
           }
 
           if ($boundedPollLoopMatches[0].Index -gt $statusReadBlocks[1].Index -or
@@ -859,22 +896,22 @@ jobs:
               $completionMaskMatches[0].Index -gt $delayCallBlocks[0].Index -or
               $delayCallBlocks[0].Index -gt $boundedPollLoopEndIndex -or
               $boundedPollLoopEndIndex -gt $resultReadBlocks[0].Index) {
-            Fail 'Gate 5A/5B requires the polling status read, completion-mask test, and delay inside the bounded loop, followed by the command/result read.'
+            Fail 'Gate 5C requires the polling status read, completion-mask test, and delay inside the bounded loop, followed by the command/result read.'
           }
 
           $postPollTimeoutMatches = @([regex]::Matches(
             $source,
-            '(?s)\bif\s*\(\s*\(\s*status\s*&\s*BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK\s*\)\s*==\s*(?:0|0u|\(\s*UCHAR\s*\)\s*0u?)\s*\)\s*\{\s*return\s+STATUS_IO_TIMEOUT\s*;\s*\}'))
+            '(?s)\bif\s*\(\s*\(\s*status\s*&\s*BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK\s*\)\s*==\s*(?:0|0u|\(\s*UCHAR\s*\)\s*0u?)\s*\)\s*\{.*?return\s+STATUS_IO_TIMEOUT\s*;.*?\}'))
 
           if ($postPollTimeoutMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one fixed post-loop completion check that conditionally returns STATUS_IO_TIMEOUT; found $($postPollTimeoutMatches.Count)."
+            Fail "Gate 5C requires exactly one fixed post-loop completion check that conditionally returns STATUS_IO_TIMEOUT; found $($postPollTimeoutMatches.Count)."
           }
 
           $postPollTimeoutEndIndex = $postPollTimeoutMatches[0].Index + $postPollTimeoutMatches[0].Length
 
           if ($postPollTimeoutMatches[0].Index -le $boundedPollLoopEndIndex -or
               $postPollTimeoutEndIndex -ge $resultReadBlocks[0].Index) {
-            Fail 'Gate 5A/5B requires the conditional timeout check after the bounded polling loop and before the command/result read.'
+            Fail 'Gate 5C requires the conditional timeout check after the bounded polling loop and before the command/result read.'
           }
 
           $timeoutReturnMatches = @([regex]::Matches(
@@ -884,7 +921,7 @@ jobs:
           if ($timeoutReturnMatches.Count -ne 1 -or
               $timeoutReturnMatches[0].Index -lt $postPollTimeoutMatches[0].Index -or
               $timeoutReturnMatches[0].Index -ge $postPollTimeoutEndIndex) {
-            Fail "Gate 5A/5B permits exactly one return STATUS_IO_TIMEOUT and requires it inside the fixed post-loop completion check; found $($timeoutReturnMatches.Count)."
+            Fail "Gate 5C permits exactly one return STATUS_IO_TIMEOUT and requires it inside the fixed post-loop completion check; found $($timeoutReturnMatches.Count)."
           }
 
           $commandResultAssignmentMatches = @([regex]::Matches(
@@ -894,39 +931,38 @@ jobs:
             'commandResult assignment from the command/result read' `
             $commandResultAssignmentMatches `
             $resultReadBlocks[0]
-          $resultComparisonPattern = '(?s)\bif\s*\(\s*(?:commandResult\s*!=\s*BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS|BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS\s*!=\s*commandResult)\s*\)'
+          $resultComparisonPattern = '(?s)\bif\s*\(\s*(?:commandResult\s*!=\s*BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS|BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS\s*!=\s*commandResult)\s*\)'
           $resultComparisonMatches = @([regex]::Matches(
             $source,
             $resultComparisonPattern))
 
           if ($resultComparisonMatches.Count -ne 1) {
-            Fail "Gate 5A/5B requires exactly one explicit commandResult comparison against BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS before response metadata reads; found $($resultComparisonMatches.Count)."
+            Fail "Gate 5C requires exactly one explicit commandResult comparison against BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS before the response byte read; found $($resultComparisonMatches.Count)."
           }
 
           if ($resultComparisonMatches[0].Index -le $commandResultAssignment.Index -or
-              $resultComparisonMatches[0].Index -ge $responseTypeReadBlocks[0].Index) {
-            Fail 'Gate 5A/5B requires the commandResult comparison after the command/result read and before all response metadata reads.'
+              $resultComparisonMatches[0].Index -ge $responseByteReadBlocks[0].Index) {
+            Fail 'Gate 5C requires the commandResult comparison after the command/result read and before the response byte read.'
           }
 
           $resultValidationMatches = @([regex]::Matches(
             $source,
-            "$resultComparisonPattern\s*(?:\{\s*return\s+STATUS_DEVICE_PROTOCOL_ERROR\s*;\s*\}|return\s+STATUS_DEVICE_PROTOCOL_ERROR\s*;)") |
+            "$resultComparisonPattern\s*(?:\{.*?return\s+STATUS_DEVICE_PROTOCOL_ERROR\s*;.*?\}|return\s+STATUS_DEVICE_PROTOCOL_ERROR\s*;)") |
             Where-Object {
               $_.Index -eq $resultComparisonMatches[0].Index
             })
 
           if ($resultValidationMatches.Count -ne 1) {
-            Fail 'Gate 5A/5B requires the unsuccessful commandResult branch to return exactly STATUS_DEVICE_PROTOCOL_ERROR.'
+            Fail 'Gate 5C requires the unsuccessful commandResult branch to return exactly STATUS_DEVICE_PROTOCOL_ERROR.'
           }
 
           $allowedMmioReferencePatterns = @(
             'if \(context->MmioBase != NULL\)',
             'context->MmioBase = MmMapIoSpaceEx\(',
             'if \(context->MmioBase == NULL\)',
-            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET',
-            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET',
-            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET',
+            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET',
             '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_KEY_NAME_OFFSET',
+            '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET',
             '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET',
             '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET',
             '\(PUCHAR\)context->MmioBase \+ BOOTCAMP_SMC_MMIO_STATUS_OFFSET',
@@ -944,11 +980,11 @@ jobs:
 
           if ($unexpectedMmioReferences.Count -ne 0) {
             Fail-WithMatches `
-              'Gate 5A/5B violation: MMIO mapping pointer is referenced outside the fixed GET_KEY_INFO(FNum) transaction lifecycle.' `
+              'Gate 5C violation: MMIO mapping pointer is referenced outside the fixed READ_KEY(FNum) transaction lifecycle.' `
               $unexpectedMmioReferences
           }
 
-          Write-Host 'BootCampSmc Gate 5A/5B GET_KEY_INFO(FNum) safety boundary: PASS'
+          Write-Host 'BootCampSmc Gate 5C READ_KEY(FNum) safety boundary: PASS'
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v6
