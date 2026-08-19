@@ -1,26 +1,26 @@
 #include "BootCampSmc.h"
 
-#define BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET ((SIZE_T)0x0000u)
-#define BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET ((SIZE_T)0x0005u)
-#define BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET ((SIZE_T)0x0006u)
+#define BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET ((SIZE_T)0x0000u)
 #define BOOTCAMP_SMC_MMIO_KEY_NAME_OFFSET ((SIZE_T)0x0078u)
+#define BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET ((SIZE_T)0x007Du)
 #define BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET ((SIZE_T)0x007Eu)
 #define BOOTCAMP_SMC_MMIO_COMMAND_RESULT_OFFSET ((SIZE_T)0x007Fu)
 #define BOOTCAMP_SMC_MMIO_STATUS_OFFSET ((SIZE_T)0x4005u)
 
 #define BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH ((SIZE_T)0x4006u)
 
-#define BOOTCAMP_SMC_COMMAND_GET_KEY_INFO ((UCHAR)0x13u)
+#define BOOTCAMP_SMC_COMMAND_READ_KEY ((UCHAR)0x10u)
 #define BOOTCAMP_SMC_KEY_FNUM ((ULONG)0x6D754E46u)
 
-#define BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK ((UCHAR)0x20u)
-#define BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT ((ULONG)25u)
-#define BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS ((LONGLONG)-100000LL)
-#define BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS ((UCHAR)0x00u)
+#define BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK ((UCHAR)0x20u)
+#define BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT ((ULONG)25u)
+#define BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS ((LONGLONG)-100000LL)
+#define BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS ((UCHAR)0x00u)
+#define BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH ((UCHAR)0x01u)
 
 static
 NTSTATUS
-BootCampSmcGate5GetFNumKeyInfo(
+BootCampSmcGate5CReadFNum(
     _In_ PBOOTCAMP_SMC_DEVICE_CONTEXT context
     );
 
@@ -29,7 +29,7 @@ BootCampSmcGate5GetFNumKeyInfo(
 #pragma alloc_text(PAGE, BootCampSmcEvtDeviceAdd)
 #pragma alloc_text(PAGE, BootCampSmcEvtDevicePrepareHardware)
 #pragma alloc_text(PAGE, BootCampSmcEvtDeviceReleaseHardware)
-#pragma alloc_text(PAGE, BootCampSmcGate5GetFNumKeyInfo)
+#pragma alloc_text(PAGE, BootCampSmcGate5CReadFNum)
 #endif
 
 NTSTATUS
@@ -243,7 +243,7 @@ BootCampSmcEvtDevicePrepareHardware(
         DbgPrintEx(
             DPFLTR_IHVDRIVER_ID,
             DPFLTR_ERROR_LEVEL,
-            "BootCampSmc: translated MEMORY resource is too small for Gate 5 GET_KEY_INFO(FNum); length=0x%lX required=0x%IX.\n",
+            "BootCampSmc: translated MEMORY resource is too small for Gate 5C READ_KEY(FNum); length=0x%lX required=0x%IX.\n",
             context->MemoryLength,
             BOOTCAMP_SMC_GATE5_MMIO_REQUIRED_LENGTH);
         return STATUS_DEVICE_CONFIGURATION_ERROR;
@@ -272,13 +272,13 @@ BootCampSmcEvtDevicePrepareHardware(
         "BootCampSmc: writable non-cached Gate 5 MMIO mapping established for 0x%I64X bytes.\n",
         (ULONGLONG)context->MmioLength);
 
-    status = BootCampSmcGate5GetFNumKeyInfo(context);
+    status = BootCampSmcGate5CReadFNum(context);
     if (!NT_SUCCESS(status))
     {
         DbgPrintEx(
             DPFLTR_IHVDRIVER_ID,
             DPFLTR_ERROR_LEVEL,
-            "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) transaction failed: 0x%08X; physical retry intentionally suppressed.\n",
+            "BootCampSmc: Gate 5C READ_KEY(FNum) transaction failed: 0x%08X; physical retry intentionally suppressed.\n",
             status);
         return STATUS_SUCCESS;
     }
@@ -286,29 +286,26 @@ BootCampSmcEvtDevicePrepareHardware(
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) transaction completed successfully.\n");
+        "BootCampSmc: Gate 5C READ_KEY(FNum) transaction completed successfully.\n");
 
     return STATUS_SUCCESS;
 }
 
 static
 NTSTATUS
-BootCampSmcGate5GetFNumKeyInfo(
+BootCampSmcGate5CReadFNum(
     _In_ PBOOTCAMP_SMC_DEVICE_CONTEXT context)
 {
-    volatile ULONG* responseTypeRegister;
-    volatile UCHAR* responseLengthRegister;
-    volatile UCHAR* responseAttributesRegister;
+    volatile UCHAR* responseByteRegister;
     volatile ULONG* keyNameRegister;
+    volatile UCHAR* requestLengthRegister;
     volatile UCHAR* smcIdRegister;
     volatile UCHAR* commandResultRegister;
     volatile UCHAR* statusRegister;
     UCHAR initialStatus;
     UCHAR status;
     UCHAR commandResult;
-    ULONG responseType;
-    UCHAR responseLength;
-    UCHAR responseAttributes;
+    UCHAR responseByte;
     ULONG pollIndex;
     ULONG pollCount;
     LARGE_INTEGER pollInterval;
@@ -316,14 +313,12 @@ BootCampSmcGate5GetFNumKeyInfo(
 
     PAGED_CODE();
 
-    responseTypeRegister = (volatile ULONG*)(
-        (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_RESPONSE_TYPE_OFFSET);
-    responseLengthRegister = (volatile UCHAR*)(
-        (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_RESPONSE_LENGTH_OFFSET);
-    responseAttributesRegister = (volatile UCHAR*)(
-        (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_RESPONSE_ATTRIBUTES_OFFSET);
+    responseByteRegister = (volatile UCHAR*)(
+        (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_RESPONSE_BYTE_OFFSET);
     keyNameRegister = (volatile ULONG*)(
         (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_KEY_NAME_OFFSET);
+    requestLengthRegister = (volatile UCHAR*)(
+        (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_REQUEST_LENGTH_OFFSET);
     smcIdRegister = (volatile UCHAR*)(
         (PUCHAR)context->MmioBase + BOOTCAMP_SMC_MMIO_SMC_ID_OFFSET);
     commandResultRegister = (volatile UCHAR*)(
@@ -337,14 +332,14 @@ BootCampSmcGate5GetFNumKeyInfo(
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) start.\n");
+        "BootCampSmc: Gate 5C READ_KEY(FNum) start.\n");
 
     initialStatus = READ_REGISTER_UCHAR(statusRegister);
 
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) initial status=0x%02X.\n",
+        "BootCampSmc: Gate 5C READ_KEY(FNum) initial status=0x%02X.\n",
         initialStatus);
 
     if (initialStatus != 0)
@@ -356,24 +351,27 @@ BootCampSmcGate5GetFNumKeyInfo(
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) stale status cleared=%u.\n",
+        "BootCampSmc: Gate 5C READ_KEY(FNum) stale status cleared=%u.\n",
         staleStatusCleared ? 1u : 0u);
 
     WRITE_REGISTER_ULONG(keyNameRegister, BOOTCAMP_SMC_KEY_FNUM);
+    WRITE_REGISTER_UCHAR(
+        requestLengthRegister,
+        BOOTCAMP_SMC_READ_KEY_FNUM_REQUEST_LENGTH);
     WRITE_REGISTER_UCHAR(smcIdRegister, 0);
     WRITE_REGISTER_UCHAR(
         commandResultRegister,
-        BOOTCAMP_SMC_COMMAND_GET_KEY_INFO);
+        BOOTCAMP_SMC_COMMAND_READ_KEY);
 
-    pollInterval.QuadPart = BOOTCAMP_SMC_GET_KEY_INFO_FNUM_POLL_INTERVAL_100NS;
+    pollInterval.QuadPart = BOOTCAMP_SMC_READ_KEY_FNUM_POLL_INTERVAL_100NS;
 
     for (pollIndex = 0;
-         pollIndex < BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT;
+         pollIndex < BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT;
          ++pollIndex)
     {
         status = READ_REGISTER_UCHAR(statusRegister);
 
-        if (status & BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK)
+        if (status & BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK)
         {
             break;
         }
@@ -384,23 +382,28 @@ BootCampSmcGate5GetFNumKeyInfo(
             &pollInterval);
     }
 
-    pollCount = (pollIndex < BOOTCAMP_SMC_GET_KEY_INFO_FNUM_MAX_POLL_COUNT) ?
+    pollCount = (pollIndex < BOOTCAMP_SMC_READ_KEY_FNUM_MAX_POLL_COUNT) ?
         (pollIndex + 1u) :
         pollIndex;
 
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) poll count=%lu final status=0x%02X completion NTSTATUS=0x%08X.\n",
+        "BootCampSmc: Gate 5C READ_KEY(FNum) poll count=%lu final status=0x%02X completion NTSTATUS=0x%08X.\n",
         pollCount,
         status,
-        ((status & BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK) == 0) ?
+        ((status & BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK) == 0) ?
             STATUS_IO_TIMEOUT :
             STATUS_SUCCESS);
 
     if ((status &
-         BOOTCAMP_SMC_GET_KEY_INFO_FNUM_STATUS_COMPLETE_MASK) == 0)
+         BOOTCAMP_SMC_READ_KEY_FNUM_STATUS_COMPLETE_MASK) == 0)
     {
+        DbgPrintEx(
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: Gate 5C READ_KEY(FNum) timeout failure: 0x%08X.\n",
+            STATUS_IO_TIMEOUT);
         return STATUS_IO_TIMEOUT;
     }
 
@@ -409,38 +412,35 @@ BootCampSmcGate5GetFNumKeyInfo(
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) commandResult=0x%02X protocol NTSTATUS=0x%08X.\n",
+        "BootCampSmc: Gate 5C READ_KEY(FNum) commandResult=0x%02X protocol NTSTATUS=0x%08X.\n",
         commandResult,
-        (commandResult != BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS) ?
+        (commandResult != BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS) ?
             STATUS_DEVICE_PROTOCOL_ERROR :
             STATUS_SUCCESS);
 
     if (commandResult !=
-        BOOTCAMP_SMC_GET_KEY_INFO_FNUM_RESULT_SUCCESS)
+        BOOTCAMP_SMC_READ_KEY_FNUM_RESULT_SUCCESS)
     {
+        DbgPrintEx(
+            DPFLTR_IHVDRIVER_ID,
+            DPFLTR_ERROR_LEVEL,
+            "BootCampSmc: Gate 5C READ_KEY(FNum) protocol failure: 0x%08X.\n",
+            STATUS_DEVICE_PROTOCOL_ERROR);
         return STATUS_DEVICE_PROTOCOL_ERROR;
     }
 
-    responseType = READ_REGISTER_ULONG(responseTypeRegister);
-    responseLength = READ_REGISTER_UCHAR(responseLengthRegister);
-    responseAttributes = READ_REGISTER_UCHAR(responseAttributesRegister);
+    responseByte = READ_REGISTER_UCHAR(responseByteRegister);
 
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) response type raw=0x%08X bytes=%02X %02X %02X %02X.\n",
-        responseType,
-        (UCHAR)(responseType & 0xFFu),
-        (UCHAR)((responseType >> 8) & 0xFFu),
-        (UCHAR)((responseType >> 16) & 0xFFu),
-        (UCHAR)((responseType >> 24) & 0xFFu));
+        "BootCampSmc: Gate 5C READ_KEY(FNum) response raw byte=0x%02X.\n",
+        responseByte);
 
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: Gate 5 GET_KEY_INFO(FNum) response length=%u attributes=0x%02X.\n",
-        responseLength,
-        responseAttributes);
+        "BootCampSmc: Gate 5C READ_KEY(FNum) transaction completed successfully.\n");
 
     return STATUS_SUCCESS;
 }
@@ -467,7 +467,7 @@ BootCampSmcEvtDeviceReleaseHardware(
     KdPrintEx((
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_INFO_LEVEL,
-        "BootCampSmc: hardware resources released and MMIO mapping removed; no register was written.\n"));
+        "BootCampSmc: hardware resources released and MMIO mapping removed.\n"));
 
     return STATUS_SUCCESS;
 }
