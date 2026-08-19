@@ -67,7 +67,8 @@ public sealed class MainViewModelTests
             new FakePowerManagementService(InitialPowerState()),
             fanControlService: fanControlService);
 
-        Assert.Equal("Fan Control: not read yet.", viewModel.FanControlStatus);
+        Assert.Equal(FanBackendState.NotChecked, viewModel.FanStatus.BackendState);
+        Assert.Equal(FanSafetyState.NotChecked, viewModel.FanStatus.SafetyState);
         Assert.Equal(0, hardwareDetectionService.DetectCallCount);
         Assert.Equal(0, fanControlService.ReadStatusCallCount);
     }
@@ -129,12 +130,11 @@ public sealed class MainViewModelTests
     [Fact]
     public async Task Refresh_WithSuccessfulFanRead_UpdatesFanStatusAfterHardwareDetection()
     {
-        const string verifiedStatus =
-            "Fan Control: read-only verified. Fan 0: 1840 / 5616 RPM (Apple Auto); Fan 1: 1691 / 5200 RPM (Apple Auto). Write control is not enabled.";
+        var verifiedFanStatus = VerifiedFanStatus();
         var hardwareDetectionService = new FakeHardwareDetectionService(
             VerifiedMacBookPro16_1());
         var fanControlService = new FakeFanControlService(
-            new FanControlStatus(IsAvailable: true, verifiedStatus));
+            verifiedFanStatus);
         var powerManagementService = new FakePowerManagementService(InitialPowerState());
         var logger = new TestApplicationLogger();
         var viewModel = CreateViewModel(
@@ -146,7 +146,9 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(verifiedStatus, viewModel.FanControlStatus);
+        Assert.Equal(verifiedFanStatus, viewModel.FanStatus);
+        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1691f, viewModel.FanStatus.Fan1?.ActualRpm);
         Assert.Equal([VerifiedHardwareModels.MacBookPro16_1], fanControlService.ReadModels);
         Assert.Equal(1, hardwareDetectionService.DetectCallCount);
         Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
@@ -176,9 +178,8 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(
-            "Fan Control: read-only read failed. Check the log for details.",
-            viewModel.FanControlStatus);
+        Assert.Equal(FanBackendState.Error, viewModel.FanStatus.BackendState);
+        Assert.Equal(FanSafetyState.Error, viewModel.FanStatus.SafetyState);
         Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
         Assert.Equal(
             "Refresh completed with errors. Check the log for details.",
@@ -206,7 +207,7 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal("Refresh canceled.", viewModel.StatusMessage);
-        Assert.Equal("Fan Control: not read yet.", viewModel.FanControlStatus);
+        Assert.Equal(FanBackendState.NotChecked, viewModel.FanStatus.BackendState);
         Assert.Equal(0, powerManagementService.ReadCurrentStateCallCount);
         Assert.Empty(logger.Errors);
         Assert.DoesNotContain(
@@ -234,10 +235,242 @@ public sealed class MainViewModelTests
 
         Assert.Equal(0, fanControlService.ReadStatusCallCount);
         Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
-        Assert.Contains("read-only unavailable", viewModel.FanControlStatus, StringComparison.Ordinal);
+        Assert.Equal(FanBackendState.Unavailable, viewModel.FanStatus.BackendState);
+        Assert.Equal(FanSafetyState.MonitoringUnavailable, viewModel.FanStatus.SafetyState);
         Assert.Equal(
             "Refresh completed with errors. Check the log for details.",
             viewModel.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(FanBackendState.NotInstalled)]
+    [InlineData(FanBackendState.InstalledStopped)]
+    public async Task Refresh_ExpectedBackendUnavailableState_DoesNotMarkRefreshAsError(
+        FanBackendState backendState)
+    {
+        var fanControlService = new FakeFanControlService(
+            FanControlStatus.CreateUnavailable(
+                backendState,
+                FanSafetyState.MonitoringUnavailable,
+                "Expected backend state in test."));
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(backendState, viewModel.FanStatus.BackendState);
+        Assert.Equal("Refresh completed.", viewModel.StatusMessage);
+        Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public async Task FanMonitoring_DoesNotPollBeforeStartOrWithoutVerifiedIdentity()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        Assert.Equal(0, pollingDelay.RequestCount);
+        Assert.Equal(0, fanControlService.ReadStatusCallCount);
+
+        viewModel.StartFanMonitoring();
+        Assert.Equal(1, pollingDelay.RequestCount);
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        Assert.Equal(0, fanControlService.ReadStatusCallCount);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanMonitoring_SuccessivePollsUpdateStructuredRpmWithoutOverlappingOrLogSpam()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(1800f, 1650f),
+            VerifiedFanStatus(1900f, 1750f),
+            VerifiedFanStatus(2000f, 1850f));
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal(1800f, viewModel.FanStatus.Fan0?.ActualRpm);
+
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await WaitUntilAsync(
+            () => fanControlService.ReadStatusCallCount == 2
+                && pollingDelay.RequestCount == 2);
+        Assert.Equal(1900f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1750f, viewModel.FanStatus.Fan1?.ActualRpm);
+
+        pollingDelay.Advance();
+        await WaitUntilAsync(
+            () => fanControlService.ReadStatusCallCount == 3
+                && pollingDelay.RequestCount == 3);
+        Assert.Equal(2000f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1850f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+        Assert.Single(
+            logger.InformationMessages,
+            message => message.Contains(
+                "Fan monitoring state changed",
+                StringComparison.Ordinal));
+
+        await viewModel.StopFanMonitoringAsync();
+        var callsAfterStop = fanControlService.ReadStatusCallCount;
+        pollingDelay.Advance();
+        await Task.Yield();
+        Assert.Equal(callsAfterStop, fanControlService.ReadStatusCallCount);
+        Assert.Equal(3, pollingDelay.RequestCount);
+    }
+
+    [Fact]
+    public async Task FanMonitoring_InFlightPollAndFullRefreshAreInterlocked()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1(),
+            VerifiedMacBookPro16_1());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        viewModel.RefreshCommand.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(1, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(2, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(3, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanMonitoring_SkipsTickWhileFullRefreshIsBusy()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1(),
+            VerifiedMacBookPro16_1());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var refreshDetectionGate = new AsyncGate();
+        hardwareDetectionService.QueueDetectGate(refreshDetectionGate);
+        viewModel.RefreshCommand.Execute(null);
+        await refreshDetectionGate.WaitUntilEnteredAsync();
+
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+
+        refreshDetectionGate.Release();
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanMonitoring_HardwareDetectionFailureClearsStaleModel()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.StartFanMonitoring();
+
+        hardwareDetectionService.DetectException = new InvalidOperationException(
+            "Detection failed after identity was established.");
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanBackendState.Unavailable, viewModel.FanStatus.BackendState);
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanMonitoring_StopCancelsInFlightReadAndPreventsFurtherPolls()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        await viewModel.StopFanMonitoringAsync();
+
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1, pollingDelay.RequestCount);
     }
 
     [Fact]
@@ -1369,7 +1602,8 @@ public sealed class MainViewModelTests
         FakeDiagnosticReportService? diagnosticReportService = null,
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
         IUserConfirmationService? userConfirmationService = null,
-        FakeFanControlService? fanControlService = null)
+        FakeFanControlService? fanControlService = null,
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
     {
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
@@ -1393,7 +1627,9 @@ public sealed class MainViewModelTests
             diagnosticReportService ?? new FakeDiagnosticReportService(),
             diagnosticReportFileSaveService ?? new FakeDiagnosticReportFileSaveService(),
             logger ?? new TestApplicationLogger(),
-            userConfirmationService);
+            userConfirmationService,
+            fanPollingInterval: TimeSpan.FromSeconds(2),
+            fanPollingDelayAsync);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)
@@ -1413,6 +1649,18 @@ public sealed class MainViewModelTests
         }
 
         Assert.False(viewModel.IsBusy);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        while (!condition() && !timeout.IsCancellationRequested)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        Assert.True(condition());
     }
 
     private static ModelVerificationResult VerifiedMacBookPro16_1()
@@ -1442,6 +1690,18 @@ public sealed class MainViewModelTests
             ProcessorMaximumDc: 70,
             BoostModeAc: 2,
             BoostModeDc: 2);
+    }
+
+    private static FanControlStatus VerifiedFanStatus(
+        float fan0ActualRpm = 1840f,
+        float fan1ActualRpm = 1691f)
+    {
+        return new FanControlStatus(
+            FanBackendState.Running,
+            FanSafetyState.ReadOnlyVerified,
+            new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto),
+            new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto),
+            "Verified in test.");
     }
 
     private static PowerStateSnapshot GamingOptimisedPowerState()
@@ -1600,19 +1860,24 @@ public sealed class MainViewModelTests
     {
         private readonly Queue<FanControlStatus> _statuses;
         private readonly Queue<Exception> _exceptions = [];
+        private readonly Queue<AsyncGate> _readGates = [];
         private FanControlStatus _lastStatus;
+        private int _activeReadCount;
 
         public FakeFanControlService(params FanControlStatus[] statuses)
         {
             _statuses = new Queue<FanControlStatus>(statuses);
             _lastStatus = statuses.Length == 0
-                ? new FanControlStatus(
-                    IsAvailable: false,
+                ? FanControlStatus.CreateUnavailable(
+                    FanBackendState.NotApplicable,
+                    FanSafetyState.MonitoringUnavailable,
                     "Unavailable in tests.")
                 : statuses[^1];
         }
 
         public int ReadStatusCallCount { get; private set; }
+
+        public int MaximumConcurrentReadCount { get; private set; }
 
         public List<string> ReadModels { get; } = [];
 
@@ -1621,25 +1886,48 @@ public sealed class MainViewModelTests
             _exceptions.Enqueue(exception);
         }
 
-        public Task<FanControlStatus> ReadStatusAsync(
+        public void QueueReadGate(AsyncGate gate)
+        {
+            _readGates.Enqueue(gate);
+        }
+
+        public async Task<FanControlStatus> ReadStatusAsync(
             string model,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ReadStatusCallCount++;
             ReadModels.Add(model);
+            _activeReadCount++;
+            MaximumConcurrentReadCount = Math.Max(
+                MaximumConcurrentReadCount,
+                _activeReadCount);
 
-            if (_exceptions.Count > 0)
+            try
             {
-                throw _exceptions.Dequeue();
-            }
+                if (_readGates.Count > 0)
+                {
+                    await _readGates.Dequeue().WaitAsync(cancellationToken);
+                }
 
-            if (_statuses.Count > 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_exceptions.Count > 0)
+                {
+                    throw _exceptions.Dequeue();
+                }
+
+                if (_statuses.Count > 0)
+                {
+                    _lastStatus = _statuses.Dequeue();
+                }
+
+                return _lastStatus;
+            }
+            finally
             {
-                _lastStatus = _statuses.Dequeue();
+                _activeReadCount--;
             }
-
-            return Task.FromResult(_lastStatus);
         }
     }
 
@@ -1661,7 +1949,7 @@ public sealed class MainViewModelTests
 
         public int VerifyModelCallCount { get; private set; }
 
-        public Exception? DetectException { get; init; }
+        public Exception? DetectException { get; set; }
 
         public void QueueDetectGate(AsyncGate gate)
         {
@@ -1851,10 +2139,10 @@ public sealed class MainViewModelTests
         private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task WaitAsync()
+        public async Task WaitAsync(CancellationToken cancellationToken = default)
         {
             _entered.TrySetResult();
-            await _release.Task;
+            await _release.Task.WaitAsync(cancellationToken);
         }
 
         public async Task WaitUntilEnteredAsync()
@@ -1865,6 +2153,60 @@ public sealed class MainViewModelTests
         public void Release()
         {
             _release.TrySetResult();
+        }
+    }
+
+    private sealed class ManualFanPollingDelay
+    {
+        private readonly object _sync = new();
+        private readonly Queue<TaskCompletionSource> _pendingTicks = [];
+        private int _requestCount;
+
+        public int RequestCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _requestCount;
+                }
+            }
+        }
+
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            Assert.Equal(TimeSpan.FromSeconds(2), delay);
+            var completion = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            lock (_sync)
+            {
+                _requestCount++;
+                _pendingTicks.Enqueue(completion);
+            }
+
+            return WaitForTickAsync(completion, cancellationToken);
+        }
+
+        public void Advance()
+        {
+            TaskCompletionSource completion;
+
+            lock (_sync)
+            {
+                completion = _pendingTicks.Dequeue();
+            }
+
+            completion.TrySetResult();
+        }
+
+        private static async Task WaitForTickAsync(
+            TaskCompletionSource completion,
+            CancellationToken cancellationToken)
+        {
+            using var registration = cancellationToken.Register(
+                () => completion.TrySetCanceled(cancellationToken));
+            await completion.Task;
         }
     }
 

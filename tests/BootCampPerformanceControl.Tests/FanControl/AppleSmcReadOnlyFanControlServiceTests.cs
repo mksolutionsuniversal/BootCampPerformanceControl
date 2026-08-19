@@ -1,5 +1,8 @@
+using System.ComponentModel;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.Smc;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
+using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
 
 namespace BootCampPerformanceControl.Tests.FanControl;
@@ -7,38 +10,42 @@ namespace BootCampPerformanceControl.Tests.FanControl;
 public sealed class AppleSmcReadOnlyFanControlServiceTests
 {
     [Fact]
-    public async Task ReadStatusAsync_UnsupportedModel_DoesNotOpenAppleSmcSession()
+    public async Task ReadStatusAsync_UnsupportedModel_DoesNotOpenServiceOrDevice()
     {
-        var sessionOpenCount = 0;
-        var service = new AppleSmcReadOnlyFanControlService(
-            new FanSafetyPolicy(),
-            _ =>
+        var serviceOpenCount = 0;
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(
+            () =>
             {
-                sessionOpenCount++;
-                throw new InvalidOperationException("Session must not be opened.");
-            });
+                serviceOpenCount++;
+                throw new InvalidOperationException("Service controller must not be opened.");
+            },
+            transportFactory);
 
         var status = await service.ReadStatusAsync(
             VerifiedHardwareModels.MacBookPro14_3,
             CancellationToken.None);
 
+        Assert.Equal(FanBackendState.NotApplicable, status.BackendState);
+        Assert.Equal(FanSafetyState.UnsupportedModel, status.SafetyState);
         Assert.False(status.IsAvailable);
-        Assert.Contains("read-only unavailable", status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("not verified", status.DisplayText, StringComparison.Ordinal);
-        Assert.Equal(0, sessionOpenCount);
+        Assert.Contains("not verified", status.Details, StringComparison.Ordinal);
+        Assert.Equal(0, serviceOpenCount);
+        Assert.Equal(0, transportFactory.OpenCount);
     }
 
     [Fact]
-    public async Task ReadStatusAsync_PreCanceled_PropagatesWithoutOpeningAppleSmcSession()
+    public async Task ReadStatusAsync_PreCanceled_PropagatesWithoutOpeningServiceOrDevice()
     {
-        var sessionOpenCount = 0;
-        var service = new AppleSmcReadOnlyFanControlService(
-            new FanSafetyPolicy(),
-            _ =>
+        var serviceOpenCount = 0;
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(
+            () =>
             {
-                sessionOpenCount++;
-                throw new InvalidOperationException("Session must not be opened.");
-            });
+                serviceOpenCount++;
+                throw new InvalidOperationException("Service controller must not be opened.");
+            },
+            transportFactory);
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -47,37 +54,233 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
                 VerifiedHardwareModels.MacBookPro16_1,
                 cancellationSource.Token));
 
-        Assert.Equal(0, sessionOpenCount);
+        Assert.Equal(0, serviceOpenCount);
+        Assert.Equal(0, transportFactory.OpenCount);
     }
 
     [Fact]
-    public async Task ReadStatusAsync_VerifiedModel_UsesReadPipelineAndDisposesSession()
+    public async Task ReadStatusAsync_MissingService_ReturnsNotInstalledWithoutOpeningDevice()
     {
-        var transport = new FakeSmcTransport();
-        var sessionOpenCount = 0;
-        var service = new AppleSmcReadOnlyFanControlService(
-            new FanSafetyPolicy(),
-            cancellationToken =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                sessionOpenCount++;
-                return Task.FromResult<ISmcTransport>(transport);
-            });
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(
+            () => throw new Win32Exception(1060, "Service does not exist."),
+            transportFactory);
 
         var status = await service.ReadStatusAsync(
             VerifiedHardwareModels.MacBookPro16_1,
             CancellationToken.None);
 
+        Assert.Equal(FanBackendState.NotInstalled, status.BackendState);
+        Assert.Equal(FanSafetyState.MonitoringUnavailable, status.SafetyState);
+        Assert.Equal(0, transportFactory.OpenCount);
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_StoppedService_DoesNotStartServiceOrOpenDevice()
+    {
+        var controller = new FakeAppleSmcServiceController(AppleSmcServiceState.Stopped);
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.InstalledStopped, status.BackendState);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(0, controller.StopCount);
+        Assert.Equal(0, transportFactory.OpenCount);
+        Assert.Equal(1, controller.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData((uint)AppleSmcServiceState.StartPending)]
+    [InlineData((uint)AppleSmcServiceState.StopPending)]
+    public async Task ReadStatusAsync_TransitionalService_DoesNotMutateServiceOrOpenDevice(
+        uint rawState)
+    {
+        var state = (AppleSmcServiceState)rawState;
+        var controller = new FakeAppleSmcServiceController(state);
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.Transitional, status.BackendState);
+        Assert.Contains(state.ToString(), status.Details, StringComparison.Ordinal);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(0, controller.StopCount);
+        Assert.Equal(0, transportFactory.OpenCount);
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_ServiceStopsAfterDiscovery_DoesNotRestartOrOpenDevice()
+    {
+        var controller = new FakeAppleSmcServiceController(
+            AppleSmcServiceState.Running,
+            AppleSmcServiceState.Stopped);
+        var transportFactory = new FakeAppleSmcTransportFactory(new FakeSmcTransport());
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.InstalledStopped, status.BackendState);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(0, transportFactory.OpenCount);
+        Assert.Equal(1, controller.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_RunningService_ReturnsStructuredValuesAndDisposesSession()
+    {
+        var controller = new FakeAppleSmcServiceController(
+            AppleSmcServiceState.Running,
+            AppleSmcServiceState.Running);
+        var transport = new FakeSmcTransport();
+        var transportFactory = new FakeAppleSmcTransportFactory(transport);
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.Running, status.BackendState);
+        Assert.Equal(FanSafetyState.ReadOnlyVerified, status.SafetyState);
         Assert.True(status.IsAvailable);
-        Assert.Contains("read-only verified", status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Fan 0: 1840 / 5616 RPM", status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Fan 1: 1691 / 5200 RPM", status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Write control is not enabled", status.DisplayText, StringComparison.Ordinal);
-        Assert.Equal(1, sessionOpenCount);
+        Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), status.Fan0);
+        Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), status.Fan1);
+        Assert.False(status.IsWriteControlEnabled);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(0, controller.StopCount);
+        Assert.Equal(1, transportFactory.OpenCount);
         Assert.Equal(1, transport.ProtocolCalls);
         Assert.Equal(9, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
         Assert.True(transport.IsDisposed);
+        Assert.Equal(1, controller.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_SharingViolation_ReturnsBusyWithoutRetry()
+    {
+        var controller = new FakeAppleSmcServiceController(
+            AppleSmcServiceState.Running,
+            AppleSmcServiceState.Running);
+        var transportFactory = new FakeAppleSmcTransportFactory(
+            new Win32Exception(32, "Sharing violation."));
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.Busy, status.BackendState);
+        Assert.Equal(FanSafetyState.MonitoringUnavailable, status.SafetyState);
+        Assert.Equal(1, transportFactory.OpenCount);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(1, controller.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_DeviceAccessDenied_ReturnsAccessDenied()
+    {
+        var controller = new FakeAppleSmcServiceController(
+            AppleSmcServiceState.Running,
+            AppleSmcServiceState.Running);
+        var transportFactory = new FakeAppleSmcTransportFactory(
+            new Win32Exception(5, "Access denied."));
+        var service = CreateService(() => controller, transportFactory);
+
+        var status = await service.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanBackendState.AccessDenied, status.BackendState);
+        Assert.Equal(FanSafetyState.MonitoringUnavailable, status.SafetyState);
+        Assert.Equal(1, transportFactory.OpenCount);
+        Assert.Equal(0, controller.StartCount);
+        Assert.Equal(1, controller.DisposeCount);
+    }
+
+    private static AppleSmcReadOnlyFanControlService CreateService(
+        Func<IAppleSmcServiceController> openServiceController,
+        IAppleSmcTransportFactory transportFactory)
+    {
+        return new AppleSmcReadOnlyFanControlService(
+            new FanSafetyPolicy(),
+            openServiceController,
+            transportFactory);
+    }
+
+    private sealed class FakeAppleSmcServiceController : IAppleSmcServiceController
+    {
+        private readonly Queue<AppleSmcServiceState> _states;
+
+        public FakeAppleSmcServiceController(params AppleSmcServiceState[] states)
+        {
+            _states = new Queue<AppleSmcServiceState>(states);
+        }
+
+        public int StartCount { get; private set; }
+
+        public int StopCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
+
+        public AppleSmcServiceState GetState()
+        {
+            return _states.Dequeue();
+        }
+
+        public void Start()
+        {
+            StartCount++;
+        }
+
+        public void Stop()
+        {
+            StopCount++;
+        }
+
+        public void Dispose()
+        {
+            DisposeCount++;
+        }
+    }
+
+    private sealed class FakeAppleSmcTransportFactory : IAppleSmcTransportFactory
+    {
+        private readonly ISmcTransport? _transport;
+        private readonly Exception? _openException;
+
+        public FakeAppleSmcTransportFactory(ISmcTransport transport)
+        {
+            _transport = transport;
+        }
+
+        public FakeAppleSmcTransportFactory(Exception openException)
+        {
+            _openException = openException;
+        }
+
+        public int OpenCount { get; private set; }
+
+        public ISmcTransport Open()
+        {
+            OpenCount++;
+
+            if (_openException is not null)
+            {
+                throw _openException;
+            }
+
+            return _transport
+                ?? throw new InvalidOperationException("No fake transport was configured.");
+        }
     }
 
     private sealed class FakeSmcTransport : ISmcTransport

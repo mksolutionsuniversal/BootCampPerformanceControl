@@ -7,6 +7,19 @@ namespace BootCampPerformanceControl.Tests.FanControl;
 public sealed class FanControllerTests
 {
     [Fact]
+    public void UnavailableStatus_UsesEncodingSafeEmDashPlaceholders()
+    {
+        var status = FanControlStatus.CreateUnavailable(
+            FanBackendState.NotInstalled,
+            FanSafetyState.MonitoringUnavailable,
+            "Unavailable in test.");
+
+        Assert.Equal("\u2014", status.Fan0DisplayText);
+        Assert.Equal("\u2014", status.Fan1DisplayText);
+        Assert.Equal("\u2014", status.ModeDisplayText);
+    }
+
+    [Fact]
     public async Task ReadStatusAsync_ReturnsVerifiedReadOnlyStatus()
     {
         await using var transport = new FakeSmcTransport();
@@ -17,6 +30,11 @@ public sealed class FanControllerTests
             CancellationToken.None);
 
         Assert.True(result.Status.IsAvailable);
+        Assert.Equal(FanBackendState.Running, result.Status.BackendState);
+        Assert.Equal(FanSafetyState.ReadOnlyVerified, result.Status.SafetyState);
+        Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), result.Status.Fan0);
+        Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), result.Status.Fan1);
+        Assert.False(result.Status.IsWriteControlEnabled);
         Assert.True(result.Capability.IsReadSupported);
         Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only verified", result.Status.DisplayText, StringComparison.Ordinal);
@@ -57,6 +75,8 @@ public sealed class FanControllerTests
             CancellationToken.None);
 
         Assert.True(result.Status.IsAvailable);
+        Assert.Equal(FanOperatingMode.Manual, result.Status.Fan0?.Mode);
+        Assert.Equal(FanOperatingMode.Manual, result.Status.Fan1?.Mode);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Equal(9, transport.KeyInfoCalls);

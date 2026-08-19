@@ -8,11 +8,14 @@ using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
 using BootCampPerformanceControl.SettingsBackup;
+using StructuredFanControlStatus = BootCampPerformanceControl.FanControl.FanControlStatus;
 
 namespace BootCampPerformanceControl.UI;
 
 public sealed class MainViewModel : ViewModelBase
 {
+    private static readonly TimeSpan DefaultFanPollingInterval = TimeSpan.FromSeconds(2);
+
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
     private readonly IFanControlService _fanControlService;
@@ -24,6 +27,10 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
     private readonly IApplicationLogger _logger;
     private readonly IUserConfirmationService _userConfirmationService;
+    private readonly TimeSpan _fanPollingInterval;
+    private readonly Func<TimeSpan, CancellationToken, Task> _fanPollingDelayAsync;
+    private readonly SemaphoreSlim _fanOperationGate = new(1, 1);
+    private readonly object _fanMonitoringSync = new();
     private readonly HashSet<string> _acknowledgedUntestedModels = new(StringComparer.OrdinalIgnoreCase);
 
     private ModelVerificationResult _lastVerificationResult = ModelVerificationResult.Unknown();
@@ -43,9 +50,15 @@ public sealed class MainViewModel : ViewModelBase
     private string _boostModeDc = "Not read";
     private string _detectedProfileState = "Unknown - power state has not been read.";
     private string _restoreSnapshotStatus = "Not available.";
-    private string _fanControlStatus = "Fan Control: not read yet.";
+    private StructuredFanControlStatus _fanStatus = StructuredFanControlStatus.NotChecked;
     private string _statusMessage = "Ready";
     private bool _isBusy;
+    private string? _fanMonitoringModel;
+    private FanBackendState? _lastLoggedFanBackendState;
+    private FanSafetyState? _lastLoggedFanSafetyState;
+    private CancellationTokenSource? _fanMonitoringCancellationSource;
+    private Task? _fanMonitoringTask;
+    private Task? _fanMonitoringStopTask;
 
     public MainViewModel(
         IHardwareDetectionService hardwareDetectionService,
@@ -58,7 +71,9 @@ public sealed class MainViewModel : ViewModelBase
         IDiagnosticReportService diagnosticReportService,
         IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
         IApplicationLogger logger,
-        IUserConfirmationService? userConfirmationService = null)
+        IUserConfirmationService? userConfirmationService = null,
+        TimeSpan? fanPollingInterval = null,
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareDetectionService);
         ArgumentNullException.ThrowIfNull(powerManagementService);
@@ -82,6 +97,15 @@ public sealed class MainViewModel : ViewModelBase
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
         _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
+        _fanPollingInterval = fanPollingInterval ?? DefaultFanPollingInterval;
+        if (_fanPollingInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(fanPollingInterval),
+                "Fan polling interval must be greater than zero.");
+        }
+
+        _fanPollingDelayAsync = fanPollingDelayAsync ?? Task.Delay;
         RefreshRestoreSnapshotStatus();
         RefreshCommand = new AsyncCommand(
             RefreshAsync,
@@ -194,11 +218,19 @@ public sealed class MainViewModel : ViewModelBase
         private set => SetProperty(ref _restoreSnapshotStatus, value);
     }
 
-    public string FanControlStatus
+    public StructuredFanControlStatus FanStatus
     {
-        get => _fanControlStatus;
-        private set => SetProperty(ref _fanControlStatus, value);
+        get => _fanStatus;
+        private set
+        {
+            if (SetProperty(ref _fanStatus, value))
+            {
+                OnPropertyChanged(nameof(FanControlStatus));
+            }
+        }
     }
+
+    public string FanControlStatus => FanStatus.DisplayText;
 
     public string StatusMessage
     {
@@ -218,26 +250,75 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    public void StartFanMonitoring()
+    {
+        lock (_fanMonitoringSync)
+        {
+            if (_fanMonitoringTask is not null)
+            {
+                return;
+            }
+
+            _fanMonitoringCancellationSource = new CancellationTokenSource();
+            _fanMonitoringTask = MonitorFansAsync(_fanMonitoringCancellationSource.Token);
+        }
+
+        _logger.Info($"Fan monitoring started. Polling interval: {_fanPollingInterval.TotalSeconds:0.###} seconds.");
+    }
+
+    public Task StopFanMonitoringAsync()
+    {
+        lock (_fanMonitoringSync)
+        {
+            if (_fanMonitoringTask is null || _fanMonitoringCancellationSource is null)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (_fanMonitoringStopTask is null)
+            {
+                _fanMonitoringCancellationSource.Cancel();
+                _fanMonitoringStopTask = StopFanMonitoringCoreAsync(
+                    _fanMonitoringTask,
+                    _fanMonitoringCancellationSource);
+            }
+
+            return _fanMonitoringStopTask;
+        }
+    }
+
     private async Task RefreshAsync(CancellationToken cancellationToken)
     {
         IsBusy = true;
         StatusMessage = "Refreshing...";
+        var fanGateAcquired = false;
 
         try
         {
+            await _fanOperationGate.WaitAsync(cancellationToken);
+            fanGateAcquired = true;
+            _fanMonitoringModel = null;
+
             var errors = 0;
             var verificationResult = ModelVerificationResult.Unknown();
             var hasUsableFanModelIdentity = false;
+            var hardwareIdentityEstablished = false;
 
             try
             {
                 _logger.Info("Hardware detection started.");
                 var hardwareSnapshot = await _hardwareDetectionService.DetectAsync(cancellationToken);
                 verificationResult = _hardwareDetectionService.VerifyModel(hardwareSnapshot);
+                hardwareIdentityEstablished = true;
                 _lastVerificationResult = verificationResult;
                 ApplyHardware(hardwareSnapshot);
                 ApplyCompatibility(verificationResult);
                 hasUsableFanModelIdentity = HasUsableFanModelIdentity(verificationResult);
+                if (hasUsableFanModelIdentity)
+                {
+                    _fanMonitoringModel = verificationResult.Model;
+                }
+
                 _logger.Info(
                     $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Platform support: {verificationResult.PlatformSupport}. Validation level: {verificationResult.ValidationLevel}.");
             }
@@ -257,16 +338,17 @@ public sealed class MainViewModel : ViewModelBase
                     _logger.Info($"Fan read started. Model: {verificationResult.Model}.");
                     var fanStatus = await _fanControlService
                         .ReadStatusAsync(verificationResult.Model, cancellationToken);
-                    FanControlStatus = fanStatus.DisplayText;
+                    ApplyFanStatus(fanStatus);
 
-                    _logger.Info(fanStatus.IsAvailable
-                        ? $"Fan read completed. Model: {verificationResult.Model}."
-                        : $"Fan read unavailable. Model: {verificationResult.Model}. {fanStatus.DisplayText}");
+                    _logger.Info($"Fan read completed. Model: {verificationResult.Model}. Backend: {fanStatus.BackendState}. Safety: {fanStatus.SafetyState}.");
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     errors++;
-                    FanControlStatus = "Fan Control: read-only read failed. Check the log for details.";
+                    ApplyFanStatus(StructuredFanControlStatus.CreateUnavailable(
+                        FanBackendState.Error,
+                        FanSafetyState.Error,
+                        "The read failed unexpectedly. Check the log for details."));
                     _logger.Error(
                         $"Fan read failed. Model: {verificationResult.Model}.",
                         exception);
@@ -274,7 +356,16 @@ public sealed class MainViewModel : ViewModelBase
             }
             else
             {
-                FanControlStatus = "Fan Control: read-only unavailable. A usable supported Intel Mac model identity was not detected.";
+                ApplyFanStatus(StructuredFanControlStatus.CreateUnavailable(
+                    hardwareIdentityEstablished
+                        ? FanBackendState.NotApplicable
+                        : FanBackendState.Unavailable,
+                    hardwareIdentityEstablished
+                        ? FanSafetyState.UnsupportedModel
+                        : FanSafetyState.MonitoringUnavailable,
+                    hardwareIdentityEstablished
+                        ? "The detected model is not supported for fan monitoring."
+                        : "A verified hardware model identity could not be established."));
                 _logger.Info("Fan read skipped because hardware detection did not produce a usable supported Intel Mac model identity.");
             }
 
@@ -304,8 +395,136 @@ public sealed class MainViewModel : ViewModelBase
         }
         finally
         {
+            if (fanGateAcquired)
+            {
+                _fanOperationGate.Release();
+            }
+
             IsBusy = false;
         }
+    }
+
+    private async Task MonitorFansAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await _fanPollingDelayAsync(_fanPollingInterval, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (IsBusy || !await _fanOperationGate.WaitAsync(0, cancellationToken))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var model = _fanMonitoringModel;
+                    if (IsBusy || string.IsNullOrWhiteSpace(model))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var status = await _fanControlService
+                            .ReadStatusAsync(model, cancellationToken);
+                        ApplyFanStatus(status);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        var changed = ApplyFanStatus(StructuredFanControlStatus.CreateUnavailable(
+                            FanBackendState.Error,
+                            FanSafetyState.Error,
+                            "The live read failed unexpectedly. Check the log for details."));
+
+                        if (changed)
+                        {
+                            _logger.Error(
+                                $"Live fan read failed unexpectedly. Model: {model}.",
+                                exception);
+                        }
+                    }
+                }
+                finally
+                {
+                    _fanOperationGate.Release();
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal monitor shutdown.
+        }
+        catch (Exception exception)
+        {
+            ApplyFanStatus(StructuredFanControlStatus.CreateUnavailable(
+                FanBackendState.Error,
+                FanSafetyState.Error,
+                "Fan monitoring stopped after an unexpected scheduler failure."));
+            _logger.Error("Fan monitoring stopped unexpectedly.", exception);
+        }
+    }
+
+    private async Task StopFanMonitoringCoreAsync(
+        Task monitoringTask,
+        CancellationTokenSource cancellationSource)
+    {
+        await Task.Yield();
+
+        try
+        {
+            await monitoringTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is the expected shutdown path.
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Fan monitoring shutdown failed unexpectedly.", exception);
+        }
+        finally
+        {
+            lock (_fanMonitoringSync)
+            {
+                if (ReferenceEquals(_fanMonitoringTask, monitoringTask))
+                {
+                    _fanMonitoringTask = null;
+                    _fanMonitoringCancellationSource = null;
+                    _fanMonitoringStopTask = null;
+                }
+            }
+
+            cancellationSource.Dispose();
+        }
+
+        _logger.Info("Fan monitoring stopped.");
+    }
+
+    private bool ApplyFanStatus(StructuredFanControlStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+
+        var stateChanged = _lastLoggedFanBackendState != status.BackendState
+            || _lastLoggedFanSafetyState != status.SafetyState;
+
+        FanStatus = status;
+
+        if (stateChanged)
+        {
+            _lastLoggedFanBackendState = status.BackendState;
+            _lastLoggedFanSafetyState = status.SafetyState;
+            _logger.Info(
+                $"Fan monitoring state changed. Backend: {status.BackendState}. Safety: {status.SafetyState}. {status.Details}");
+        }
+
+        return stateChanged;
     }
 
     private void OnRefreshCanceled(OperationCanceledException exception)

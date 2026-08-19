@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanController
@@ -33,23 +31,16 @@ internal sealed class FanController
         var fan1Actual = snapshot.Fan1Actual.GetFloat32();
         var fan0Maximum = snapshot.Fan0Maximum.GetFloat32();
         var fan1Maximum = snapshot.Fan1Maximum.GetFloat32();
-        var fan0Mode = FormatMode(snapshot.Fan0Mode.GetUInt8());
-        var fan1Mode = FormatMode(snapshot.Fan1Mode.GetUInt8());
-
-        var displayText = string.Format(
-            CultureInfo.InvariantCulture,
-            "Fan Control: read-only verified. Fan 0: {0:0} / {1:0} RPM ({2}); Fan 1: {3:0} / {4:0} RPM ({5}). Write control is not enabled.",
-            fan0Actual,
-            fan0Maximum,
-            fan0Mode,
-            fan1Actual,
-            fan1Maximum,
-            fan1Mode);
+        var fan0Mode = GetMode(snapshot.Fan0Mode.GetUInt8());
+        var fan1Mode = GetMode(snapshot.Fan1Mode.GetUInt8());
 
         return new FanControllerReadResult(
             new FanControlStatus(
-                IsAvailable: true,
-                DisplayText: displayText),
+                FanBackendState.Running,
+                FanSafetyState.ReadOnlyVerified,
+                new FanReading(fan0Actual, fan0Maximum, fan0Mode),
+                new FanReading(fan1Actual, fan1Maximum, fan1Mode),
+                "The AppleSMC read-only protocol and fan metadata were verified."),
             capability);
     }
 
@@ -62,18 +53,19 @@ internal sealed class FanController
             ? "Fan read capability is not available."
             : string.Join(" ", capability.Failures);
 
-        return new FanControlStatus(
-            IsAvailable: false,
-            DisplayText: $"Fan Control: read-only unavailable. {reason}");
+        return FanControlStatus.CreateUnavailable(
+            FanBackendState.Running,
+            FanSafetyState.ReadOnlyUnavailable,
+            reason);
     }
 
-    private static string FormatMode(byte mode)
+    private static FanOperatingMode GetMode(byte mode)
     {
         return mode switch
         {
-            0 => "Apple Auto",
-            1 => "Manual",
-            _ => $"Unknown mode {mode}"
+            0 => FanOperatingMode.AppleAuto,
+            1 => FanOperatingMode.Manual,
+            _ => FanOperatingMode.Unknown
         };
     }
 }
