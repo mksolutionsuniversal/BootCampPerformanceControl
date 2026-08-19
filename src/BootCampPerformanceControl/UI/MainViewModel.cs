@@ -15,6 +15,7 @@ public sealed class MainViewModel : ViewModelBase
 {
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
+    private readonly IFanControlService _fanControlService;
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
@@ -42,7 +43,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _boostModeDc = "Not read";
     private string _detectedProfileState = "Unknown - power state has not been read.";
     private string _restoreSnapshotStatus = "Not available.";
-    private string _fanControlStatus;
+    private string _fanControlStatus = "Fan Control: not read yet.";
     private string _statusMessage = "Ready";
     private bool _isBusy;
 
@@ -72,6 +73,7 @@ public sealed class MainViewModel : ViewModelBase
 
         _hardwareDetectionService = hardwareDetectionService;
         _powerManagementService = powerManagementService;
+        _fanControlService = fanControlService;
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
         _restoreSnapshotStore = restoreSnapshotStore;
@@ -80,8 +82,6 @@ public sealed class MainViewModel : ViewModelBase
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
         _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
-        _fanControlStatus = fanControlService.GetStatus().DisplayText;
-
         RefreshRestoreSnapshotStatus();
         RefreshCommand = new AsyncCommand(
             RefreshAsync,
@@ -227,6 +227,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             var errors = 0;
             var verificationResult = ModelVerificationResult.Unknown();
+            var hasUsableFanModelIdentity = false;
 
             try
             {
@@ -236,6 +237,7 @@ public sealed class MainViewModel : ViewModelBase
                 _lastVerificationResult = verificationResult;
                 ApplyHardware(hardwareSnapshot);
                 ApplyCompatibility(verificationResult);
+                hasUsableFanModelIdentity = HasUsableFanModelIdentity(verificationResult);
                 _logger.Info(
                     $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Platform support: {verificationResult.PlatformSupport}. Validation level: {verificationResult.ValidationLevel}.");
             }
@@ -246,6 +248,34 @@ public sealed class MainViewModel : ViewModelBase
                 ApplyCompatibility(verificationResult);
                 _lastVerificationResult = verificationResult;
                 _logger.Error("Hardware detection failed.", exception);
+            }
+
+            if (hasUsableFanModelIdentity)
+            {
+                try
+                {
+                    _logger.Info($"Fan read started. Model: {verificationResult.Model}.");
+                    var fanStatus = await _fanControlService
+                        .ReadStatusAsync(verificationResult.Model, cancellationToken);
+                    FanControlStatus = fanStatus.DisplayText;
+
+                    _logger.Info(fanStatus.IsAvailable
+                        ? $"Fan read completed. Model: {verificationResult.Model}."
+                        : $"Fan read unavailable. Model: {verificationResult.Model}. {fanStatus.DisplayText}");
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    errors++;
+                    FanControlStatus = "Fan Control: read-only read failed. Check the log for details.";
+                    _logger.Error(
+                        $"Fan read failed. Model: {verificationResult.Model}.",
+                        exception);
+                }
+            }
+            else
+            {
+                FanControlStatus = "Fan Control: read-only unavailable. A usable supported Intel Mac model identity was not detected.";
+                _logger.Info("Fan read skipped because hardware detection did not produce a usable supported Intel Mac model identity.");
             }
 
             try
@@ -537,6 +567,17 @@ public sealed class MainViewModel : ViewModelBase
         PlatformSupport = PlatformSupportFormatter.FormatPlatformSupport(verificationResult.PlatformSupport);
         ModelValidation = PlatformSupportFormatter.FormatModelValidation(verificationResult.ValidationLevel);
         CompatibilityDetails = verificationResult.Message;
+    }
+
+    private static bool HasUsableFanModelIdentity(
+        ModelVerificationResult verificationResult)
+    {
+        return verificationResult.IsSupportedIntelMac
+            && !string.IsNullOrWhiteSpace(verificationResult.Model)
+            && !string.Equals(
+                verificationResult.Model,
+                "Unknown",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private void ApplyPowerState(PowerStateSnapshot snapshot)

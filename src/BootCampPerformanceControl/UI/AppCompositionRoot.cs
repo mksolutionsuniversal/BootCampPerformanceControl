@@ -39,7 +39,7 @@ public static class AppCompositionRoot
         return new MainViewModel(
             hardwareDetectionService,
             powerManagementService,
-            new UnavailableFanControlService(),
+            new AppleSmcReadOnlyFanControlService(),
             profileCatalog,
             profileApplyService,
             restoreSnapshotStore,
