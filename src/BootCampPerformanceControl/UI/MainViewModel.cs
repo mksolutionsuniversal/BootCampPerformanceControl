@@ -3,6 +3,7 @@ using System.Windows.Input;
 using BootCampPerformanceControl.ApplicationInfo;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.BackendActivation;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -15,10 +16,12 @@ namespace BootCampPerformanceControl.UI;
 public sealed class MainViewModel : ViewModelBase
 {
     private static readonly TimeSpan DefaultFanPollingInterval = TimeSpan.FromSeconds(2);
+    private static readonly FanSafetyPolicy FanIdentitySafetyPolicy = new();
 
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
     private readonly IFanControlService _fanControlService;
+    private readonly IAppleSmcBackendElevationLauncher _appleSmcBackendElevationLauncher;
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
@@ -64,6 +67,7 @@ public sealed class MainViewModel : ViewModelBase
         IHardwareDetectionService hardwareDetectionService,
         IPowerManagementService powerManagementService,
         IFanControlService fanControlService,
+        IAppleSmcBackendElevationLauncher appleSmcBackendElevationLauncher,
         IProfileCatalog profileCatalog,
         ProfileApplyService profileApplyService,
         IRestoreSnapshotStore restoreSnapshotStore,
@@ -78,6 +82,7 @@ public sealed class MainViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(hardwareDetectionService);
         ArgumentNullException.ThrowIfNull(powerManagementService);
         ArgumentNullException.ThrowIfNull(fanControlService);
+        ArgumentNullException.ThrowIfNull(appleSmcBackendElevationLauncher);
         ArgumentNullException.ThrowIfNull(profileCatalog);
         ArgumentNullException.ThrowIfNull(profileApplyService);
         ArgumentNullException.ThrowIfNull(restoreSnapshotStore);
@@ -89,6 +94,7 @@ public sealed class MainViewModel : ViewModelBase
         _hardwareDetectionService = hardwareDetectionService;
         _powerManagementService = powerManagementService;
         _fanControlService = fanControlService;
+        _appleSmcBackendElevationLauncher = appleSmcBackendElevationLauncher;
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
         _restoreSnapshotStore = restoreSnapshotStore;
@@ -112,6 +118,11 @@ public sealed class MainViewModel : ViewModelBase
             canExecute: () => !IsBusy,
             onCanceled: OnRefreshCanceled,
             onException: OnRefreshException);
+        EnableFanMonitoringCommand = new AsyncCommand(
+            EnableFanMonitoringAsync,
+            canExecute: () => !IsBusy && IsFanMonitoringActivationAvailable,
+            onCanceled: OnEnableFanMonitoringCanceled,
+            onException: OnEnableFanMonitoringException);
         ExportDiagnosticReportCommand = new AsyncCommand(
             ExportDiagnosticReportAsync,
             canExecute: () => !IsBusy,
@@ -121,6 +132,8 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     public ICommand RefreshCommand { get; }
+
+    public ICommand EnableFanMonitoringCommand { get; }
 
     public ICommand ExportDiagnosticReportCommand { get; }
 
@@ -226,11 +239,16 @@ public sealed class MainViewModel : ViewModelBase
             if (SetProperty(ref _fanStatus, value))
             {
                 OnPropertyChanged(nameof(FanControlStatus));
+                NotifyFanMonitoringActivationStateChanged();
             }
         }
     }
 
     public string FanControlStatus => FanStatus.DisplayText;
+
+    public bool IsFanMonitoringActivationAvailable =>
+        FanStatus.BackendState == FanBackendState.InstalledStopped
+        && HasVerifiedFanActivationIdentity(_lastVerificationResult);
 
     public string StatusMessage
     {
@@ -268,6 +286,11 @@ public sealed class MainViewModel : ViewModelBase
 
     public Task StopFanMonitoringAsync()
     {
+        if (EnableFanMonitoringCommand is AsyncCommand enableFanMonitoringCommand)
+        {
+            enableFanMonitoringCommand.Cancel();
+        }
+
         lock (_fanMonitoringSync)
         {
             if (_fanMonitoringTask is null || _fanMonitoringCancellationSource is null)
@@ -310,7 +333,7 @@ public sealed class MainViewModel : ViewModelBase
                 var hardwareSnapshot = await _hardwareDetectionService.DetectAsync(cancellationToken);
                 verificationResult = _hardwareDetectionService.VerifyModel(hardwareSnapshot);
                 hardwareIdentityEstablished = true;
-                _lastVerificationResult = verificationResult;
+                SetLastVerificationResult(verificationResult);
                 ApplyHardware(hardwareSnapshot);
                 ApplyCompatibility(verificationResult);
                 hasUsableFanModelIdentity = HasUsableFanModelIdentity(verificationResult);
@@ -327,7 +350,7 @@ public sealed class MainViewModel : ViewModelBase
                 errors++;
                 ApplyHardwareFailure();
                 ApplyCompatibility(verificationResult);
-                _lastVerificationResult = verificationResult;
+                SetLastVerificationResult(verificationResult);
                 _logger.Error("Hardware detection failed.", exception);
             }
 
@@ -392,6 +415,107 @@ public sealed class MainViewModel : ViewModelBase
             StatusMessage = errors == 0
                 ? "Refresh completed."
                 : "Refresh completed with errors. Check the log for details.";
+        }
+        finally
+        {
+            if (fanGateAcquired)
+            {
+                _fanOperationGate.Release();
+            }
+
+            IsBusy = false;
+        }
+    }
+
+    private async Task EnableFanMonitoringAsync(CancellationToken cancellationToken)
+    {
+        IsBusy = true;
+        StatusMessage = "Requesting administrator permission to enable fan monitoring...";
+        var fanGateAcquired = false;
+
+        try
+        {
+            if (!IsFanMonitoringActivationAvailable)
+            {
+                StatusMessage = "Fan monitoring activation is not available for the current backend and hardware state.";
+                return;
+            }
+
+            var verifiedModel = _lastVerificationResult.Model;
+            _logger.Info($"AppleSMC backend activation requested. Model: {verifiedModel}.");
+
+            await _fanOperationGate.WaitAsync(cancellationToken);
+            fanGateAcquired = true;
+
+            if (!IsFanMonitoringActivationAvailable
+                || !string.Equals(
+                    verifiedModel,
+                    _lastVerificationResult.Model,
+                    StringComparison.Ordinal))
+            {
+                _fanMonitoringModel = null;
+                StatusMessage = "Fan monitoring activation is no longer available for the current hardware state.";
+                _logger.Info("AppleSMC backend activation skipped because the verified hardware identity changed.");
+                return;
+            }
+
+            var launchResult = await _appleSmcBackendElevationLauncher
+                .LaunchAsync(cancellationToken);
+
+            if (launchResult.Outcome == AppleSmcBackendElevationOutcome.UserCanceled)
+            {
+                StatusMessage = "Fan monitoring was not enabled.";
+                _logger.Info("AppleSMC backend activation was canceled by the user at the UAC prompt.");
+                return;
+            }
+
+            if (launchResult.Outcome == AppleSmcBackendElevationOutcome.Failed
+                && !launchResult.ExitCode.HasValue)
+            {
+                StatusMessage = "Fan monitoring could not be enabled. Check the log for details.";
+                _logger.Error(
+                    "The elevated AppleSMC helper could not be launched.",
+                    launchResult.Exception
+                        ?? new InvalidOperationException("The elevation launcher did not provide failure details."));
+                return;
+            }
+
+            if (launchResult.Outcome == AppleSmcBackendElevationOutcome.Failed)
+            {
+                _logger.Error(
+                    $"Elevated AppleSMC helper completed with unrecognized exit code {FormatExitCode(launchResult.ExitCode)}. Parent verification will determine the backend state.",
+                    launchResult.Exception
+                        ?? new InvalidOperationException("The elevation launcher did not provide failure details."));
+            }
+            else
+            {
+                _logger.Info(
+                    $"Elevated AppleSMC helper completed. Outcome: {FormatHelperOutcome(launchResult.HelperOutcome)}; exit code: {FormatExitCode(launchResult.ExitCode)}.");
+            }
+
+            if (!HasVerifiedFanActivationIdentity(_lastVerificationResult)
+                || !string.Equals(
+                    verifiedModel,
+                    _lastVerificationResult.Model,
+                    StringComparison.Ordinal))
+            {
+                _fanMonitoringModel = null;
+                StatusMessage = "Fan monitoring was not enabled because the verified hardware identity is no longer valid.";
+                _logger.Info("Parent verification skipped because the verified hardware identity changed after helper completion.");
+                return;
+            }
+
+            var observedStatus = await _fanControlService
+                .ReadStatusAsync(verifiedModel, cancellationToken);
+            ApplyFanStatus(observedStatus);
+            _fanMonitoringModel = verifiedModel;
+
+            _logger.Info(
+                $"Parent AppleSMC verification completed. Backend: {observedStatus.BackendState}. Safety: {observedStatus.SafetyState}.");
+
+            StatusMessage = observedStatus.IsAvailable
+                ? "Fan monitoring enabled."
+                : $"Fan monitoring was not enabled. Parent verification observed backend '{observedStatus.BackendDisplayText}' and safety '{observedStatus.SafetyDisplayText}'. Helper outcome: '{FormatHelperOutcome(launchResult.HelperOutcome)}'.";
         }
         finally
         {
@@ -539,6 +663,18 @@ public sealed class MainViewModel : ViewModelBase
         _logger.Error("Refresh failed unexpectedly.", exception);
     }
 
+    private void OnEnableFanMonitoringCanceled(OperationCanceledException exception)
+    {
+        StatusMessage = "Fan monitoring activation canceled.";
+        _logger.Info($"Fan monitoring activation canceled: {exception.Message}");
+    }
+
+    private void OnEnableFanMonitoringException(Exception exception)
+    {
+        StatusMessage = "Fan monitoring activation failed. Check the log for details.";
+        _logger.Error("Fan monitoring activation failed unexpectedly.", exception);
+    }
+
     private async Task ExportDiagnosticReportAsync(CancellationToken cancellationToken)
     {
         IsBusy = true;
@@ -621,7 +757,7 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             _logger.Info($"Profile application succeeded: {profileId}. Re-reading power state.");
-            _lastVerificationResult = result.ModelVerificationResult;
+            SetLastVerificationResult(result.ModelVerificationResult);
 
             var profileDisplayName = GetProfileDisplayName(profileId);
 
@@ -799,6 +935,22 @@ public sealed class MainViewModel : ViewModelBase
                 StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool HasVerifiedFanActivationIdentity(
+        ModelVerificationResult verificationResult)
+    {
+        return verificationResult.IsSupportedIntelMac
+            && !string.IsNullOrWhiteSpace(verificationResult.Model)
+            && FanIdentitySafetyPolicy
+                .EvaluateIdentity(verificationResult.Model)
+                .Failures.Count == 0;
+    }
+
+    private void SetLastVerificationResult(ModelVerificationResult verificationResult)
+    {
+        _lastVerificationResult = verificationResult;
+        NotifyFanMonitoringActivationStateChanged();
+    }
+
     private void ApplyPowerState(PowerStateSnapshot snapshot)
     {
         ActivePowerScheme = snapshot.SchemeId.ToString();
@@ -905,6 +1057,11 @@ public sealed class MainViewModel : ViewModelBase
             exportDiagnosticReportCommand.NotifyCanExecuteChanged();
         }
 
+        if (EnableFanMonitoringCommand is AsyncCommand enableFanMonitoringCommand)
+        {
+            enableFanMonitoringCommand.NotifyCanExecuteChanged();
+        }
+
         foreach (var profileButton in ProfileButtons)
         {
             if (profileButton.Command is AsyncCommand profileCommand)
@@ -912,6 +1069,28 @@ public sealed class MainViewModel : ViewModelBase
                 profileCommand.NotifyCanExecuteChanged();
             }
         }
+    }
+
+    private void NotifyFanMonitoringActivationStateChanged()
+    {
+        OnPropertyChanged(nameof(IsFanMonitoringActivationAvailable));
+
+        if (EnableFanMonitoringCommand is AsyncCommand enableFanMonitoringCommand)
+        {
+            enableFanMonitoringCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private static string FormatHelperOutcome(
+        AppleSmcBackendActivationOutcome? helperOutcome)
+    {
+        return helperOutcome?.ToString() ?? "not provided";
+    }
+
+    private static string FormatExitCode(int? exitCode)
+    {
+        return exitCode?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ?? "not provided";
     }
 
     private static string FormatVideoController(VideoControllerInfo videoController)

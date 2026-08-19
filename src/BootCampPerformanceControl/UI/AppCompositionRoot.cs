@@ -1,5 +1,6 @@
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.BackendActivation;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -40,6 +41,7 @@ public static class AppCompositionRoot
             hardwareDetectionService,
             powerManagementService,
             new AppleSmcReadOnlyFanControlService(),
+            new WindowsAppleSmcBackendElevationLauncher(),
             profileCatalog,
             profileApplyService,
             restoreSnapshotStore,
