@@ -25,4 +25,10 @@ internal static class ApplicationStartupArguments
                 ? ApplicationStartupMode.StartAppleSmcHelper
                 : ApplicationStartupMode.Invalid;
     }
+
+    internal static bool RequiresMainApplicationInstanceGuard(
+        ApplicationStartupMode startupMode)
+    {
+        return startupMode == ApplicationStartupMode.Normal;
+    }
 }

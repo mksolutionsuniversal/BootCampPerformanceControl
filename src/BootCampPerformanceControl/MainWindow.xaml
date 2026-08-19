@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="BootCamp Performance Control"
+        Icon="Assets/AppIcon.ico"
         Height="700"
         Width="940"
         MinHeight="580"
@@ -61,8 +62,10 @@
             </StackPanel>
         </DockPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
+        <TabControl Grid.Row="1">
+            <TabItem Header="Overview">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8">
                 <GroupBox Header="Hardware">
                     <Grid Margin="4">
                         <Grid.ColumnDefinitions>
@@ -226,8 +229,46 @@
                                 Margin="0,4,0,0" />
                     </Grid>
                 </GroupBox>
-            </StackPanel>
-        </ScrollViewer>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Options">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="12">
+                        <GroupBox Header="Window close behavior">
+                            <StackPanel Margin="4">
+                                <TextBlock Text="Choose what happens when you click the X button."
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
+                                <RadioButton Content="Keep the application running in the system tray"
+                                             GroupName="CloseBehavior"
+                                             IsChecked="{Binding MinimizeToTrayOnClose, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,0,0,8" />
+                                <TextBlock Text="Fan monitoring remains active. Double-click the tray icon to restore the window, or choose Exit from its menu."
+                                           Foreground="#666666"
+                                           TextWrapping="Wrap"
+                                           Margin="24,0,0,14" />
+                                <RadioButton Content="Exit the application completely"
+                                             GroupName="CloseBehavior"
+                                             IsChecked="{Binding ExitApplicationOnClose, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Windows startup">
+                            <StackPanel Margin="4">
+                                <CheckBox Content="Start BootCamp Performance Control when I sign in to Windows"
+                                          IsChecked="{Binding StartWithWindows, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,8" />
+                                <TextBlock Text="This uses the current-user Windows startup entry and does not require administrator rights."
+                                           Foreground="#666666"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
 
         <TextBlock Grid.Row="2"
                    Text="{Binding StatusMessage}"

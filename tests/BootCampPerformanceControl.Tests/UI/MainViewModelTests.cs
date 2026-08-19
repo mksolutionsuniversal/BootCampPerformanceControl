@@ -1,4 +1,5 @@
 using System.Reflection;
+using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
@@ -13,6 +14,83 @@ namespace BootCampPerformanceControl.Tests.UI;
 
 public sealed class MainViewModelTests
 {
+    [Fact]
+    public void ApplicationOptions_AreLoadedWithoutWritingSettings()
+    {
+        var optionsService = new FakeApplicationOptionsService
+        {
+            Options = new ApplicationOptionsSnapshot(
+                ApplicationCloseBehavior.ExitApplication,
+                StartWithWindows: true)
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            applicationOptionsService: optionsService);
+
+        Assert.False(viewModel.MinimizeToTrayOnClose);
+        Assert.True(viewModel.ExitApplicationOnClose);
+        Assert.True(viewModel.StartWithWindows);
+        Assert.Equal(1, optionsService.LoadCallCount);
+        Assert.Equal(0, optionsService.SetCloseBehaviorCallCount);
+        Assert.Equal(0, optionsService.SetStartWithWindowsCallCount);
+    }
+
+    [Fact]
+    public void ApplicationOptions_ChangesPersistAndUpdateTheViewModel()
+    {
+        var optionsService = new FakeApplicationOptionsService();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            applicationOptionsService: optionsService);
+
+        Assert.True(viewModel.MinimizeToTrayOnClose);
+        Assert.False(viewModel.ExitApplicationOnClose);
+        Assert.False(viewModel.StartWithWindows);
+
+        viewModel.ExitApplicationOnClose = true;
+        viewModel.StartWithWindows = true;
+
+        Assert.False(viewModel.MinimizeToTrayOnClose);
+        Assert.True(viewModel.ExitApplicationOnClose);
+        Assert.True(viewModel.StartWithWindows);
+        Assert.Equal(ApplicationCloseBehavior.ExitApplication, optionsService.LastCloseBehavior);
+        Assert.True(optionsService.LastStartWithWindows);
+        Assert.Equal(1, optionsService.SetCloseBehaviorCallCount);
+        Assert.Equal(1, optionsService.SetStartWithWindowsCallCount);
+    }
+
+    [Fact]
+    public void ApplicationOptions_WriteFailureRevertsDisplayedValuesAndLogsError()
+    {
+        var expectedException = new InvalidOperationException("Registry unavailable.");
+        var optionsService = new FakeApplicationOptionsService
+        {
+            SetException = expectedException
+        };
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            applicationOptionsService: optionsService);
+        var changedProperties = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        viewModel.ExitApplicationOnClose = true;
+        viewModel.StartWithWindows = true;
+
+        Assert.True(viewModel.MinimizeToTrayOnClose);
+        Assert.False(viewModel.ExitApplicationOnClose);
+        Assert.False(viewModel.StartWithWindows);
+        Assert.Contains(nameof(MainViewModel.MinimizeToTrayOnClose), changedProperties);
+        Assert.Contains(nameof(MainViewModel.ExitApplicationOnClose), changedProperties);
+        Assert.Contains(nameof(MainViewModel.StartWithWindows), changedProperties);
+        Assert.Equal(2, logger.Errors.Count);
+        Assert.All(logger.Errors, error => Assert.Same(expectedException, error.Exception));
+    }
+
     [Fact]
     public void MainViewModel_DoesNotDependOnConcreteRestoreSnapshotStore()
     {
@@ -1959,6 +2037,7 @@ public sealed class MainViewModelTests
         IUserConfirmationService? userConfirmationService = null,
         FakeFanControlService? fanControlService = null,
         FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
+        IApplicationOptionsService? applicationOptionsService = null,
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
     {
         var profileCatalog = new ProfileCatalog();
@@ -1971,6 +2050,7 @@ public sealed class MainViewModelTests
             powerManagementService,
             fanControlService ?? new FakeFanControlService(),
             elevationLauncher ?? new FakeAppleSmcBackendElevationLauncher(),
+            applicationOptionsService ?? new FakeApplicationOptionsService(),
             profileCatalog,
             new ProfileApplyService(
                 hardwareDetectionService,
@@ -2664,6 +2744,54 @@ public sealed class MainViewModelTests
             CallCount++;
             LastModelName = modelName;
             return Result;
+        }
+    }
+
+    private sealed class FakeApplicationOptionsService : IApplicationOptionsService
+    {
+        public ApplicationOptionsSnapshot Options { get; init; } =
+            ApplicationOptionsSnapshot.Default;
+
+        public Exception? SetException { get; init; }
+
+        public int LoadCallCount { get; private set; }
+
+        public int SetCloseBehaviorCallCount { get; private set; }
+
+        public int SetStartWithWindowsCallCount { get; private set; }
+
+        public ApplicationCloseBehavior? LastCloseBehavior { get; private set; }
+
+        public bool? LastStartWithWindows { get; private set; }
+
+        public ApplicationOptionsSnapshot Load()
+        {
+            LoadCallCount++;
+            return Options;
+        }
+
+        public void SetCloseBehavior(ApplicationCloseBehavior closeBehavior)
+        {
+            SetCloseBehaviorCallCount++;
+
+            if (SetException is not null)
+            {
+                throw SetException;
+            }
+
+            LastCloseBehavior = closeBehavior;
+        }
+
+        public void SetStartWithWindows(bool enabled)
+        {
+            SetStartWithWindowsCallCount++;
+
+            if (SetException is not null)
+            {
+                throw SetException;
+            }
+
+            LastStartWithWindows = enabled;
         }
     }
 }

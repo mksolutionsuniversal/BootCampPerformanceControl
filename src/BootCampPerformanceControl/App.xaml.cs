@@ -8,8 +8,10 @@ using BootCampPerformanceControl.UI;
 
 namespace BootCampPerformanceControl;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
+    private ApplicationInstanceGuard? _instanceGuard;
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -32,10 +34,27 @@ public partial class App : Application
             return;
         }
 
-        logger.Info("Application start.");
-
         try
         {
+            if (ApplicationStartupArguments.RequiresMainApplicationInstanceGuard(startupMode))
+            {
+                _instanceGuard = ApplicationInstanceGuard.TryAcquire();
+
+                if (_instanceGuard is null)
+                {
+                    ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    logger.Info("Application startup skipped because another main instance is already running.");
+                    System.Windows.MessageBox.Show(
+                        "BootCamp Performance Control is already running. Check the system tray.",
+                        "BootCamp Performance Control",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    Shutdown(ApplicationExitCodes.Success);
+                    return;
+                }
+            }
+
+            logger.Info("Application start.");
             var window = new MainWindow(AppCompositionRoot.CreateMainViewModel(logger));
             MainWindow = window;
             window.Show();
@@ -43,13 +62,20 @@ public partial class App : Application
         catch (Exception exception)
         {
             logger.Error("Application startup failed.", exception);
-            MessageBox.Show(
+            System.Windows.MessageBox.Show(
                 "Application startup failed. Check the application log for details.",
                 "BootCamp Performance Control",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown(ApplicationExitCodes.ApplicationStartupFailed);
         }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _instanceGuard?.Dispose();
+        _instanceGuard = null;
+        base.OnExit(e);
     }
 
     private async Task RunAppleSmcActivationHelperAsync(

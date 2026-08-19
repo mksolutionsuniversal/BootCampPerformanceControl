@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using BootCampPerformanceControl.ApplicationInfo;
+using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
@@ -22,6 +23,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IPowerManagementService _powerManagementService;
     private readonly IFanControlService _fanControlService;
     private readonly IAppleSmcBackendElevationLauncher _appleSmcBackendElevationLauncher;
+    private readonly IApplicationOptionsService _applicationOptionsService;
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
@@ -56,6 +58,9 @@ public sealed class MainViewModel : ViewModelBase
     private StructuredFanControlStatus _fanStatus = StructuredFanControlStatus.NotChecked;
     private string _statusMessage = "Ready";
     private bool _isBusy;
+    private ApplicationCloseBehavior _closeBehavior =
+        ApplicationOptionsSnapshot.Default.CloseBehavior;
+    private bool _startWithWindows;
     private string? _fanMonitoringModel;
     private FanBackendState? _lastLoggedFanBackendState;
     private FanSafetyState? _lastLoggedFanSafetyState;
@@ -68,6 +73,7 @@ public sealed class MainViewModel : ViewModelBase
         IPowerManagementService powerManagementService,
         IFanControlService fanControlService,
         IAppleSmcBackendElevationLauncher appleSmcBackendElevationLauncher,
+        IApplicationOptionsService applicationOptionsService,
         IProfileCatalog profileCatalog,
         ProfileApplyService profileApplyService,
         IRestoreSnapshotStore restoreSnapshotStore,
@@ -83,6 +89,7 @@ public sealed class MainViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(powerManagementService);
         ArgumentNullException.ThrowIfNull(fanControlService);
         ArgumentNullException.ThrowIfNull(appleSmcBackendElevationLauncher);
+        ArgumentNullException.ThrowIfNull(applicationOptionsService);
         ArgumentNullException.ThrowIfNull(profileCatalog);
         ArgumentNullException.ThrowIfNull(profileApplyService);
         ArgumentNullException.ThrowIfNull(restoreSnapshotStore);
@@ -95,6 +102,7 @@ public sealed class MainViewModel : ViewModelBase
         _powerManagementService = powerManagementService;
         _fanControlService = fanControlService;
         _appleSmcBackendElevationLauncher = appleSmcBackendElevationLauncher;
+        _applicationOptionsService = applicationOptionsService;
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
         _restoreSnapshotStore = restoreSnapshotStore;
@@ -103,6 +111,7 @@ public sealed class MainViewModel : ViewModelBase
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
         _logger = logger;
         _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
+        LoadApplicationOptions();
         _fanPollingInterval = fanPollingInterval ?? DefaultFanPollingInterval;
         if (_fanPollingInterval <= TimeSpan.Zero)
         {
@@ -264,6 +273,59 @@ public sealed class MainViewModel : ViewModelBase
             if (SetProperty(ref _isBusy, value))
             {
                 NotifyOperationCommandsCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool MinimizeToTrayOnClose
+    {
+        get => _closeBehavior == ApplicationCloseBehavior.MinimizeToTray;
+        set
+        {
+            if (value)
+            {
+                UpdateCloseBehavior(ApplicationCloseBehavior.MinimizeToTray);
+            }
+        }
+    }
+
+    public bool ExitApplicationOnClose
+    {
+        get => _closeBehavior == ApplicationCloseBehavior.ExitApplication;
+        set
+        {
+            if (value)
+            {
+                UpdateCloseBehavior(ApplicationCloseBehavior.ExitApplication);
+            }
+        }
+    }
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set
+        {
+            if (value == _startWithWindows)
+            {
+                return;
+            }
+
+            try
+            {
+                _applicationOptionsService.SetStartWithWindows(value);
+                _startWithWindows = value;
+                OnPropertyChanged();
+                StatusMessage = value
+                    ? "BootCamp Performance Control will start when you sign in to Windows."
+                    : "Windows startup disabled for BootCamp Performance Control.";
+                _logger.Info($"Windows startup option changed. Enabled: {value}.");
+            }
+            catch (Exception exception)
+            {
+                OnPropertyChanged();
+                StatusMessage = "Windows startup option could not be changed. Check the log for details.";
+                _logger.Error("Updating the Windows startup option failed.", exception);
             }
         }
     }
@@ -943,6 +1005,51 @@ public sealed class MainViewModel : ViewModelBase
             && FanIdentitySafetyPolicy
                 .EvaluateIdentity(verificationResult.Model)
                 .Failures.Count == 0;
+    }
+
+    private void LoadApplicationOptions()
+    {
+        try
+        {
+            var options = _applicationOptionsService.Load();
+            _closeBehavior = options.CloseBehavior;
+            _startWithWindows = options.StartWithWindows;
+        }
+        catch (Exception exception)
+        {
+            _closeBehavior = ApplicationOptionsSnapshot.Default.CloseBehavior;
+            _startWithWindows = ApplicationOptionsSnapshot.Default.StartWithWindows;
+            _logger.Error(
+                "Application options could not be loaded. Safe defaults will be used.",
+                exception);
+        }
+    }
+
+    private void UpdateCloseBehavior(ApplicationCloseBehavior closeBehavior)
+    {
+        if (closeBehavior == _closeBehavior)
+        {
+            return;
+        }
+
+        try
+        {
+            _applicationOptionsService.SetCloseBehavior(closeBehavior);
+            _closeBehavior = closeBehavior;
+            OnPropertyChanged(nameof(MinimizeToTrayOnClose));
+            OnPropertyChanged(nameof(ExitApplicationOnClose));
+            StatusMessage = closeBehavior == ApplicationCloseBehavior.MinimizeToTray
+                ? "Closing the window will keep the application in the system tray."
+                : "Closing the window will exit the application completely.";
+            _logger.Info($"Window close behavior changed to '{closeBehavior}'.");
+        }
+        catch (Exception exception)
+        {
+            OnPropertyChanged(nameof(MinimizeToTrayOnClose));
+            OnPropertyChanged(nameof(ExitApplicationOnClose));
+            StatusMessage = "Window close behavior could not be changed. Check the log for details.";
+            _logger.Error("Updating the window close behavior failed.", exception);
+        }
     }
 
     private void SetLastVerificationResult(ModelVerificationResult verificationResult)

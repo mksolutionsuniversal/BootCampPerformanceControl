@@ -16,7 +16,7 @@ public sealed class WpfDiagnosticReportFileSaveService : IDiagnosticReportFileSa
         ArgumentNullException.ThrowIfNull(report);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var dialog = new SaveFileDialog
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
             FileName = report.SuggestedFileName,
             DefaultExt = ".txt",

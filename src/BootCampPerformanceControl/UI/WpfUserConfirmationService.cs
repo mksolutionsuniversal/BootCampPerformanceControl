@@ -14,7 +14,7 @@ public sealed class WpfUserConfirmationService : IUserConfirmationService
             "Your original processor power settings will be saved before changes are applied." + Environment.NewLine + Environment.NewLine +
             "Do you want to continue?";
 
-        var result = MessageBox.Show(
+        var result = System.Windows.MessageBox.Show(
             message,
             title,
             MessageBoxButton.OKCancel,
