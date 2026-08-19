@@ -23,14 +23,8 @@ internal sealed class FanController
             !capability.IsHardwareSafetyGateSatisfied ||
             capability.Snapshot is null)
         {
-            var reason = capability.Failures.Count == 0
-                ? "Fan read capability is not available."
-                : string.Join(" ", capability.Failures);
-
             return new FanControllerReadResult(
-                new FanControlStatus(
-                    IsAvailable: false,
-                    DisplayText: $"Fan Control: read-only unavailable. {reason}"),
+                CreateUnavailableStatus(capability),
                 capability);
         }
 
@@ -57,6 +51,20 @@ internal sealed class FanController
                 IsAvailable: true,
                 DisplayText: displayText),
             capability);
+    }
+
+    internal static FanControlStatus CreateUnavailableStatus(
+        FanControlCapabilityResult capability)
+    {
+        ArgumentNullException.ThrowIfNull(capability);
+
+        var reason = capability.Failures.Count == 0
+            ? "Fan read capability is not available."
+            : string.Join(" ", capability.Failures);
+
+        return new FanControlStatus(
+            IsAvailable: false,
+            DisplayText: $"Fan Control: read-only unavailable. {reason}");
     }
 
     private static string FormatMode(byte mode)

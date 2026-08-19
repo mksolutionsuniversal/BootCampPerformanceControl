@@ -56,6 +56,23 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void Constructor_DoesNotPerformFanHardwareIo()
+    {
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1());
+        var fanControlService = new FakeFanControlService();
+
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService);
+
+        Assert.Equal("Fan Control: not read yet.", viewModel.FanControlStatus);
+        Assert.Equal(0, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(0, fanControlService.ReadStatusCallCount);
+    }
+
+    [Fact]
     public void RestoreSnapshotStatus_InitialStateReflectsUnavailableSnapshot()
     {
         var viewModel = CreateViewModel(
@@ -107,6 +124,120 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal("Windows / custom processor settings.", viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task Refresh_WithSuccessfulFanRead_UpdatesFanStatusAfterHardwareDetection()
+    {
+        const string verifiedStatus =
+            "Fan Control: read-only verified. Fan 0: 1840 / 5616 RPM (Apple Auto); Fan 1: 1691 / 5200 RPM (Apple Auto). Write control is not enabled.";
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1());
+        var fanControlService = new FakeFanControlService(
+            new FanControlStatus(IsAvailable: true, verifiedStatus));
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            logger: logger,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(verifiedStatus, viewModel.FanControlStatus);
+        Assert.Equal([VerifiedHardwareModels.MacBookPro16_1], fanControlService.ReadModels);
+        Assert.Equal(1, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal("Refresh completed.", viewModel.StatusMessage);
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.Contains("Fan read started", StringComparison.Ordinal));
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.Contains("Fan read completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Refresh_FanReadFailure_ReportsErrorAndStillReadsPowerState()
+    {
+        var fanControlService = new FakeFanControlService();
+        fanControlService.QueueReadException(
+            new InvalidOperationException("AppleSMC device is busy."));
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            logger: logger,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(
+            "Fan Control: read-only read failed. Check the log for details.",
+            viewModel.FanControlStatus);
+        Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal(
+            "Refresh completed with errors. Check the log for details.",
+            viewModel.StatusMessage);
+        var error = Assert.Single(logger.Errors);
+        Assert.Contains("Fan read failed", error.Message, StringComparison.Ordinal);
+        Assert.Equal("AppleSMC device is busy.", error.Exception.Message);
+    }
+
+    [Fact]
+    public async Task Refresh_FanCancellation_ReportsCanceledWithoutNormalFanFailure()
+    {
+        var fanControlService = new FakeFanControlService();
+        fanControlService.QueueReadException(
+            new OperationCanceledException("Fan read canceled."));
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var logger = new TestApplicationLogger();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            logger: logger,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal("Refresh canceled.", viewModel.StatusMessage);
+        Assert.Equal("Fan Control: not read yet.", viewModel.FanControlStatus);
+        Assert.Equal(0, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Empty(logger.Errors);
+        Assert.DoesNotContain(
+            logger.InformationMessages,
+            message => message.Contains("Fan read failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Refresh_HardwareDetectionFailure_SkipsFanReadAndStillReadsPowerState()
+    {
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1())
+        {
+            DetectException = new InvalidOperationException("Detection failed.")
+        };
+        var fanControlService = new FakeFanControlService();
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Contains("read-only unavailable", viewModel.FanControlStatus, StringComparison.Ordinal);
+        Assert.Equal(
+            "Refresh completed with errors. Check the log for details.",
+            viewModel.StatusMessage);
     }
 
     [Fact]
@@ -1237,7 +1368,8 @@ public sealed class MainViewModelTests
         TestApplicationLogger? logger = null,
         FakeDiagnosticReportService? diagnosticReportService = null,
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
-        IUserConfirmationService? userConfirmationService = null)
+        IUserConfirmationService? userConfirmationService = null,
+        FakeFanControlService? fanControlService = null)
     {
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
@@ -1247,7 +1379,7 @@ public sealed class MainViewModelTests
         return new MainViewModel(
             hardwareDetectionService,
             powerManagementService,
-            new FakeFanControlService(),
+            fanControlService ?? new FakeFanControlService(),
             profileCatalog,
             new ProfileApplyService(
                 hardwareDetectionService,
@@ -1466,11 +1598,48 @@ public sealed class MainViewModelTests
 
     private sealed class FakeFanControlService : IFanControlService
     {
-        public FanControlStatus GetStatus()
+        private readonly Queue<FanControlStatus> _statuses;
+        private readonly Queue<Exception> _exceptions = [];
+        private FanControlStatus _lastStatus;
+
+        public FakeFanControlService(params FanControlStatus[] statuses)
         {
-            return new FanControlStatus(
-                IsAvailable: false,
-                "Unavailable in tests.");
+            _statuses = new Queue<FanControlStatus>(statuses);
+            _lastStatus = statuses.Length == 0
+                ? new FanControlStatus(
+                    IsAvailable: false,
+                    "Unavailable in tests.")
+                : statuses[^1];
+        }
+
+        public int ReadStatusCallCount { get; private set; }
+
+        public List<string> ReadModels { get; } = [];
+
+        public void QueueReadException(Exception exception)
+        {
+            _exceptions.Enqueue(exception);
+        }
+
+        public Task<FanControlStatus> ReadStatusAsync(
+            string model,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReadStatusCallCount++;
+            ReadModels.Add(model);
+
+            if (_exceptions.Count > 0)
+            {
+                throw _exceptions.Dequeue();
+            }
+
+            if (_statuses.Count > 0)
+            {
+                _lastStatus = _statuses.Dequeue();
+            }
+
+            return Task.FromResult(_lastStatus);
         }
     }
 
@@ -1492,6 +1661,8 @@ public sealed class MainViewModelTests
 
         public int VerifyModelCallCount { get; private set; }
 
+        public Exception? DetectException { get; init; }
+
         public void QueueDetectGate(AsyncGate gate)
         {
             _detectGates.Enqueue(gate);
@@ -1504,6 +1675,11 @@ public sealed class MainViewModelTests
             if (_detectGates.Count > 0)
             {
                 await _detectGates.Dequeue().WaitAsync();
+            }
+
+            if (DetectException is not null)
+            {
+                throw DetectException;
             }
 
             if (_verificationResults.Count > 0)
