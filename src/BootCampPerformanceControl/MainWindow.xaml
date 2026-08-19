@@ -177,9 +177,42 @@
                 </GroupBox>
 
                 <GroupBox Header="Fan Control">
-                    <TextBlock Text="{Binding FanControlStatus}"
-                               Style="{StaticResource ValueTextStyle}"
-                               Margin="4" />
+                    <Grid Margin="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="AppleSMC backend" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.BackendDisplayText}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Safety status" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.SafetyDisplayText}" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Fan 0" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Fan0DisplayText}" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Fan 1" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Fan1DisplayText}" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Mode" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.ModeDisplayText}" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Write control" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.WriteControlDisplayText}" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Details}" />
+                    </Grid>
                 </GroupBox>
             </StackPanel>
         </ScrollViewer>

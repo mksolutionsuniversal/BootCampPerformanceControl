@@ -48,12 +48,25 @@ internal sealed class CrystalIdeaAppleSmcSession : ISmcTransport
             cancellationToken);
     }
 
+    internal static Task<CrystalIdeaAppleSmcSession> OpenReadOnlyAsync(
+        IAppleSmcServiceController serviceController,
+        IAppleSmcTransportFactory transportFactory,
+        CancellationToken cancellationToken)
+    {
+        return OpenAsync(
+            serviceController,
+            transportFactory,
+            cancellationToken,
+            allowServiceStart: false);
+    }
+
     internal static async Task<CrystalIdeaAppleSmcSession> OpenAsync(
         IAppleSmcServiceController serviceController,
         IAppleSmcTransportFactory transportFactory,
         CancellationToken cancellationToken,
         int maximumPollAttempts = DefaultMaximumPollAttempts,
-        TimeSpan? pollInterval = null)
+        TimeSpan? pollInterval = null,
+        bool allowServiceStart = true)
     {
         ArgumentNullException.ThrowIfNull(serviceController);
         ArgumentNullException.ThrowIfNull(transportFactory);
@@ -86,6 +99,11 @@ internal sealed class CrystalIdeaAppleSmcSession : ISmcTransport
                     break;
 
                 case AppleSmcServiceState.Stopped:
+                    if (!allowServiceStart)
+                    {
+                        throw new AppleSmcServiceStateException(initialState);
+                    }
+
                     cancellationToken.ThrowIfCancellationRequested();
                     serviceController.Start();
                     startedService = true;
@@ -100,6 +118,11 @@ internal sealed class CrystalIdeaAppleSmcSession : ISmcTransport
                     break;
 
                 default:
+                    if (!allowServiceStart)
+                    {
+                        throw new AppleSmcServiceStateException(initialState);
+                    }
+
                     throw new InvalidOperationException(
                         $"Windows service '{WindowsAppleSmcServiceController.ServiceName}' "
                         + $"is in unsupported initial state {FormatState(initialState)}. "
