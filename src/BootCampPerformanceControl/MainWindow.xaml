@@ -10,6 +10,7 @@
         MinHeight="580"
         MinWidth="760">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <Style x:Key="ValueTextStyle" TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -190,6 +191,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="AppleSMC backend" />
@@ -212,6 +214,16 @@
 
                         <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
                         <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Details}" />
+
+                        <Button Grid.Row="7"
+                                Grid.Column="1"
+                                Content="Enable Fan Monitoring"
+                                Command="{Binding EnableFanMonitoringCommand}"
+                                Visibility="{Binding IsFanMonitoringActivationAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                HorizontalAlignment="Left"
+                                MinWidth="190"
+                                Padding="16,8"
+                                Margin="0,4,0,0" />
                     </Grid>
                 </GroupBox>
             </StackPanel>

@@ -1,6 +1,7 @@
 using System.Reflection;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.BackendActivation;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
@@ -61,16 +62,19 @@ public sealed class MainViewModelTests
         var hardwareDetectionService = new FakeHardwareDetectionService(
             VerifiedMacBookPro16_1());
         var fanControlService = new FakeFanControlService();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
 
         var viewModel = CreateViewModel(
             hardwareDetectionService,
             new FakePowerManagementService(InitialPowerState()),
-            fanControlService: fanControlService);
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
 
         Assert.Equal(FanBackendState.NotChecked, viewModel.FanStatus.BackendState);
         Assert.Equal(FanSafetyState.NotChecked, viewModel.FanStatus.SafetyState);
         Assert.Equal(0, hardwareDetectionService.DetectCallCount);
         Assert.Equal(0, fanControlService.ReadStatusCallCount);
+        Assert.Equal(0, elevationLauncher.LaunchCallCount);
     }
 
     [Fact]
@@ -266,6 +270,357 @@ public sealed class MainViewModelTests
         Assert.Equal(backendState, viewModel.FanStatus.BackendState);
         Assert.Equal("Refresh completed.", viewModel.StatusMessage);
         Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_IsAvailableOnlyForInstalledStoppedAndVerifiedFanIdentity()
+    {
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: new FakeFanControlService(InstalledStoppedFanStatus()),
+            elevationLauncher: elevationLauncher);
+
+        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.True(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+    }
+
+    [Theory]
+    [InlineData(FanBackendState.NotChecked)]
+    [InlineData(FanBackendState.NotApplicable)]
+    [InlineData(FanBackendState.NotInstalled)]
+    [InlineData(FanBackendState.Running)]
+    [InlineData(FanBackendState.Busy)]
+    [InlineData(FanBackendState.AccessDenied)]
+    [InlineData(FanBackendState.Transitional)]
+    [InlineData(FanBackendState.Unavailable)]
+    [InlineData(FanBackendState.Error)]
+    public async Task EnableFanMonitoringCommand_IsUnavailableForOtherBackendStates(
+        FanBackendState backendState)
+    {
+        var status = backendState == FanBackendState.Running
+            ? VerifiedFanStatus()
+            : FanControlStatus.CreateUnavailable(
+                backendState,
+                FanSafetyState.MonitoringUnavailable,
+                "Backend is unavailable in the test.");
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: new FakeFanControlService(status),
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_IsUnavailableForUnsupportedFanIdentity()
+    {
+        var unsupportedIdentity = new ModelVerificationResult(
+            "Apple Inc.",
+            "MacBookPro15,1",
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac without verified fan activation identity.");
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(unsupportedIdentity),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: new FakeFanControlService(InstalledStoppedFanStatus()),
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
+        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_SuccessUsesBusyInterlockAndFreshParentRead()
+    {
+        var launchGate = new AsyncGate();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueLaunchGate(launchGate);
+        elevationLauncher.QueueResult(CompletedElevationResult());
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var fanControlService = new FakeFanControlService(
+            InstalledStoppedFanStatus(),
+            VerifiedFanStatus());
+        var hardwareDetectionService = new FakeHardwareDetectionService(
+            VerifiedMacBookPro16_1());
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        var powerReadsBeforeActivation = powerManagementService.ReadCurrentStateCallCount;
+        var detectedProfileBeforeActivation = viewModel.DetectedProfileState;
+
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await launchGate.WaitUntilEnteredAsync();
+
+        Assert.True(viewModel.IsBusy);
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        Assert.False(viewModel.RefreshCommand.CanExecute(null));
+        Assert.Equal(
+            "Requesting administrator permission to enable fan monitoring...",
+            viewModel.StatusMessage);
+
+        launchGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, elevationLauncher.LaunchCallCount);
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+        Assert.Equal(FanBackendState.Running, viewModel.FanStatus.BackendState);
+        Assert.True(viewModel.FanStatus.IsAvailable);
+        Assert.Equal("Fan monitoring enabled.", viewModel.StatusMessage);
+        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.Equal(powerReadsBeforeActivation, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal(detectedProfileBeforeActivation, viewModel.DetectedProfileState);
+        Assert.Equal(1, hardwareDetectionService.DetectCallCount);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_CompletedHelperUsesObservedParentStateAsSourceOfTruth()
+    {
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(CompletedElevationResult());
+        var fanControlService = new FakeFanControlService(
+            InstalledStoppedFanStatus(),
+            InstalledStoppedFanStatus("Still stopped after helper completion."));
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+        Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
+        Assert.Contains("Installed, stopped", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.NotEqual("Fan monitoring enabled.", viewModel.StatusMessage);
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_CompletedFailureOutcomeStillPerformsParentRead()
+    {
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(CompletedElevationResult(
+            AppleSmcBackendActivationOutcome.AccessDenied,
+            exitCode: 13));
+        var fanControlService = new FakeFanControlService(
+            InstalledStoppedFanStatus(),
+            VerifiedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+        Assert.True(viewModel.FanStatus.IsAvailable);
+        Assert.Equal("Fan monitoring enabled.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_UnknownHelperExitStillPerformsParentRead()
+    {
+        var helperException = new InvalidOperationException("Unknown helper exit code 99.");
+        var logger = new TestApplicationLogger();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(new AppleSmcBackendElevationResult(
+            AppleSmcBackendElevationOutcome.Failed,
+            HelperOutcome: null,
+            ExitCode: 99,
+            Exception: helperException));
+        var fanControlService = new FakeFanControlService(
+            InstalledStoppedFanStatus(),
+            InstalledStoppedFanStatus("Still stopped after the unknown helper exit."));
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
+        Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
+        Assert.Contains("Installed, stopped", viewModel.StatusMessage, StringComparison.Ordinal);
+        var error = Assert.Single(logger.Errors);
+        Assert.Same(helperException, error.Exception);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_UserCanceledIsExpectedAndDoesNotReadOrLogError()
+    {
+        var logger = new TestApplicationLogger();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(UserCanceledElevationResult());
+        var fanControlService = new FakeFanControlService(InstalledStoppedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, elevationLauncher.LaunchCallCount);
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
+        Assert.Equal("Fan monitoring was not enabled.", viewModel.StatusMessage);
+        Assert.Empty(logger.Errors);
+        Assert.Contains(
+            logger.InformationMessages,
+            message => message.Contains("canceled by the user", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_LaunchFailureIsReportedWithoutParentRead()
+    {
+        var launchException = new InvalidOperationException("Elevation launch failed in test.");
+        var logger = new TestApplicationLogger();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(FailedElevationResult(
+            launchException.Message,
+            launchException));
+        var fanControlService = new FakeFanControlService(InstalledStoppedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            logger: logger,
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(
+            "Fan monitoring could not be enabled. Check the log for details.",
+            viewModel.StatusMessage);
+        var error = Assert.Single(logger.Errors);
+        Assert.Same(launchException, error.Exception);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoringCommand_IsInterlockedWithInFlightLivePoll()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueResult(CompletedElevationResult());
+        var fanControlService = new FakeFanControlService(
+            InstalledStoppedFanStatus(),
+            InstalledStoppedFanStatus("Live poll remains stopped."),
+            VerifiedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, elevationLauncher.LaunchCallCount);
+        Assert.Equal(3, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+        Assert.True(viewModel.FanStatus.IsAvailable);
+
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+        pollingDelay.Advance();
+        await WaitUntilAsync(
+            () => fanControlService.ReadStatusCallCount == 4
+                && pollingDelay.RequestCount == 3);
+        Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task StopFanMonitoringAsync_CancelsPendingActivationWithoutKillingHelper()
+    {
+        var launchGate = new AsyncGate();
+        var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
+        elevationLauncher.QueueLaunchGate(launchGate);
+        elevationLauncher.QueueResult(CompletedElevationResult());
+        var fanControlService = new FakeFanControlService(InstalledStoppedFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            elevationLauncher: elevationLauncher);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await launchGate.WaitUntilEnteredAsync();
+
+        await viewModel.StopFanMonitoringAsync();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(elevationLauncher.CancellationObserved);
+        Assert.Equal(1, fanControlService.ReadStatusCallCount);
+        Assert.Equal("Fan monitoring activation canceled.", viewModel.StatusMessage);
     }
 
     [Fact]
@@ -1603,6 +1958,7 @@ public sealed class MainViewModelTests
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
         IUserConfirmationService? userConfirmationService = null,
         FakeFanControlService? fanControlService = null,
+        FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
     {
         var profileCatalog = new ProfileCatalog();
@@ -1614,6 +1970,7 @@ public sealed class MainViewModelTests
             hardwareDetectionService,
             powerManagementService,
             fanControlService ?? new FakeFanControlService(),
+            elevationLauncher ?? new FakeAppleSmcBackendElevationLauncher(),
             profileCatalog,
             new ProfileApplyService(
                 hardwareDetectionService,
@@ -1629,7 +1986,7 @@ public sealed class MainViewModelTests
             logger ?? new TestApplicationLogger(),
             userConfirmationService,
             fanPollingInterval: TimeSpan.FromSeconds(2),
-            fanPollingDelayAsync);
+            fanPollingDelayAsync: fanPollingDelayAsync);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)
@@ -1702,6 +2059,46 @@ public sealed class MainViewModelTests
             new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto),
             new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto),
             "Verified in test.");
+    }
+
+    private static FanControlStatus InstalledStoppedFanStatus(
+        string details = "AppleSMC is installed but stopped in the test.")
+    {
+        return FanControlStatus.CreateUnavailable(
+            FanBackendState.InstalledStopped,
+            FanSafetyState.MonitoringUnavailable,
+            details);
+    }
+
+    private static AppleSmcBackendElevationResult CompletedElevationResult(
+        AppleSmcBackendActivationOutcome helperOutcome = AppleSmcBackendActivationOutcome.Running,
+        int exitCode = 0)
+    {
+        return new AppleSmcBackendElevationResult(
+            AppleSmcBackendElevationOutcome.Completed,
+            helperOutcome,
+            exitCode,
+            Exception: null);
+    }
+
+    private static AppleSmcBackendElevationResult UserCanceledElevationResult()
+    {
+        return new AppleSmcBackendElevationResult(
+            AppleSmcBackendElevationOutcome.UserCanceled,
+            HelperOutcome: null,
+            ExitCode: null,
+            Exception: null);
+    }
+
+    private static AppleSmcBackendElevationResult FailedElevationResult(
+        string message,
+        Exception? exception = null)
+    {
+        return new AppleSmcBackendElevationResult(
+            AppleSmcBackendElevationOutcome.Failed,
+            HelperOutcome: null,
+            ExitCode: null,
+            exception ?? new InvalidOperationException(message));
     }
 
     private static PowerStateSnapshot GamingOptimisedPowerState()
@@ -1927,6 +2324,52 @@ public sealed class MainViewModelTests
             finally
             {
                 _activeReadCount--;
+            }
+        }
+    }
+
+    private sealed class FakeAppleSmcBackendElevationLauncher
+        : IAppleSmcBackendElevationLauncher
+    {
+        private readonly Queue<AppleSmcBackendElevationResult> _results = [];
+        private readonly Queue<AsyncGate> _launchGates = [];
+
+        public int LaunchCallCount { get; private set; }
+
+        public bool CancellationObserved { get; private set; }
+
+        public void QueueResult(AppleSmcBackendElevationResult result)
+        {
+            _results.Enqueue(result);
+        }
+
+        public void QueueLaunchGate(AsyncGate gate)
+        {
+            _launchGates.Enqueue(gate);
+        }
+
+        public async Task<AppleSmcBackendElevationResult> LaunchAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LaunchCallCount++;
+
+            try
+            {
+                if (_launchGates.Count > 0)
+                {
+                    await _launchGates.Dequeue().WaitAsync(cancellationToken);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return _results.Count > 0
+                    ? _results.Dequeue()
+                    : FailedElevationResult("No elevation result was queued in the test.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved = true;
+                throw;
             }
         }
     }

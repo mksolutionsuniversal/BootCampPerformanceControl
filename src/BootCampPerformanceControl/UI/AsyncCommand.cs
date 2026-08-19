@@ -35,6 +35,11 @@ public sealed class AsyncCommand : ICommand
         RaiseCanExecuteChanged();
     }
 
+    public void Cancel()
+    {
+        _cancellationTokenSource?.Cancel();
+    }
+
     public async void Execute(object? parameter)
     {
         if (!CanExecute(parameter))
