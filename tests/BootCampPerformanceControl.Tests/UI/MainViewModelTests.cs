@@ -1078,6 +1078,77 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ReportCompatibilityIssueCommand_IsExposed()
+    {
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()));
+
+        Assert.NotNull(viewModel.ReportCompatibilityIssueCommand);
+        Assert.True(viewModel.ReportCompatibilityIssueCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ReportCompatibilityIssueCommand_GeneratesAndShowsReportWithKnownFanStatus()
+    {
+        var compatibilityReportService = new FakeCompatibilityReportService();
+        var compatibilityReportDialogService = new FakeCompatibilityReportDialogService();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus());
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            fanControlService: fanControlService,
+            compatibilityReportService: compatibilityReportService,
+            compatibilityReportDialogService: compatibilityReportDialogService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        var fanReadCountAfterRefresh = fanControlService.ReadStatusCallCount;
+
+        viewModel.ReportCompatibilityIssueCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, compatibilityReportService.GenerateCallCount);
+        Assert.Equal(viewModel.FanStatus, compatibilityReportService.LastFanStatus);
+        Assert.Equal(1, compatibilityReportDialogService.ShowCallCount);
+        Assert.Equal(
+            compatibilityReportService.Report,
+            compatibilityReportDialogService.LastReport);
+        Assert.Equal(fanReadCountAfterRefresh, fanControlService.ReadStatusCallCount);
+        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task ReportCompatibilityIssueCommand_CannotExecuteWhileRefreshIsBusy()
+    {
+        var hardwareDetectionService = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var powerManagementService = new FakePowerManagementService(InitialPowerState());
+        var compatibilityReportService = new FakeCompatibilityReportService();
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            powerManagementService,
+            compatibilityReportService: compatibilityReportService);
+        var refreshDetectGate = new AsyncGate();
+        hardwareDetectionService.QueueDetectGate(refreshDetectGate);
+
+        viewModel.RefreshCommand.Execute(null);
+        await refreshDetectGate.WaitUntilEnteredAsync();
+
+        Assert.True(viewModel.IsBusy);
+        Assert.False(viewModel.ReportCompatibilityIssueCommand.CanExecute(null));
+
+        viewModel.ReportCompatibilityIssueCommand.Execute(null);
+
+        Assert.Equal(0, compatibilityReportService.GenerateCallCount);
+
+        refreshDetectGate.Release();
+        await WaitForIdleAsync(viewModel);
+    }
+
+    [Fact]
     public void ProfileButtons_GamingOptimisedIsEnabledForVerifiedMacBookPro16_1()
     {
         var viewModel = CreateViewModel(
@@ -2034,6 +2105,8 @@ public sealed class MainViewModelTests
         TestApplicationLogger? logger = null,
         FakeDiagnosticReportService? diagnosticReportService = null,
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
+        FakeCompatibilityReportService? compatibilityReportService = null,
+        FakeCompatibilityReportDialogService? compatibilityReportDialogService = null,
         IUserConfirmationService? userConfirmationService = null,
         FakeFanControlService? fanControlService = null,
         FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
@@ -2063,6 +2136,8 @@ public sealed class MainViewModelTests
                 profileExecutionResolver),
             diagnosticReportService ?? new FakeDiagnosticReportService(),
             diagnosticReportFileSaveService ?? new FakeDiagnosticReportFileSaveService(),
+            compatibilityReportService ?? new FakeCompatibilityReportService(),
+            compatibilityReportDialogService ?? new FakeCompatibilityReportDialogService(),
             logger ?? new TestApplicationLogger(),
             userConfirmationService,
             fanPollingInterval: TimeSpan.FromSeconds(2),
@@ -2330,6 +2405,54 @@ public sealed class MainViewModelTests
             }
 
             return Task.FromResult(SaveResult);
+        }
+    }
+
+    private sealed class FakeCompatibilityReportService : ICompatibilityReportService
+    {
+        private readonly Queue<AsyncGate> _generateGates = [];
+
+        public CompatibilityReportResult Report { get; set; } = new(
+            "Compatibility report content.",
+            "BootCampPerformanceControl-Compatibility-Test-0.3.0-rc.1.txt");
+
+        public int GenerateCallCount { get; private set; }
+
+        public FanControlStatus? LastFanStatus { get; private set; }
+
+        public void QueueGenerateGate(AsyncGate gate)
+        {
+            _generateGates.Enqueue(gate);
+        }
+
+        public async Task<CompatibilityReportResult> GenerateAsync(
+            FanControlStatus currentFanStatus,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GenerateCallCount++;
+            LastFanStatus = currentFanStatus;
+
+            if (_generateGates.Count > 0)
+            {
+                await _generateGates.Dequeue().WaitAsync(cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Report;
+        }
+    }
+
+    private sealed class FakeCompatibilityReportDialogService : ICompatibilityReportDialogService
+    {
+        public int ShowCallCount { get; private set; }
+
+        public CompatibilityReportResult? LastReport { get; private set; }
+
+        public void Show(CompatibilityReportResult report)
+        {
+            ShowCallCount++;
+            LastReport = report;
         }
     }
 

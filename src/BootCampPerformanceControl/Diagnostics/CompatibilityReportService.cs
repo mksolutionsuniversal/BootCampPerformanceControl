@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using BootCampPerformanceControl.ApplicationInfo;
+using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -9,10 +10,11 @@ using BootCampPerformanceControl.SettingsBackup;
 
 namespace BootCampPerformanceControl.Diagnostics;
 
-public sealed class DiagnosticReportService : IDiagnosticReportService
+public sealed class CompatibilityReportService : ICompatibilityReportService
 {
-    private const string Unknown = DiagnosticPrivacySanitizer.Unknown;
     private const string GamingOptimisedProfileId = "gaming-optimised";
+    private const string Unknown = DiagnosticPrivacySanitizer.Unknown;
+    private const string Unavailable = "Unavailable";
 
     private readonly IHardwareDetectionService _hardwareDetectionService;
     private readonly IPowerManagementService _powerManagementService;
@@ -21,7 +23,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
     private readonly ProfileExecutionResolver _profileExecutionResolver;
     private readonly IApplicationLogger _logger;
 
-    public DiagnosticReportService(
+    public CompatibilityReportService(
         IHardwareDetectionService hardwareDetectionService,
         IPowerManagementService powerManagementService,
         IRestoreSnapshotStore restoreSnapshotStore,
@@ -44,8 +46,11 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         _logger = logger;
     }
 
-    public async Task<DiagnosticReportResult> GenerateAsync(CancellationToken cancellationToken)
+    public async Task<CompatibilityReportResult> GenerateAsync(
+        FanControlStatus currentFanStatus,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(currentFanStatus);
         cancellationToken.ThrowIfCancellationRequested();
 
         var hardwareSnapshot = await ReadHardwareSnapshotAsync(cancellationToken)
@@ -56,17 +61,19 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         var restoreSnapshotPresent = ReadRestoreSnapshotPresence(cancellationToken);
         var profileSupport = ResolveProfileSupport(verificationResult, powerState);
 
-        return new DiagnosticReportResult(
+        return new CompatibilityReportResult(
             BuildReport(
                 hardwareSnapshot,
                 verificationResult,
                 powerState,
                 restoreSnapshotPresent,
-                profileSupport),
+                profileSupport,
+                currentFanStatus),
             CreateSuggestedFileName(hardwareSnapshot?.ComputerSystem.Model));
     }
 
-    private async Task<HardwareSnapshot?> ReadHardwareSnapshotAsync(CancellationToken cancellationToken)
+    private async Task<HardwareSnapshot?> ReadHardwareSnapshotAsync(
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -80,7 +87,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
         catch (Exception exception)
         {
-            _logger.Error("Diagnostic report generation failed while reading hardware details.", exception);
+            _logger.Error("Compatibility report generation failed while reading hardware details.", exception);
             return null;
         }
     }
@@ -98,12 +105,13 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
         catch (Exception exception)
         {
-            _logger.Error("Diagnostic report generation failed while verifying the hardware model.", exception);
+            _logger.Error("Compatibility report generation failed while verifying the hardware model.", exception);
             return ModelVerificationResult.Unknown();
         }
     }
 
-    private async Task<PowerStateSnapshot?> ReadPowerStateAsync(CancellationToken cancellationToken)
+    private async Task<PowerStateSnapshot?> ReadPowerStateAsync(
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -117,7 +125,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
         catch (Exception exception)
         {
-            _logger.Error("Diagnostic report generation failed while reading current power settings.", exception);
+            _logger.Error("Compatibility report generation failed while reading current power settings.", exception);
             return null;
         }
     }
@@ -135,12 +143,12 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         }
         catch (Exception exception)
         {
-            _logger.Error("Diagnostic report generation failed while checking restore snapshot presence.", exception);
+            _logger.Error("Compatibility report generation failed while checking restore snapshot presence.", exception);
             return null;
         }
     }
 
-    private DiagnosticProfileSupport ResolveProfileSupport(
+    private CompatibilityProfileSupport ResolveProfileSupport(
         ModelVerificationResult verificationResult,
         PowerStateSnapshot? powerState)
     {
@@ -155,8 +163,7 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
 
             if (profile is null)
             {
-                return new DiagnosticProfileSupport(
-                    PlatformSupported: false,
+                return new CompatibilityProfileSupport(
                     PowerStateReadable: powerState is not null,
                     GamingOptimisedEligible: false);
             }
@@ -164,20 +171,17 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
             var resolution = _profileExecutionResolver.ResolveProcessorSettings(
                 profile,
                 verificationResult);
-
             var isPlatformSupported = profile.IsAvailableForDetectedModel && resolution.IsExecutable;
             var isPowerStateReadable = powerState is not null;
 
-            return new DiagnosticProfileSupport(
-                PlatformSupported: isPlatformSupported,
+            return new CompatibilityProfileSupport(
                 PowerStateReadable: isPowerStateReadable,
                 GamingOptimisedEligible: isPlatformSupported && isPowerStateReadable);
         }
         catch (Exception exception)
         {
-            _logger.Error("Diagnostic report generation failed while resolving profile support.", exception);
-            return new DiagnosticProfileSupport(
-                PlatformSupported: false,
+            _logger.Error("Compatibility report generation failed while resolving profile support.", exception);
+            return new CompatibilityProfileSupport(
                 PowerStateReadable: false,
                 GamingOptimisedEligible: false);
         }
@@ -188,53 +192,62 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         ModelVerificationResult verificationResult,
         PowerStateSnapshot? powerState,
         bool? restoreSnapshotPresent,
-        DiagnosticProfileSupport profileSupport)
+        CompatibilityProfileSupport profileSupport,
+        FanControlStatus fanStatus)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("BootCamp Performance Control Diagnostics");
-        builder.AppendLine("========================================");
+        builder.AppendLine("BootCamp Performance Control Compatibility Report");
+        builder.AppendLine("=================================================");
+        builder.AppendLine();
+        builder.AppendLine("No report is uploaded automatically. Review this text before sharing it.");
+        builder.AppendLine("To report an issue, copy this report, open a GitHub issue, and paste it there.");
         builder.AppendLine();
         builder.AppendLine("App");
         builder.AppendLine("---");
-        builder.AppendLine($"Version: {GetApplicationVersion()}");
-        builder.AppendLine();
-        builder.AppendLine("Operating System");
-        builder.AppendLine("----------------");
-        builder.AppendLine($"Windows: {FormatOperatingSystem(hardwareSnapshot?.OperatingSystem)}");
+        builder.AppendLine($"BCPC version: {GetApplicationVersion()}");
         builder.AppendLine();
         builder.AppendLine("Hardware");
         builder.AppendLine("--------");
         builder.AppendLine($"Manufacturer: {FormatValue(hardwareSnapshot?.ComputerSystem.Manufacturer)}");
-        builder.AppendLine($"Mac Model: {FormatValue(hardwareSnapshot?.ComputerSystem.Model)}");
+        builder.AppendLine($"Mac model identifier: {FormatValue(hardwareSnapshot?.ComputerSystem.Model)}");
         builder.AppendLine($"CPU: {FormatValue(hardwareSnapshot?.Processor?.Name)}");
-        builder.AppendLine("GPU:");
+        builder.AppendLine($"Core/thread count: {FormatCoreThreadCount(hardwareSnapshot?.Processor)}");
+        builder.AppendLine("GPU(s):");
         AppendGpuLines(builder, hardwareSnapshot?.VideoControllers);
+        builder.AppendLine($"Windows version/build: {FormatOperatingSystem(hardwareSnapshot?.OperatingSystem)}");
         builder.AppendLine();
         builder.AppendLine("Power");
         builder.AppendLine("-----");
-        builder.AppendLine($"Active Power Scheme: {FormatPowerScheme(powerState)}");
+        builder.AppendLine($"Active power scheme: {FormatPowerScheme(powerState)}");
+        builder.AppendLine($"PROCTHROTTLEMAX AC: {FormatPercentage(powerState?.ProcessorMaximumAc)}");
+        builder.AppendLine($"PROCTHROTTLEMAX DC: {FormatPercentage(powerState?.ProcessorMaximumDc)}");
+        builder.AppendLine($"PERFBOOSTMODE AC: {FormatUInt32(powerState?.BoostModeAc)}");
+        builder.AppendLine($"PERFBOOSTMODE DC: {FormatUInt32(powerState?.BoostModeDc)}");
+        builder.AppendLine($"Processor state readable: {FormatYesNo(profileSupport.PowerStateReadable)}");
         builder.AppendLine();
-        builder.AppendLine("PROCTHROTTLEMAX");
-        builder.AppendLine($"  AC: {FormatPercentage(powerState?.ProcessorMaximumAc)}");
-        builder.AppendLine($"  DC: {FormatPercentage(powerState?.ProcessorMaximumDc)}");
-        builder.AppendLine();
-        builder.AppendLine("PERFBOOSTMODE");
-        builder.AppendLine($"  AC: {FormatUInt32(powerState?.BoostModeAc)}");
-        builder.AppendLine($"  DC: {FormatUInt32(powerState?.BoostModeDc)}");
+        builder.AppendLine("Power validation");
+        builder.AppendLine("----------------");
+        builder.AppendLine($"Gaming Optimised eligibility: {FormatYesNo(profileSupport.GamingOptimisedEligible)}");
+        builder.AppendLine($"Model validation level: {verificationResult.ValidationLevel}");
+        builder.AppendLine($"Platform support: {verificationResult.PlatformSupport}");
+        builder.AppendLine($"Validation details: {FormatValue(verificationResult.Message)}");
         builder.AppendLine();
         builder.AppendLine("Restore");
         builder.AppendLine("-------");
-        builder.AppendLine($"Original restore snapshot present: {FormatYesNo(restoreSnapshotPresent)}");
+        builder.AppendLine($"Original Restore snapshot present: {FormatYesNo(restoreSnapshotPresent)}");
         builder.AppendLine();
-        builder.AppendLine("Platform & Profile Support");
-        builder.AppendLine("--------------------------");
-        builder.AppendLine($"Platform support: {verificationResult.PlatformSupport}");
-        builder.AppendLine($"Model validation: {verificationResult.ValidationLevel}");
-        builder.AppendLine($"Verification message: {FormatValue(verificationResult.Message)}");
-        builder.AppendLine($"Processor power settings readable: {FormatYesNo(profileSupport.PowerStateReadable)}");
-        builder.AppendLine($"Gaming Optimised eligible: {FormatYesNo(profileSupport.GamingOptimisedEligible)}");
+        builder.AppendLine("Fan compatibility");
+        builder.AppendLine("-----------------");
+        builder.AppendLine($"AppleSMC backend state: {fanStatus.BackendDisplayText}");
+        builder.AppendLine($"Fan safety state: {fanStatus.SafetyDisplayText}");
+        builder.AppendLine($"Fan 0 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan0)}");
+        builder.AppendLine($"Fan 1 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan1)}");
+        builder.AppendLine($"Mode: {FormatFanMode(fanStatus)}");
+        builder.AppendLine($"Write control state: {fanStatus.WriteControlDisplayText}");
+        builder.AppendLine($"Fan status/details: {FormatValue(fanStatus.Details)}");
 
-        return builder.ToString();
+        return DiagnosticPrivacySanitizer.RedactPrivacySensitiveValues(
+            builder.ToString());
     }
 
     private static void AppendGpuLines(
@@ -300,6 +313,38 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         return parts.Count == 0 ? Unknown : string.Join(", ", parts);
     }
 
+    private static string FormatCoreThreadCount(ProcessorInfo? processor)
+    {
+        return processor is null
+            ? Unknown
+            : string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} cores / {1} threads",
+                processor.NumberOfCores,
+                processor.NumberOfLogicalProcessors);
+    }
+
+    private static string FormatFanRpm(
+        FanControlStatus fanStatus,
+        FanReading? reading)
+    {
+        if (!fanStatus.IsAvailable || reading is null)
+        {
+            return Unavailable;
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:0} / {1:0} RPM",
+            reading.ActualRpm,
+            reading.MaximumRpm);
+    }
+
+    private static string FormatFanMode(FanControlStatus fanStatus)
+    {
+        return fanStatus.IsAvailable ? fanStatus.ModeDisplayText : Unavailable;
+    }
+
     private static string FormatPowerScheme(PowerStateSnapshot? powerState)
     {
         return powerState?.SchemeId.ToString() ?? Unknown;
@@ -337,16 +382,12 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
 
     private static string CreateSuggestedFileName(string? model)
     {
-        return $"BootCampPerformanceControl-Diagnostics-{CreateSafeFileNameSegment(model)}.txt";
+        var modelSegment = DiagnosticPrivacySanitizer.CreateSafeFileNameSegment(model);
+        var versionSegment = DiagnosticPrivacySanitizer.CreateSafeFileNameSegment(GetApplicationVersion());
+        return $"BootCampPerformanceControl-Compatibility-{modelSegment}-{versionSegment}.txt";
     }
 
-    private static string CreateSafeFileNameSegment(string? value)
-    {
-        return DiagnosticPrivacySanitizer.CreateSafeFileNameSegment(value);
-    }
-
-    private sealed record DiagnosticProfileSupport(
-        bool PlatformSupported,
+    private sealed record CompatibilityProfileSupport(
         bool PowerStateReadable,
         bool GamingOptimisedEligible);
 }
