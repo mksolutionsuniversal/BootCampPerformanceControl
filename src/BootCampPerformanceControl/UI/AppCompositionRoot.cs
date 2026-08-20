@@ -37,6 +37,13 @@ public static class AppCompositionRoot
             profileCatalog,
             profileExecutionResolver,
             logger);
+        var compatibilityReportService = new CompatibilityReportService(
+            hardwareDetectionService,
+            powerManagementService,
+            restoreSnapshotStore,
+            profileCatalog,
+            profileExecutionResolver,
+            logger);
 
         return new MainViewModel(
             hardwareDetectionService,
@@ -50,6 +57,8 @@ public static class AppCompositionRoot
             processorProfileStateEvaluator,
             diagnosticReportService,
             new WpfDiagnosticReportFileSaveService(),
+            compatibilityReportService,
+            new WpfCompatibilityReportDialogService(logger),
             logger,
             new WpfUserConfirmationService());
     }

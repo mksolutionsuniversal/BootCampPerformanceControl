@@ -42,6 +42,11 @@
                         MinWidth="190"
                         Padding="16,8"
                         Margin="0,0,8,0" />
+                <Button Content="Report Compatibility Issue"
+                        Command="{Binding ReportCompatibilityIssueCommand}"
+                        MinWidth="190"
+                        Padding="16,8"
+                        Margin="0,0,8,0" />
                 <Button Content="Refresh"
                         Command="{Binding RefreshCommand}"
                         MinWidth="110"

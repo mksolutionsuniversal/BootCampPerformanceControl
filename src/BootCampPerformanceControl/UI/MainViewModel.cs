@@ -30,6 +30,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ProcessorProfileStateEvaluator _processorProfileStateEvaluator;
     private readonly IDiagnosticReportService _diagnosticReportService;
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
+    private readonly ICompatibilityReportService _compatibilityReportService;
+    private readonly ICompatibilityReportDialogService _compatibilityReportDialogService;
     private readonly IApplicationLogger _logger;
     private readonly IUserConfirmationService _userConfirmationService;
     private readonly TimeSpan _fanPollingInterval;
@@ -80,6 +82,8 @@ public sealed class MainViewModel : ViewModelBase
         ProcessorProfileStateEvaluator processorProfileStateEvaluator,
         IDiagnosticReportService diagnosticReportService,
         IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
+        ICompatibilityReportService compatibilityReportService,
+        ICompatibilityReportDialogService compatibilityReportDialogService,
         IApplicationLogger logger,
         IUserConfirmationService? userConfirmationService = null,
         TimeSpan? fanPollingInterval = null,
@@ -96,6 +100,8 @@ public sealed class MainViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(processorProfileStateEvaluator);
         ArgumentNullException.ThrowIfNull(diagnosticReportService);
         ArgumentNullException.ThrowIfNull(diagnosticReportFileSaveService);
+        ArgumentNullException.ThrowIfNull(compatibilityReportService);
+        ArgumentNullException.ThrowIfNull(compatibilityReportDialogService);
         ArgumentNullException.ThrowIfNull(logger);
 
         _hardwareDetectionService = hardwareDetectionService;
@@ -109,6 +115,8 @@ public sealed class MainViewModel : ViewModelBase
         _processorProfileStateEvaluator = processorProfileStateEvaluator;
         _diagnosticReportService = diagnosticReportService;
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
+        _compatibilityReportService = compatibilityReportService;
+        _compatibilityReportDialogService = compatibilityReportDialogService;
         _logger = logger;
         _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
         LoadApplicationOptions();
@@ -137,6 +145,11 @@ public sealed class MainViewModel : ViewModelBase
             canExecute: () => !IsBusy,
             onCanceled: OnExportDiagnosticReportCanceled,
             onException: OnExportDiagnosticReportException);
+        ReportCompatibilityIssueCommand = new AsyncCommand(
+            ReportCompatibilityIssueAsync,
+            canExecute: () => !IsBusy,
+            onCanceled: OnReportCompatibilityIssueCanceled,
+            onException: OnReportCompatibilityIssueException);
         UpdateProfiles(_lastVerificationResult, isPowerStateReadable: false);
     }
 
@@ -145,6 +158,8 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand EnableFanMonitoringCommand { get; }
 
     public ICommand ExportDiagnosticReportCommand { get; }
+
+    public ICommand ReportCompatibilityIssueCommand { get; }
 
     public ObservableCollection<ProfileButtonViewModel> ProfileButtons { get; } = [];
 
@@ -781,6 +796,41 @@ public sealed class MainViewModel : ViewModelBase
                 $"Diagnostic report export failed with {exception.GetType().Name}."));
     }
 
+    private async Task ReportCompatibilityIssueAsync(CancellationToken cancellationToken)
+    {
+        CompatibilityReportResult report;
+
+        IsBusy = true;
+        StatusMessage = "Generating compatibility report...";
+
+        try
+        {
+            _logger.Info("Compatibility report generation started.");
+            report = await _compatibilityReportService
+                .GenerateAsync(FanStatus, cancellationToken);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        _compatibilityReportDialogService.Show(report);
+        StatusMessage = "Compatibility report ready for review.";
+        _logger.Info("Compatibility report opened for user review.");
+    }
+
+    private void OnReportCompatibilityIssueCanceled(OperationCanceledException exception)
+    {
+        StatusMessage = "Compatibility report generation canceled.";
+        _logger.Info($"Compatibility report generation canceled: {exception.Message}");
+    }
+
+    private void OnReportCompatibilityIssueException(Exception exception)
+    {
+        StatusMessage = "Compatibility report could not be generated. Check the log for details.";
+        _logger.Error("Compatibility report generation failed unexpectedly.", exception);
+    }
+
     private async Task ApplyProfileAsync(string profileId, CancellationToken cancellationToken)
     {
         if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
@@ -1162,6 +1212,11 @@ public sealed class MainViewModel : ViewModelBase
         if (ExportDiagnosticReportCommand is AsyncCommand exportDiagnosticReportCommand)
         {
             exportDiagnosticReportCommand.NotifyCanExecuteChanged();
+        }
+
+        if (ReportCompatibilityIssueCommand is AsyncCommand reportCompatibilityIssueCommand)
+        {
+            reportCompatibilityIssueCommand.NotifyCanExecuteChanged();
         }
 
         if (EnableFanMonitoringCommand is AsyncCommand enableFanMonitoringCommand)
