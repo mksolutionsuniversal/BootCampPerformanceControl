@@ -9,19 +9,19 @@
     <UseWindowsForms>true</UseWindowsForms>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
-    <Version>0.3.0-rc.2</Version>
-    <AssemblyVersion>0.3.0.0</AssemblyVersion>
-    <FileVersion>0.3.0.0</FileVersion>
-    <InformationalVersion>0.3.0-rc.2</InformationalVersion>
+    <Version>0.4.0-rc.1</Version>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
+    <InformationalVersion>0.4.0-rc.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyTitle>BootCamp Performance Control</AssemblyTitle>
     <Product>BootCamp Performance Control</Product>
     <Company>MK Universal Solutions LTD</Company>
     <Authors>MK Universal Solutions LTD</Authors>
     <Copyright>Copyright © 2026 MK Universal Solutions LTD</Copyright>
-    <Description>Open-source Windows utility for Intel Macs running Windows through Boot Camp to manage Windows processor power settings.</Description>
+    <Description>Open-source Windows utility for Intel Macs running Windows through Boot Camp, providing safe processor power management and verified Apple SMC fan control on explicitly validated hardware.</Description>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>bootcamp;windows;macbook;power-management</PackageTags>
+    <PackageTags>bootcamp;windows;macbook;power-management;fan-control;apple-smc</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
