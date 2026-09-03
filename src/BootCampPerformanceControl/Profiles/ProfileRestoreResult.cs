@@ -8,14 +8,16 @@ public sealed record ProfileRestoreResult(
     bool IsSuccessful,
     string FailureMessage,
     ModelVerificationResult ModelVerificationResult,
-    PowerOperationResult? PowerOperation = null)
+    PowerOperationResult? PowerOperation = null,
+    string? SuccessMessage = null)
 {
     internal FanOverrideRecoveryDecision? FanRecovery { get; init; }
 
     internal static ProfileRestoreResult Successful(
         ModelVerificationResult modelVerificationResult,
         PowerOperationResult? powerOperation = null,
-        FanOverrideRecoveryDecision? fanRecovery = null)
+        FanOverrideRecoveryDecision? fanRecovery = null,
+        string? successMessage = null)
     {
         ArgumentNullException.ThrowIfNull(modelVerificationResult);
 
@@ -23,7 +25,27 @@ public sealed record ProfileRestoreResult(
             IsSuccessful: true,
             FailureMessage: string.Empty,
             modelVerificationResult,
-            powerOperation)
+            powerOperation,
+            successMessage)
+        {
+            FanRecovery = fanRecovery
+        };
+    }
+
+    internal static ProfileRestoreResult SuccessfulFanOnly(
+        ModelVerificationResult modelVerificationResult,
+        FanOverrideRecoveryDecision? fanRecovery,
+        string successMessage)
+    {
+        ArgumentNullException.ThrowIfNull(modelVerificationResult);
+        ArgumentException.ThrowIfNullOrWhiteSpace(successMessage);
+
+        return new ProfileRestoreResult(
+            IsSuccessful: true,
+            FailureMessage: string.Empty,
+            modelVerificationResult,
+            PowerOperation: null,
+            SuccessMessage: successMessage)
         {
             FanRecovery = fanRecovery
         };

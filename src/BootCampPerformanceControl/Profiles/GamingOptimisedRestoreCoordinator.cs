@@ -17,7 +17,7 @@ internal sealed class GamingOptimisedRestoreCoordinator
         _fanExecutionSessionFactory = fanExecutionSessionFactory ?? throw new ArgumentNullException(nameof(fanExecutionSessionFactory));
     }
 
-    public async Task<GamingOptimisedRestoreResult> RestoreAsync(
+    public async Task<GamingOptimisedRestoreResult> RecoverFansOnlyAsync(
         string model,
         CancellationToken cancellationToken)
     {
@@ -81,6 +81,23 @@ internal sealed class GamingOptimisedRestoreCoordinator
             return fanPhaseFailure;
         }
 
+        return GamingOptimisedRestoreResult.SuccessfulFanOnly(
+            model,
+            fanRecovery);
+    }
+
+    public async Task<GamingOptimisedRestoreResult> RestoreAsync(
+        string model,
+        CancellationToken cancellationToken)
+    {
+        var fanResult = await RecoverFansOnlyAsync(model, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!fanResult.IsSuccessful)
+        {
+            return fanResult;
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
 
         var powerOperation = await _powerManagementService
@@ -91,7 +108,7 @@ internal sealed class GamingOptimisedRestoreCoordinator
         {
             return GamingOptimisedRestoreResult.Successful(
                 model,
-                fanRecovery,
+                fanResult.FanRecovery!,
                 powerOperation);
         }
 
@@ -99,7 +116,7 @@ internal sealed class GamingOptimisedRestoreCoordinator
             model,
             powerOperation.FailureMessage ?? "Original processor power restore failed.",
             isFanBaselineVerified: true,
-            fanRecovery,
+            fanResult.FanRecovery,
             powerOperation);
     }
 

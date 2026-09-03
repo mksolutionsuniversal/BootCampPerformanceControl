@@ -6,7 +6,7 @@ namespace BootCampPerformanceControl.Tests.UI;
 public sealed class AppCompositionRootTests
 {
     [Fact]
-    public void CreateMainViewModel_SucceedsWithZeroSideEffects()
+    public void CreateMainViewModel_SucceedsWithoutSmcAccess_DefersOwnershipStoreAccess()
     {
         var logger = new TestApplicationLogger();
 
@@ -16,6 +16,7 @@ public sealed class AppCompositionRootTests
         Assert.NotNull(viewModel.RefreshCommand);
         Assert.False(viewModel.IsBusy);
         Assert.Equal("Not detected", viewModel.MacModel);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
         Assert.Empty(logger.Errors);
     }
 }

@@ -5,6 +5,7 @@ using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -28,6 +29,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ProfileApplyService _profileApplyService;
     private readonly ProfileRestoreService _profileRestoreService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
+    private readonly IFanOverrideOwnershipReader _ownershipReader;
+    private readonly GamingOptimisedRestoreCoordinator? _gamingOptimisedRestoreCoordinator;
     private readonly ProcessorProfileStateEvaluator _processorProfileStateEvaluator;
     private readonly IDiagnosticReportService _diagnosticReportService;
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
@@ -58,6 +61,9 @@ public sealed class MainViewModel : ViewModelBase
     private string _boostModeDc = "Not read";
     private string _detectedProfileState = "Unknown - power state has not been read.";
     private string _restoreSnapshotStatus = "Not available.";
+    private FanRecoveryState _fanRecoveryState = FanRecoveryState.None;
+    private string _fanRecoveryStatus = "No pending fan recovery.";
+    private bool _startupRecoveryEvaluated;
     private StructuredFanControlStatus _fanStatus = StructuredFanControlStatus.NotChecked;
     private string _statusMessage = "Ready";
     private bool _isBusy;
@@ -90,6 +96,51 @@ public sealed class MainViewModel : ViewModelBase
         TimeSpan? fanPollingInterval = null,
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
         ProfileRestoreService? profileRestoreService = null)
+        : this(
+            hardwareDetectionService,
+            powerManagementService,
+            fanControlService,
+            appleSmcBackendElevationLauncher,
+            applicationOptionsService,
+            profileCatalog,
+            profileApplyService,
+            restoreSnapshotStore,
+            processorProfileStateEvaluator,
+            diagnosticReportService,
+            diagnosticReportFileSaveService,
+            compatibilityReportService,
+            compatibilityReportDialogService,
+            logger,
+            userConfirmationService,
+            fanPollingInterval,
+            fanPollingDelayAsync,
+            profileRestoreService,
+            ownershipReader: null,
+            gamingOptimisedRestoreCoordinator: null)
+    {
+    }
+
+    internal MainViewModel(
+        IHardwareDetectionService hardwareDetectionService,
+        IPowerManagementService powerManagementService,
+        IFanControlService fanControlService,
+        IAppleSmcBackendElevationLauncher appleSmcBackendElevationLauncher,
+        IApplicationOptionsService applicationOptionsService,
+        IProfileCatalog profileCatalog,
+        ProfileApplyService profileApplyService,
+        IRestoreSnapshotStore restoreSnapshotStore,
+        ProcessorProfileStateEvaluator processorProfileStateEvaluator,
+        IDiagnosticReportService diagnosticReportService,
+        IDiagnosticReportFileSaveService diagnosticReportFileSaveService,
+        ICompatibilityReportService compatibilityReportService,
+        ICompatibilityReportDialogService compatibilityReportDialogService,
+        IApplicationLogger logger,
+        IUserConfirmationService? userConfirmationService = null,
+        TimeSpan? fanPollingInterval = null,
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
+        ProfileRestoreService? profileRestoreService = null,
+        IFanOverrideOwnershipReader? ownershipReader = null,
+        GamingOptimisedRestoreCoordinator? gamingOptimisedRestoreCoordinator = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareDetectionService);
         ArgumentNullException.ThrowIfNull(powerManagementService);
@@ -113,9 +164,17 @@ public sealed class MainViewModel : ViewModelBase
         _applicationOptionsService = applicationOptionsService;
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
-        _profileRestoreService = profileRestoreService
-            ?? new ProfileRestoreService(hardwareDetectionService, powerManagementService);
         _restoreSnapshotStore = restoreSnapshotStore;
+        _ownershipReader = ownershipReader ?? new JsonFanOverrideOwnershipStore(logger);
+        _gamingOptimisedRestoreCoordinator = gamingOptimisedRestoreCoordinator;
+        _profileRestoreService = profileRestoreService
+            ?? new ProfileRestoreService(
+                hardwareDetectionService,
+                powerManagementService,
+                _gamingOptimisedRestoreCoordinator,
+                restoreSnapshotStore,
+                _ownershipReader,
+                logger);
         _processorProfileStateEvaluator = processorProfileStateEvaluator;
         _diagnosticReportService = diagnosticReportService;
         _diagnosticReportFileSaveService = diagnosticReportFileSaveService;
@@ -257,6 +316,21 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => _restoreSnapshotStatus;
         private set => SetProperty(ref _restoreSnapshotStatus, value);
+    }
+
+    public string FanRecoveryStatus
+    {
+        get => _fanRecoveryStatus;
+        private set => SetProperty(ref _fanRecoveryStatus, value);
+    }
+
+    internal FanRecoveryState RecoveryState => _fanRecoveryState;
+
+    private void SetFanRecoveryState(FanRecoveryState state, string statusMessage)
+    {
+        _fanRecoveryState = state;
+        FanRecoveryStatus = statusMessage;
+        OnPropertyChanged(nameof(RecoveryState));
     }
 
     public StructuredFanControlStatus FanStatus
@@ -435,6 +509,12 @@ public sealed class MainViewModel : ViewModelBase
                 _logger.Error("Hardware detection failed.", exception);
             }
 
+            if (!_startupRecoveryEvaluated)
+            {
+                await EvaluateStartupRecoveryUnderGateAsync(verificationResult, cancellationToken);
+                _startupRecoveryEvaluated = true;
+            }
+
             if (hasUsableFanModelIdentity)
             {
                 try
@@ -594,9 +674,21 @@ public sealed class MainViewModel : ViewModelBase
             _logger.Info(
                 $"Parent AppleSMC verification completed. Backend: {observedStatus.BackendState}. Safety: {observedStatus.SafetyState}.");
 
-            StatusMessage = observedStatus.IsAvailable
-                ? "Fan monitoring enabled."
-                : $"Fan monitoring was not enabled. Parent verification observed backend '{observedStatus.BackendDisplayText}' and safety '{observedStatus.SafetyDisplayText}'. Helper outcome: '{FormatHelperOutcome(launchResult.HelperOutcome)}'.";
+            if (observedStatus.IsAvailable)
+            {
+                if (_fanRecoveryState == FanRecoveryState.PreviousSessionRecoveryPending)
+                {
+                    await TryRetryPendingFanRecoveryUnderGateAsync(verifiedModel, cancellationToken);
+                }
+                else
+                {
+                    StatusMessage = "Fan monitoring enabled.";
+                }
+            }
+            else
+            {
+                StatusMessage = $"Fan monitoring was not enabled. Parent verification observed backend '{observedStatus.BackendDisplayText}' and safety '{observedStatus.SafetyDisplayText}'. Helper outcome: '{FormatHelperOutcome(launchResult.HelperOutcome)}'.";
+            }
         }
         finally
         {
@@ -879,6 +971,49 @@ public sealed class MainViewModel : ViewModelBase
             _logger.Info($"Profile application succeeded: {profileId}. Re-reading power state.");
             SetLastVerificationResult(result.ModelVerificationResult);
 
+            if (IsExactVerifiedMacBookPro16_1(result.ModelVerificationResult)
+                && string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var marker = await _ownershipReader
+                        .LoadAsync(CancellationToken.None)
+                        .ConfigureAwait(false);
+
+                    if (marker is null)
+                    {
+                        _logger.Error(
+                            "Gaming Optimised apply succeeded but ownership marker is unexpectedly missing on disk.",
+                            new InvalidOperationException("Ownership marker was not found after successful apply."));
+                        SetFanRecoveryState(
+                            FanRecoveryState.RecoveryBlocked,
+                            "Fan recovery is blocked because the ownership marker could not be verified on disk.");
+                    }
+                    else if (!string.Equals(marker.Model, result.ModelVerificationResult.Model, StringComparison.Ordinal))
+                    {
+                        _logger.Error(
+                            $"Gaming Optimised apply succeeded but persisted marker model '{marker.Model}' does not match verified hardware model '{result.ModelVerificationResult.Model}'.",
+                            new InvalidOperationException("Ownership marker model mismatch after apply."));
+                        SetFanRecoveryState(
+                            FanRecoveryState.RecoveryBlocked,
+                            "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+                    }
+                    else
+                    {
+                        SetFanRecoveryState(
+                            FanRecoveryState.CurrentSessionOverrideActive,
+                            "Gaming Optimised fan override is active. Restore returns fans to Apple Auto.");
+                    }
+                }
+                catch (Exception exception)
+                {
+                    _logger.Error("Reloading ownership marker after successful Gaming Optimised apply failed.", exception);
+                    SetFanRecoveryState(
+                        FanRecoveryState.InspectionFailed,
+                        "Inspection failed. Could not verify fan ownership marker.");
+                }
+            }
+
             var profileDisplayName = GetProfileDisplayName(profileId);
 
             try
@@ -949,37 +1084,79 @@ public sealed class MainViewModel : ViewModelBase
                 return;
             }
 
-            _logger.Info("Restore succeeded. Re-reading power state.");
+            _logger.Info("Restore succeeded.");
             SetLastVerificationResult(result.ModelVerificationResult);
 
             try
             {
-                var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
-                _lastPowerStateReadSucceeded = true;
-                ApplyPowerState(currentPowerState);
-                ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
-                RefreshRestoreSnapshotStatus();
-                UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
-                StatusMessage = "Original power settings restored successfully. Power state refreshed.";
-                _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
-            }
-            catch (OperationCanceledException exception)
-            {
-                HandlePostSuccessPowerStateRefreshCanceled(
-                    "Original processor settings were restored and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
-                    "Power-state UI refresh canceled after successful restore",
-                    exception);
+                var markerAfterRestore = await _ownershipReader
+                    .LoadAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                if (markerAfterRestore is not null)
+                {
+                    _logger.Error(
+                        "Restore returned success but fan override ownership marker is still present on disk.",
+                        new InvalidOperationException("Fan override ownership marker was not cleared after restore."));
+                    SetFanRecoveryState(
+                        FanRecoveryState.RecoveryBlocked,
+                        "Fan recovery is blocked because the ownership marker could not be verified as cleared.");
+                }
+                else
+                {
+                    SetFanRecoveryState(
+                        FanRecoveryState.None,
+                        "No pending fan recovery.");
+                }
             }
             catch (Exception exception)
             {
-                _lastPowerStateReadSucceeded = false;
-                ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+                _logger.Error("Reloading the fan override ownership marker after restore failed.", exception);
+                SetFanRecoveryState(
+                    FanRecoveryState.InspectionFailed,
+                    "Inspection failed. Could not verify fan ownership marker.");
+            }
+
+            if (result.PowerOperation is null)
+            {
                 RefreshRestoreSnapshotStatus();
                 UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
-                StatusMessage = "Original power settings were restored and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
-                _logger.Error(
-                    "Power-state UI refresh failed after successful restore.",
-                    exception);
+                StatusMessage = !string.IsNullOrWhiteSpace(result.SuccessMessage)
+                    ? result.SuccessMessage
+                    : "Fan control was restored to Apple Auto. No original processor snapshot required restoration.";
+            }
+            else
+            {
+                _logger.Info("Re-reading power state after restore.");
+                try
+                {
+                    var currentPowerState = await _powerManagementService.ReadCurrentStateAsync(cancellationToken);
+                    _lastPowerStateReadSucceeded = true;
+                    ApplyPowerState(currentPowerState);
+                    ApplyDetectedProfileState(currentPowerState, _lastVerificationResult);
+                    RefreshRestoreSnapshotStatus();
+                    UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+                    StatusMessage = "Original power settings restored successfully. Power state refreshed.";
+                    _logger.Info($"Power-state read completed after restore. Active scheme: {currentPowerState.SchemeId}.");
+                }
+                catch (OperationCanceledException exception)
+                {
+                    HandlePostSuccessPowerStateRefreshCanceled(
+                        "Original processor settings were restored and verified, but refreshing the displayed power state was canceled. Use Refresh to update the display.",
+                        "Power-state UI refresh canceled after successful restore",
+                        exception);
+                }
+                catch (Exception exception)
+                {
+                    _lastPowerStateReadSucceeded = false;
+                    ApplyDetectedProfileState(ProcessorProfileState.Unknown);
+                    RefreshRestoreSnapshotStatus();
+                    UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+                    StatusMessage = "Original power settings were restored and verified, but refreshing the displayed power state failed. Use Refresh to retry.";
+                    _logger.Error(
+                        "Power-state UI refresh failed after successful restore.",
+                        exception);
+                }
             }
 
             await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
@@ -1189,9 +1366,18 @@ public sealed class MainViewModel : ViewModelBase
 
     private void RefreshRestoreSnapshotStatus()
     {
-        RestoreSnapshotStatus = _restoreSnapshotStore.HasOriginalRestoreSnapshot
-            ? "Available - original processor settings can be restored."
-            : "Not available.";
+        if (_restoreSnapshotStore.HasOriginalRestoreSnapshot)
+        {
+            RestoreSnapshotStatus = "Available - original processor settings can be restored.";
+        }
+        else if (_fanRecoveryState != FanRecoveryState.None)
+        {
+            RestoreSnapshotStatus = "Available - fan override recovery can be performed.";
+        }
+        else
+        {
+            RestoreSnapshotStatus = "Not available.";
+        }
     }
 
     private void RefreshProfileStateAfterUncertainApply()
@@ -1227,14 +1413,172 @@ public sealed class MainViewModel : ViewModelBase
         RefreshRestoreSnapshotStatus();
         ProfileButtons.Clear();
 
+        var hasFanRecoveryContext = _fanRecoveryState != FanRecoveryState.None;
+        var isExactMbp161 = IsExactVerifiedMacBookPro16_1(verificationResult);
+
         foreach (var profile in _profileCatalog.GetProfiles(verificationResult))
         {
             ProfileButtons.Add(new ProfileButtonViewModel(
                 profile,
                 CreateProfileCommand(profile),
-                _restoreSnapshotStore.HasOriginalRestoreSnapshot,
-                isPowerStateReadable));
+                isRestoreSnapshotAvailable: _restoreSnapshotStore.HasOriginalRestoreSnapshot,
+                isPowerStateReadable: isPowerStateReadable,
+                hasFanRecoveryContext: hasFanRecoveryContext,
+                isExactVerifiedMacBookPro16_1: isExactMbp161));
         }
+    }
+
+    private async Task EvaluateStartupRecoveryUnderGateAsync(
+        ModelVerificationResult verificationResult,
+        CancellationToken cancellationToken)
+    {
+        FanOverrideOwnershipMarker? marker;
+        try
+        {
+            marker = await _ownershipReader
+                .LoadAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Loading fan override ownership marker during startup recovery check failed.", exception);
+            SetFanRecoveryState(
+                FanRecoveryState.InspectionFailed,
+                "Inspection failed. Could not verify fan ownership marker.");
+            return;
+        }
+
+        if (marker is null)
+        {
+            SetFanRecoveryState(
+                FanRecoveryState.None,
+                "No pending fan recovery.");
+            return;
+        }
+
+        _logger.Info($"Previous-session fan override marker detected. Model={marker.Model}; CreatedAtUtc={marker.CreatedAtUtc:O}.");
+
+        if (!IsExactVerifiedMacBookPro16_1(verificationResult)
+            || !string.Equals(marker.Model, verificationResult.Model, StringComparison.Ordinal))
+        {
+            _logger.Info(
+                $"Startup fan recovery blocked: detected model '{verificationResult.Model}' does not match marker model '{marker.Model}' or is not verified MacBookPro16,1.");
+            SetFanRecoveryState(
+                FanRecoveryState.RecoveryBlocked,
+                "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+            return;
+        }
+
+        if (_gamingOptimisedRestoreCoordinator is null)
+        {
+            SetFanRecoveryState(
+                FanRecoveryState.RecoveryBlocked,
+                "Fan recovery is blocked because the transactional restore coordinator is not available.");
+            return;
+        }
+
+        _logger.Info("Attempting automatic startup fan recovery to Apple Auto.");
+
+        try
+        {
+            var result = await _gamingOptimisedRestoreCoordinator
+                .RecoverFansOnlyAsync(verificationResult.Model, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (result.IsSuccessful)
+            {
+                _logger.Info($"Automatic startup fan recovery completed successfully. Action={result.FanRecovery?.Action}. Marker cleared.");
+                SetFanRecoveryState(
+                    FanRecoveryState.None,
+                    "No pending fan recovery.");
+            }
+            else
+            {
+                _logger.Info($"Automatic startup fan recovery was not completed: {result.FailureReason}. Action={result.FanRecovery?.Action}.");
+                SetFanRecoveryState(
+                    FanRecoveryState.RecoveryBlocked,
+                    "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+            }
+        }
+        catch (AppleSmcServiceStateException)
+        {
+            _logger.Info("Startup fan recovery deferred because AppleSMC service is not running.");
+            SetFanRecoveryState(
+                FanRecoveryState.PreviousSessionRecoveryPending,
+                "Previous fan override detected. Recovery to Apple Auto is pending.");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.Error("Startup fan recovery failed unexpectedly.", exception);
+            SetFanRecoveryState(
+                FanRecoveryState.RecoveryBlocked,
+                "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+        }
+    }
+
+    private async Task TryRetryPendingFanRecoveryUnderGateAsync(
+        string verifiedModel,
+        CancellationToken cancellationToken)
+    {
+        if (_gamingOptimisedRestoreCoordinator is null)
+        {
+            return;
+        }
+
+        _logger.Info("Retrying pending fan recovery after explicit AppleSMC activation.");
+
+        try
+        {
+            var result = await _gamingOptimisedRestoreCoordinator
+                .RecoverFansOnlyAsync(verifiedModel, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (result.IsSuccessful)
+            {
+                _logger.Info($"Pending fan recovery completed successfully after AppleSMC activation. Action={result.FanRecovery?.Action}. Marker cleared.");
+                SetFanRecoveryState(
+                    FanRecoveryState.None,
+                    "No pending fan recovery.");
+
+                var refreshedStatus = await _fanControlService
+                    .ReadStatusAsync(verifiedModel, cancellationToken)
+                    .ConfigureAwait(false);
+                ApplyFanStatus(refreshedStatus);
+                StatusMessage = "Fan monitoring enabled. Previous fan override was restored to Apple Auto.";
+            }
+            else
+            {
+                _logger.Info($"Pending fan recovery after AppleSMC activation was not completed: {result.FailureReason}. Action={result.FanRecovery?.Action}.");
+                SetFanRecoveryState(
+                    FanRecoveryState.RecoveryBlocked,
+                    "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+                StatusMessage = "Fan monitoring enabled. Fan recovery remains blocked because current hardware state does not match the ownership marker.";
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.Error("Retrying pending fan recovery failed unexpectedly.", exception);
+            SetFanRecoveryState(
+                FanRecoveryState.RecoveryBlocked,
+                "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+            StatusMessage = "Fan monitoring enabled, but recovering the previous fan override failed unexpectedly. Check the log for details.";
+        }
+
+        UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+    }
+
+    private static bool IsExactVerifiedMacBookPro16_1(ModelVerificationResult verificationResult)
+    {
+        return string.Equals(
+                verificationResult.Model,
+                VerifiedHardwareModels.MacBookPro16_1,
+                StringComparison.Ordinal)
+            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
+            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
     }
 
     private AsyncCommand CreateProfileCommand(PerformanceProfile profile)

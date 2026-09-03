@@ -508,6 +508,71 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.Equal(0, fanCoordinator.ApplyCallCount);
     }
 
+    [Fact]
+    public async Task RecoverFansOnlyAsync_ModelMismatch_FailsClosedWithoutSession()
+    {
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var fanCoordinator = new RecordingFanOverrideCoordinator();
+        var coordinator = CreateCoordinator(power, fanProbe, fanCoordinator);
+
+        var result = await coordinator.RecoverFansOnlyAsync("MacBookPro15,1", CancellationToken.None);
+
+        Assert.False(result.IsSuccessful);
+        Assert.Contains("MacBookPro16,1", result.FailureReason, StringComparison.Ordinal);
+        Assert.Null(result.PowerOperation);
+        Assert.Equal(0, fanProbe.ProbeCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task RecoverFansOnlyAsync_Successful_VerifiesBaselineAndDisposesSession_ReturnsSuccessfulFanOnly()
+    {
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var fanCoordinator = new RecordingFanOverrideCoordinator();
+        var factory = new RecordingFanExecutionSessionFactory(fanProbe, fanCoordinator);
+        var coordinator = CreateCoordinator(power, factory);
+
+        var result = await coordinator.RecoverFansOnlyAsync(Model, CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.True(result.IsFanBaselineVerified);
+        Assert.Null(result.PowerOperation);
+        Assert.NotNull(result.FanRecovery);
+        Assert.Equal(1, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanCoordinator.RecoverCallCount);
+        Assert.Single(factory.Sessions);
+        Assert.Equal(1, factory.Sessions[0].DisposeCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task RecoverFansOnlyAsync_BaselineMismatch_FailsClosedAndDisposesSession()
+    {
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe(
+            null,
+            ValidFanCapability(fan0Mode: 1, fan1Mode: 0));
+        var fanCoordinator = new RecordingFanOverrideCoordinator
+        {
+            RecoveryResult = new FanOverrideRecoveryDecision(
+                FanOverrideRecoveryAction.None,
+                "No recovery required.")
+        };
+        var factory = new RecordingFanExecutionSessionFactory(fanProbe, fanCoordinator);
+        var coordinator = CreateCoordinator(power, factory);
+
+        var result = await coordinator.RecoverFansOnlyAsync(Model, CancellationToken.None);
+
+        Assert.False(result.IsSuccessful);
+        Assert.False(result.IsFanBaselineVerified);
+        Assert.Null(result.PowerOperation);
+        Assert.Single(factory.Sessions);
+        Assert.Equal(1, factory.Sessions[0].DisposeCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
     private static GamingOptimisedRestoreCoordinator CreateCoordinator(
         RecordingPowerManagementService powerManagementService,
         RecordingFanCapabilityProbe fanCapabilityProbe,

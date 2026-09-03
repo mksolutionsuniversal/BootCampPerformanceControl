@@ -28,6 +28,21 @@ internal sealed record GamingOptimisedRestoreResult(
             powerOperation);
     }
 
+    public static GamingOptimisedRestoreResult SuccessfulFanOnly(
+        string model,
+        FanOverrideRecoveryDecision fanRecovery)
+    {
+        ArgumentNullException.ThrowIfNull(fanRecovery);
+
+        return new GamingOptimisedRestoreResult(
+            model,
+            IsSuccessful: true,
+            IsFanBaselineVerified: true,
+            FailureReason: string.Empty,
+            fanRecovery,
+            PowerOperation: null);
+    }
+
     public static GamingOptimisedRestoreResult Failed(
         string model,
         string failureReason,

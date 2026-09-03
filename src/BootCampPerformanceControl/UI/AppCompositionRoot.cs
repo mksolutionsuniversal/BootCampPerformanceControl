@@ -16,12 +16,15 @@ public static class AppCompositionRoot
     public static MainViewModel CreateMainViewModel(IApplicationLogger logger)
     {
         var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
+        var ownershipStore = new JsonFanOverrideOwnershipStore(logger);
         var modelSupportRegistry = new ModelSupportRegistry();
         var hardwareDetectionService = new HardwareDetectionService(modelSupportRegistry);
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
         var fanProfileExecutionResolver = new FanProfileExecutionResolver();
-        var fanExecutionSessionFactory = new CrystalIdeaFanExecutionSessionFactory(logger);
+        var fanExecutionSessionFactory = new CrystalIdeaFanExecutionSessionFactory(
+            ownershipStore,
+            logger);
         var processorProfileStateEvaluator = new ProcessorProfileStateEvaluator(
             profileCatalog,
             profileExecutionResolver);
@@ -45,7 +48,10 @@ public static class AppCompositionRoot
         var profileRestoreService = new ProfileRestoreService(
             hardwareDetectionService,
             powerManagementService,
-            gamingOptimisedRestoreCoordinator);
+            gamingOptimisedRestoreCoordinator,
+            restoreSnapshotStore,
+            ownershipStore,
+            logger);
         var diagnosticReportService = new DiagnosticReportService(
             hardwareDetectionService,
             powerManagementService,
@@ -77,6 +83,8 @@ public static class AppCompositionRoot
             new WpfCompatibilityReportDialogService(logger),
             logger,
             new WpfUserConfirmationService(),
-            profileRestoreService: profileRestoreService);
+            profileRestoreService: profileRestoreService,
+            ownershipReader: ownershipStore,
+            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator);
     }
 }

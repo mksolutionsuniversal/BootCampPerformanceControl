@@ -23,6 +23,19 @@ internal sealed class CrystalIdeaFanExecutionSessionFactory : IFanExecutionSessi
     {
     }
 
+    public CrystalIdeaFanExecutionSessionFactory(
+        IFanOverrideOwnershipStore ownershipStore,
+        IApplicationLogger logger)
+        : this(
+            logger,
+            static () => new WindowsAppleSmcServiceController(),
+            static () => WindowsDeviceIoControlClient.OpenExclusive(
+                CrystalIdeaAppleSmcTransport.DevicePath),
+            () => ownershipStore)
+    {
+        ArgumentNullException.ThrowIfNull(ownershipStore);
+    }
+
     internal CrystalIdeaFanExecutionSessionFactory(
         IApplicationLogger logger,
         Func<IAppleSmcServiceController> openServiceController,

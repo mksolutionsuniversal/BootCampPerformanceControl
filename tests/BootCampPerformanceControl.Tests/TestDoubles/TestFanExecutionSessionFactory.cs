@@ -6,6 +6,13 @@ namespace BootCampPerformanceControl.Tests.TestDoubles;
 
 internal sealed class TestFanExecutionSessionFactory : IFanExecutionSessionFactory
 {
+    private readonly IFanOverrideOwnershipStore? _ownershipStore;
+
+    public TestFanExecutionSessionFactory(IFanOverrideOwnershipStore? ownershipStore = null)
+    {
+        _ownershipStore = ownershipStore;
+    }
+
     public Func<Task<IFanExecutionSession>>? OpenSessionHandler { get; init; }
     public int OpenCallCount { get; private set; }
 
@@ -17,7 +24,8 @@ internal sealed class TestFanExecutionSessionFactory : IFanExecutionSessionFacto
             return OpenSessionHandler();
         }
 
-        return Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession());
+        return Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+            overrideCoordinator: new TestFanOverrideCoordinator(_ownershipStore)));
     }
 }
 
@@ -94,17 +102,24 @@ internal sealed class TestFanCapabilityProbe : IFanCapabilityProbe
 
 internal sealed class TestFanOverrideCoordinator : IFanOverrideCoordinator
 {
+    private readonly IFanOverrideOwnershipStore? _ownershipStore;
+
+    public TestFanOverrideCoordinator(IFanOverrideOwnershipStore? ownershipStore = null)
+    {
+        _ownershipStore = ownershipStore;
+    }
+
     public Func<string, FanControlCapabilityResult, CancellationToken, Task<FanOverrideExecutionResult>>? ApplyHandler { get; init; }
     public Func<string, FanControlCapabilityResult, CancellationToken, Task<FanOverrideRecoveryDecision>>? RecoverHandler { get; init; }
 
-    public Task<FanOverrideExecutionResult> ApplyMaximumSafeRpmAsync(
+    public async Task<FanOverrideExecutionResult> ApplyMaximumSafeRpmAsync(
         string model,
         FanControlCapabilityResult freshCapability,
         CancellationToken cancellationToken)
     {
         if (ApplyHandler is not null)
         {
-            return ApplyHandler(model, freshCapability, cancellationToken);
+            return await ApplyHandler(model, freshCapability, cancellationToken);
         }
 
         var marker = new FanOverrideOwnershipMarker(
@@ -113,21 +128,31 @@ internal sealed class TestFanOverrideCoordinator : IFanOverrideCoordinator
             4789.5f,
             DateTimeOffset.UtcNow);
 
-        return Task.FromResult(FanOverrideExecutionResult.Applied(marker));
+        if (_ownershipStore is not null)
+        {
+            await _ownershipStore.SaveNewAsync(marker, cancellationToken);
+        }
+
+        return FanOverrideExecutionResult.Applied(marker);
     }
 
-    public Task<FanOverrideRecoveryDecision> RecoverAsync(
+    public async Task<FanOverrideRecoveryDecision> RecoverAsync(
         string model,
         FanControlCapabilityResult freshCapability,
         CancellationToken cancellationToken)
     {
         if (RecoverHandler is not null)
         {
-            return RecoverHandler(model, freshCapability, cancellationToken);
+            return await RecoverHandler(model, freshCapability, cancellationToken);
         }
 
-        return Task.FromResult(new FanOverrideRecoveryDecision(
+        if (_ownershipStore is not null)
+        {
+            await _ownershipStore.ClearAsync(cancellationToken);
+        }
+
+        return new FanOverrideRecoveryDecision(
             FanOverrideRecoveryAction.RestoreAppleAuto,
-            "Restored Apple Auto."));
+            "Restored Apple Auto.");
     }
 }
