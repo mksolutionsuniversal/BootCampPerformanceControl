@@ -17,7 +17,10 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         var power = new RecordingPowerManagementService();
         var fanProbe = new RecordingFanCapabilityProbe();
         var fanCoordinator = new RecordingFanOverrideCoordinator();
-        var coordinator = CreateCoordinator(power, fanProbe, fanCoordinator);
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator);
+        var coordinator = CreateCoordinator(power, sessionFactory);
 
         var result = await coordinator.RestoreAsync(
             VerifiedHardwareModels.MacBookPro14_3,
@@ -26,6 +29,32 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.False(result.IsSuccessful);
         Assert.Null(result.FanRecovery);
         Assert.Null(result.PowerOperation);
+        Assert.Equal(0, fanProbe.ProbeCallCount);
+        Assert.Equal(0, fanCoordinator.RecoverCallCount);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_FanSessionOpenFailure_DoesNotProbeRecoverOrRestorePower()
+    {
+        var openException = new InvalidOperationException("session open failed");
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var fanCoordinator = new RecordingFanOverrideCoordinator();
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator)
+        {
+            OpenException = openException
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => coordinator.RestoreAsync(Model, CancellationToken.None));
+
+        Assert.Same(openException, exception);
+        Assert.Equal(1, sessionFactory.OpenCallCount);
         Assert.Equal(0, fanProbe.ProbeCallCount);
         Assert.Equal(0, fanCoordinator.RecoverCallCount);
         Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
@@ -53,6 +82,38 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
     }
 
     [Fact]
+    public async Task RestoreAsync_FanRecoveryThrowsAndSessionDisposeThrows_SurfacesFanAndCleanupFailures()
+    {
+        var recoveryException = new InvalidOperationException("fan recovery failed");
+        var cleanupException = new InvalidOperationException("session dispose failed");
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var fanCoordinator = new RecordingFanOverrideCoordinator
+        {
+            RecoveryException = recoveryException
+        };
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator)
+        {
+            DisposeException = cleanupException
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
+            () => coordinator.RestoreAsync(Model, CancellationToken.None));
+
+        Assert.Same(recoveryException, exception.OperationException);
+        Assert.Same(cleanupException, exception.CleanupException);
+        var aggregate = Assert.IsType<AggregateException>(exception.InnerException);
+        Assert.Contains(recoveryException, aggregate.InnerExceptions);
+        Assert.Contains(cleanupException, aggregate.InnerExceptions);
+        Assert.Equal(1, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanCoordinator.RecoverCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
     public async Task RestoreAsync_FanRecoveryBlocked_FailsWithoutPowerRestore()
     {
         var power = new RecordingPowerManagementService();
@@ -71,6 +132,39 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.False(result.IsFanBaselineVerified);
         Assert.Equal(FanOverrideRecoveryAction.Blocked, result.FanRecovery?.Action);
         Assert.Null(result.PowerOperation);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_FanRecoveryBlockedAndSessionDisposeThrows_PreservesFailureResultDetails()
+    {
+        var cleanupException = new InvalidOperationException("session dispose failed");
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var recoveryDecision = new FanOverrideRecoveryDecision(
+            FanOverrideRecoveryAction.Blocked,
+            "owned manual state changed");
+        var fanCoordinator = new RecordingFanOverrideCoordinator
+        {
+            RecoveryResult = recoveryDecision
+        };
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator)
+        {
+            DisposeException = cleanupException
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
+            () => coordinator.RestoreAsync(Model, CancellationToken.None));
+
+        Assert.Null(exception.OperationException);
+        Assert.Equal(
+            "Gaming Optimised restore is blocked by fan recovery. owned manual state changed",
+            exception.OperationFailureReason);
+        Assert.Same(recoveryDecision, exception.RecoveryDecision);
+        Assert.Same(cleanupException, exception.CleanupException);
         Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
     }
 
@@ -94,6 +188,40 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.False(result.IsFanBaselineVerified);
         Assert.Equal(FanOverrideRecoveryAction.None, result.FanRecovery?.Action);
         Assert.Null(result.PowerOperation);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_FanRecoveryNoneWithManualFansAndSessionDisposeThrows_PreservesFailureResultDetails()
+    {
+        var cleanupException = new InvalidOperationException("session dispose failed");
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe(
+            results: [ValidFanCapability(fan0Mode: 1, fan1Mode: 1)]);
+        var recoveryDecision = new FanOverrideRecoveryDecision(
+            FanOverrideRecoveryAction.None,
+            "No fan override ownership marker exists.");
+        var fanCoordinator = new RecordingFanOverrideCoordinator
+        {
+            RecoveryResult = recoveryDecision
+        };
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator)
+        {
+            DisposeException = cleanupException
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
+            () => coordinator.RestoreAsync(Model, CancellationToken.None));
+
+        Assert.Null(exception.OperationException);
+        Assert.Equal(
+            "Gaming Optimised restore could not verify the fan Apple Auto baseline.",
+            exception.OperationFailureReason);
+        Assert.Same(recoveryDecision, exception.RecoveryDecision);
+        Assert.Same(cleanupException, exception.CleanupException);
         Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
     }
 
@@ -153,8 +281,35 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         var result = await coordinator.RestoreAsync(Model, CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
-        Assert.Equal(["fan-probe", "fan-recover", "power-restore"], events);
+        Assert.Equal(
+            ["fan-session-open", "fan-probe", "fan-recover", "fan-session-dispose", "power-restore"],
+            events);
         Assert.True(events.IndexOf("fan-recover") < events.IndexOf("power-restore"));
+        Assert.True(events.IndexOf("fan-session-dispose") < events.IndexOf("power-restore"));
+    }
+
+    [Fact]
+    public async Task RestoreAsync_FanSessionDisposeFailure_DoesNotRestorePower()
+    {
+        var disposeException = new InvalidOperationException("session dispose failed");
+        var power = new RecordingPowerManagementService();
+        var fanProbe = new RecordingFanCapabilityProbe();
+        var fanCoordinator = new RecordingFanOverrideCoordinator();
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator)
+        {
+            DisposeException = disposeException
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => coordinator.RestoreAsync(Model, CancellationToken.None));
+
+        Assert.Same(disposeException, exception);
+        Assert.Equal(1, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanCoordinator.RecoverCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
     }
 
     [Fact]
@@ -191,7 +346,7 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.Equal(1, fanCoordinator.RecoverCallCount);
         Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
         Assert.Equal(0, fanCoordinator.ApplyCallCount);
-        Assert.Equal(["fan-probe", "fan-recover"], events);
+        Assert.Equal(["fan-session-open", "fan-probe", "fan-recover", "fan-session-dispose"], events);
     }
 
     [Fact]
@@ -288,7 +443,11 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
                 FanOverrideRecoveryAction.RestoreAppleAuto,
                 "Apple Auto restored.")
         };
-        var firstCoordinator = CreateCoordinator(firstPower, firstFanProbe, firstFanCoordinator);
+        var firstSessionFactory = new RecordingFanExecutionSessionFactory(
+            firstFanProbe,
+            firstFanCoordinator,
+            events);
+        var firstCoordinator = CreateCoordinator(firstPower, firstSessionFactory);
 
         var firstResult = await firstCoordinator.RestoreAsync(Model, CancellationToken.None);
 
@@ -302,7 +461,11 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
                 FanOverrideRecoveryAction.None,
                 "No fan override ownership marker exists.")
         };
-        var secondCoordinator = CreateCoordinator(secondPower, secondFanProbe, secondFanCoordinator);
+        var secondSessionFactory = new RecordingFanExecutionSessionFactory(
+            secondFanProbe,
+            secondFanCoordinator,
+            events);
+        var secondCoordinator = CreateCoordinator(secondPower, secondSessionFactory);
 
         var secondResult = await secondCoordinator.RestoreAsync(Model, CancellationToken.None);
 
@@ -310,13 +473,23 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         Assert.True(secondResult.IsSuccessful);
         Assert.Equal(0, firstFanCoordinator.ApplyCallCount);
         Assert.Equal(0, secondFanCoordinator.ApplyCallCount);
+        Assert.Equal(1, firstSessionFactory.OpenCallCount);
+        Assert.Equal(1, secondSessionFactory.OpenCallCount);
+        Assert.Single(firstSessionFactory.Sessions);
+        Assert.Single(secondSessionFactory.Sessions);
+        Assert.Equal(1, firstSessionFactory.Sessions[0].DisposeCallCount);
+        Assert.Equal(1, secondSessionFactory.Sessions[0].DisposeCallCount);
         Assert.Equal(
             [
+                "fan-session-open",
                 "fan-probe",
                 "fan-recover",
+                "fan-session-dispose",
                 "power-restore",
+                "fan-session-open",
                 "fan-probe",
                 "fan-recover",
+                "fan-session-dispose",
                 "power-restore"
             ],
             events);
@@ -340,10 +513,20 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         RecordingFanCapabilityProbe fanCapabilityProbe,
         RecordingFanOverrideCoordinator fanOverrideCoordinator)
     {
+        return CreateCoordinator(
+            powerManagementService,
+            new RecordingFanExecutionSessionFactory(
+                fanCapabilityProbe,
+                fanOverrideCoordinator));
+    }
+
+    private static GamingOptimisedRestoreCoordinator CreateCoordinator(
+        RecordingPowerManagementService powerManagementService,
+        IFanExecutionSessionFactory fanExecutionSessionFactory)
+    {
         return new GamingOptimisedRestoreCoordinator(
             powerManagementService,
-            fanCapabilityProbe,
-            fanOverrideCoordinator);
+            fanExecutionSessionFactory);
     }
 
     private static PowerOperationResult SuccessfulPowerRestore()
@@ -492,6 +675,93 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         }
     }
 
+    private sealed class RecordingFanExecutionSessionFactory : IFanExecutionSessionFactory
+    {
+        private readonly RecordingFanCapabilityProbe _fanCapabilityProbe;
+        private readonly RecordingFanOverrideCoordinator _fanOverrideCoordinator;
+        private readonly List<string>? _events;
+
+        public RecordingFanExecutionSessionFactory(
+            RecordingFanCapabilityProbe fanCapabilityProbe,
+            RecordingFanOverrideCoordinator fanOverrideCoordinator,
+            List<string>? events = null)
+        {
+            _fanCapabilityProbe = fanCapabilityProbe;
+            _fanOverrideCoordinator = fanOverrideCoordinator;
+            _events = events ?? fanCapabilityProbe.Events ?? fanOverrideCoordinator.Events;
+        }
+
+        public Exception? OpenException { get; init; }
+
+        public Exception? DisposeException { get; init; }
+
+        public int OpenCallCount { get; private set; }
+
+        public List<CancellationToken> OpenTokens { get; } = [];
+
+        public List<RecordingFanExecutionSession> Sessions { get; } = [];
+
+        public Task<IFanExecutionSession> OpenAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            OpenCallCount++;
+            OpenTokens.Add(cancellationToken);
+            _events?.Add("fan-session-open");
+
+            if (OpenException is not null)
+            {
+                throw OpenException;
+            }
+
+            var session = new RecordingFanExecutionSession(
+                _fanCapabilityProbe,
+                _fanOverrideCoordinator,
+                _events)
+            {
+                DisposeException = DisposeException
+            };
+            Sessions.Add(session);
+
+            return Task.FromResult<IFanExecutionSession>(session);
+        }
+    }
+
+    private sealed class RecordingFanExecutionSession : IFanExecutionSession
+    {
+        private readonly List<string>? _events;
+
+        public RecordingFanExecutionSession(
+            IFanCapabilityProbe capabilityProbe,
+            IFanOverrideCoordinator overrideCoordinator,
+            List<string>? events)
+        {
+            CapabilityProbe = capabilityProbe;
+            OverrideCoordinator = overrideCoordinator;
+            _events = events;
+        }
+
+        public IFanCapabilityProbe CapabilityProbe { get; }
+
+        public IFanOverrideCoordinator OverrideCoordinator { get; }
+
+        public Exception? DisposeException { get; init; }
+
+        public int DisposeCallCount { get; private set; }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCallCount++;
+            _events?.Add("fan-session-dispose");
+
+            if (DisposeException is not null)
+            {
+                throw DisposeException;
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class RecordingFanCapabilityProbe : IFanCapabilityProbe
     {
         private readonly List<string>? _events;
@@ -505,6 +775,8 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
             _results = new Queue<FanControlCapabilityResult>(
                 results.Length == 0 ? [ValidFanCapability()] : results);
         }
+
+        public List<string>? Events => _events;
 
         public Exception? ProbeException { get; init; }
 
@@ -542,8 +814,12 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
             _events = events;
         }
 
+        public List<string>? Events => _events;
+
         public FanOverrideRecoveryDecision RecoveryResult { get; init; } =
             new(FanOverrideRecoveryAction.RestoreAppleAuto, "Apple Auto restored.");
+
+        public Exception? RecoveryException { get; init; }
 
         public Action? OnRecover { get; init; }
 
@@ -571,6 +847,12 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
             RecoverTokens.Add(cancellationToken);
             _events?.Add("fan-recover");
             OnRecover?.Invoke();
+
+            if (RecoveryException is not null)
+            {
+                throw RecoveryException;
+            }
+
             return Task.FromResult(RecoveryResult);
         }
     }

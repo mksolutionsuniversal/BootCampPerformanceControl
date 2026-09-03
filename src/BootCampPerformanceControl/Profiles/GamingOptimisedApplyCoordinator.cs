@@ -9,21 +9,18 @@ internal sealed class GamingOptimisedApplyCoordinator
     private readonly ProfileExecutionResolver _profileExecutionResolver;
     private readonly FanProfileExecutionResolver _fanProfileExecutionResolver;
     private readonly IPowerManagementService _powerManagementService;
-    private readonly IFanCapabilityProbe _fanCapabilityProbe;
-    private readonly IFanOverrideCoordinator _fanOverrideCoordinator;
+    private readonly IFanExecutionSessionFactory _fanExecutionSessionFactory;
 
     public GamingOptimisedApplyCoordinator(
         ProfileExecutionResolver profileExecutionResolver,
         FanProfileExecutionResolver fanProfileExecutionResolver,
         IPowerManagementService powerManagementService,
-        IFanCapabilityProbe fanCapabilityProbe,
-        IFanOverrideCoordinator fanOverrideCoordinator)
+        IFanExecutionSessionFactory fanExecutionSessionFactory)
     {
         _profileExecutionResolver = profileExecutionResolver ?? throw new ArgumentNullException(nameof(profileExecutionResolver));
         _fanProfileExecutionResolver = fanProfileExecutionResolver ?? throw new ArgumentNullException(nameof(fanProfileExecutionResolver));
         _powerManagementService = powerManagementService ?? throw new ArgumentNullException(nameof(powerManagementService));
-        _fanCapabilityProbe = fanCapabilityProbe ?? throw new ArgumentNullException(nameof(fanCapabilityProbe));
-        _fanOverrideCoordinator = fanOverrideCoordinator ?? throw new ArgumentNullException(nameof(fanOverrideCoordinator));
+        _fanExecutionSessionFactory = fanExecutionSessionFactory ?? throw new ArgumentNullException(nameof(fanExecutionSessionFactory));
     }
 
     public async Task<GamingOptimisedApplyResult> ApplyAsync(
@@ -50,7 +47,50 @@ internal sealed class GamingOptimisedApplyCoordinator
             .ReadCurrentStateAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var fanCapability = await _fanCapabilityProbe
+        var fanSession = await _fanExecutionSessionFactory
+            .OpenAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        GamingOptimisedApplyResult result;
+        try
+        {
+            result = await ApplyWithFanSessionAsync(
+                    profile,
+                    verificationResult,
+                    processorResolution,
+                    expectedStateBefore,
+                    fanSession,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception operationException)
+        {
+            await DisposeFanSessionAfterFailureAsync(
+                    fanSession,
+                    operationException,
+                    "Fan execution session cleanup failed after Gaming Optimised apply failed.")
+                .ConfigureAwait(false);
+            throw;
+        }
+
+        await DisposeFanSessionAfterResultAsync(fanSession, result)
+            .ConfigureAwait(false);
+        return result;
+    }
+
+    private async Task<GamingOptimisedApplyResult> ApplyWithFanSessionAsync(
+        PerformanceProfile profile,
+        ModelVerificationResult verificationResult,
+        ProfileExecutionResolution processorResolution,
+        PowerStateSnapshot expectedStateBefore,
+        IFanExecutionSession fanSession,
+        CancellationToken cancellationToken)
+    {
+        var processorSettings = processorResolution.Settings
+            ?? throw new InvalidOperationException(
+                "Executable processor resolution must include settings.");
+
+        var fanCapability = await fanSession.CapabilityProbe
             .ProbeAsync(verificationResult.Model, cancellationToken)
             .ConfigureAwait(false);
         var fanResolution = _fanProfileExecutionResolver.ResolveMaximumSafeRpmPlan(
@@ -70,7 +110,7 @@ internal sealed class GamingOptimisedApplyCoordinator
         FanOverrideExecutionResult fanExecution;
         try
         {
-            fanExecution = await _fanOverrideCoordinator
+            fanExecution = await fanSession.OverrideCoordinator
                 .ApplyMaximumSafeRpmAsync(
                     verificationResult.Model,
                     fanCapability,
@@ -80,6 +120,7 @@ internal sealed class GamingOptimisedApplyCoordinator
         catch (Exception exception)
         {
             await RecoverFanOrThrowAsync(
+                    fanSession,
                     verificationResult.Model,
                     "Fan apply failed and fan compensation could not be verified.",
                     exception)
@@ -102,7 +143,7 @@ internal sealed class GamingOptimisedApplyCoordinator
         {
             powerOperation = await _powerManagementService
                 .ApplyProcessorSettingsAsync(
-                    processorResolution.Settings,
+                    processorSettings,
                     expectedStateBefore,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -110,6 +151,7 @@ internal sealed class GamingOptimisedApplyCoordinator
         catch (Exception exception)
         {
             await RecoverFanOrThrowAsync(
+                    fanSession,
                     verificationResult.Model,
                     "Processor apply failed after fan ownership and fan compensation could not be verified.",
                     exception)
@@ -128,6 +170,7 @@ internal sealed class GamingOptimisedApplyCoordinator
         }
 
         var fanCompensation = await RecoverFanAfterPowerFailureOrThrowAsync(
+                fanSession,
                 verificationResult.Model)
             .ConfigureAwait(false);
 
@@ -167,12 +210,49 @@ internal sealed class GamingOptimisedApplyCoordinator
             fanCompensation.Decision);
     }
 
+    private static async Task DisposeFanSessionAfterFailureAsync(
+        IFanExecutionSession fanSession,
+        Exception operationException,
+        string message)
+    {
+        try
+        {
+            await fanSession.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupException)
+        {
+            throw new FanExecutionSessionCleanupException(
+                message,
+                operationException,
+                cleanupException);
+        }
+    }
+
+    private static async Task DisposeFanSessionAfterResultAsync(
+        IFanExecutionSession fanSession,
+        GamingOptimisedApplyResult result)
+    {
+        try
+        {
+            await fanSession.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupException) when (!result.IsSuccessful)
+        {
+            throw new FanExecutionSessionCleanupException(
+                "Fan execution session cleanup failed after Gaming Optimised apply returned a failed result.",
+                result.FailureReason,
+                result.FanCompensation,
+                cleanupException);
+        }
+    }
+
     private async Task<FanRecoveryResult> RecoverFanAfterPowerFailureOrThrowAsync(
+        IFanExecutionSession fanSession,
         string model)
     {
         try
         {
-            return await RecoverFanCoreAsync(model)
+            return await RecoverFanCoreAsync(fanSession, model)
                 .ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -186,13 +266,14 @@ internal sealed class GamingOptimisedApplyCoordinator
     }
 
     private async Task<FanRecoveryResult> RecoverFanOrThrowAsync(
+        IFanExecutionSession fanSession,
         string model,
         string failureMessage,
         Exception operationException)
     {
         try
         {
-            var recovery = await RecoverFanCoreAsync(model)
+            var recovery = await RecoverFanCoreAsync(fanSession, model)
                 .ConfigureAwait(false);
 
             if (recovery.Decision.Action == FanOverrideRecoveryAction.Blocked)
@@ -227,13 +308,15 @@ internal sealed class GamingOptimisedApplyCoordinator
         }
     }
 
-    private async Task<FanRecoveryResult> RecoverFanCoreAsync(string model)
+    private static async Task<FanRecoveryResult> RecoverFanCoreAsync(
+        IFanExecutionSession fanSession,
+        string model)
     {
-        var freshFanCapability = await _fanCapabilityProbe
+        var freshFanCapability = await fanSession.CapabilityProbe
             .ProbeAsync(model, CancellationToken.None)
             .ConfigureAwait(false);
 
-        var decision = await _fanOverrideCoordinator
+        var decision = await fanSession.OverrideCoordinator
             .RecoverAsync(
                 model,
                 freshFanCapability,

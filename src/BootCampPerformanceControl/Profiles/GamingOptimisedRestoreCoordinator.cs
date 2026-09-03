@@ -7,17 +7,14 @@ namespace BootCampPerformanceControl.Profiles;
 internal sealed class GamingOptimisedRestoreCoordinator
 {
     private readonly IPowerManagementService _powerManagementService;
-    private readonly IFanCapabilityProbe _fanCapabilityProbe;
-    private readonly IFanOverrideCoordinator _fanOverrideCoordinator;
+    private readonly IFanExecutionSessionFactory _fanExecutionSessionFactory;
 
     public GamingOptimisedRestoreCoordinator(
         IPowerManagementService powerManagementService,
-        IFanCapabilityProbe fanCapabilityProbe,
-        IFanOverrideCoordinator fanOverrideCoordinator)
+        IFanExecutionSessionFactory fanExecutionSessionFactory)
     {
         _powerManagementService = powerManagementService ?? throw new ArgumentNullException(nameof(powerManagementService));
-        _fanCapabilityProbe = fanCapabilityProbe ?? throw new ArgumentNullException(nameof(fanCapabilityProbe));
-        _fanOverrideCoordinator = fanOverrideCoordinator ?? throw new ArgumentNullException(nameof(fanOverrideCoordinator));
+        _fanExecutionSessionFactory = fanExecutionSessionFactory ?? throw new ArgumentNullException(nameof(fanExecutionSessionFactory));
     }
 
     public async Task<GamingOptimisedRestoreResult> RestoreAsync(
@@ -34,38 +31,54 @@ internal sealed class GamingOptimisedRestoreCoordinator
                 $"Gaming Optimised restore requires the verified {VerifiedHardwareModels.MacBookPro16_1} model.");
         }
 
-        var freshFanCapability = await _fanCapabilityProbe
-            .ProbeAsync(model, cancellationToken)
+        FanControlCapabilityResult freshFanCapability;
+        FanOverrideRecoveryDecision fanRecovery;
+
+        var fanSession = await _fanExecutionSessionFactory
+            .OpenAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var fanRecovery = await _fanOverrideCoordinator
-            .RecoverAsync(
-                model,
-                freshFanCapability,
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        try
+        {
+            freshFanCapability = await fanSession.CapabilityProbe
+                .ProbeAsync(model, cancellationToken)
+                .ConfigureAwait(false);
+
+            fanRecovery = await fanSession.OverrideCoordinator
+                .RecoverAsync(
+                    model,
+                    freshFanCapability,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception operationException)
+        {
+            await DisposeFanSessionAfterFailureAsync(
+                    fanSession,
+                    operationException,
+                    "Fan execution session cleanup failed after Gaming Optimised restore fan recovery failed.")
+                .ConfigureAwait(false);
+            throw;
+        }
 
         var fanBaselineVerified = IsVerifiedFanBaseline(
             freshFanCapability,
             fanRecovery);
 
-        if (fanRecovery.Action == FanOverrideRecoveryAction.Blocked)
-        {
-            return GamingOptimisedRestoreResult.Failed(
-                model,
-                "Gaming Optimised restore is blocked by fan recovery. "
-                + fanRecovery.Reason,
-                isFanBaselineVerified: false,
-                fanRecovery);
-        }
+        var fanPhaseFailure = CreateFanPhaseFailure(
+            model,
+            fanRecovery,
+            fanBaselineVerified);
 
-        if (!fanBaselineVerified)
+        await DisposeFanSessionAfterResultAsync(
+                fanSession,
+                fanPhaseFailure,
+                fanRecovery)
+            .ConfigureAwait(false);
+
+        if (fanPhaseFailure is not null)
         {
-            return GamingOptimisedRestoreResult.Failed(
-                model,
-                "Gaming Optimised restore could not verify the fan Apple Auto baseline.",
-                isFanBaselineVerified: false,
-                fanRecovery);
+            return fanPhaseFailure;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -88,6 +101,70 @@ internal sealed class GamingOptimisedRestoreCoordinator
             isFanBaselineVerified: true,
             fanRecovery,
             powerOperation);
+    }
+
+    private static GamingOptimisedRestoreResult? CreateFanPhaseFailure(
+        string model,
+        FanOverrideRecoveryDecision fanRecovery,
+        bool fanBaselineVerified)
+    {
+        if (fanRecovery.Action == FanOverrideRecoveryAction.Blocked)
+        {
+            return GamingOptimisedRestoreResult.Failed(
+                model,
+                "Gaming Optimised restore is blocked by fan recovery. "
+                + fanRecovery.Reason,
+                isFanBaselineVerified: false,
+                fanRecovery);
+        }
+
+        if (!fanBaselineVerified)
+        {
+            return GamingOptimisedRestoreResult.Failed(
+                model,
+                "Gaming Optimised restore could not verify the fan Apple Auto baseline.",
+                isFanBaselineVerified: false,
+                fanRecovery);
+        }
+
+        return null;
+    }
+
+    private static async Task DisposeFanSessionAfterFailureAsync(
+        IFanExecutionSession fanSession,
+        Exception operationException,
+        string message)
+    {
+        try
+        {
+            await fanSession.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupException)
+        {
+            throw new FanExecutionSessionCleanupException(
+                message,
+                operationException,
+                cleanupException);
+        }
+    }
+
+    private static async Task DisposeFanSessionAfterResultAsync(
+        IFanExecutionSession fanSession,
+        GamingOptimisedRestoreResult? fanPhaseFailure,
+        FanOverrideRecoveryDecision fanRecovery)
+    {
+        try
+        {
+            await fanSession.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupException) when (fanPhaseFailure is not null)
+        {
+            throw new FanExecutionSessionCleanupException(
+                "Fan execution session cleanup failed after Gaming Optimised restore fan phase returned a failed result.",
+                fanPhaseFailure.FailureReason,
+                fanRecovery,
+                cleanupException);
+        }
     }
 
     private static bool IsVerifiedFanBaseline(
