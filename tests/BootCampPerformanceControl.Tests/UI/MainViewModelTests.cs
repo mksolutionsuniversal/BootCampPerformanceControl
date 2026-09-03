@@ -1,8 +1,10 @@
+using System.Buffers.Binary;
 using System.Reflection;
 using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
+using BootCampPerformanceControl.FanControl.Smc;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
@@ -904,6 +906,281 @@ public sealed class MainViewModelTests
 
         Assert.Equal(2, fanControlService.ReadStatusCallCount);
         Assert.Equal(1, pollingDelay.RequestCount);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_WaitsForInFlightLivePoll()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(InitialPowerState(), new ProcessorPowerSettings(95, 95, 0, 0)),
+            InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        // Trigger Apply while live poll is in-flight holding the fan gate
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+
+        // Release polling read; Apply now acquires gate and opens write session
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.False(viewModel.IsBusy);
+        Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task RestoreAsync_WaitsForInFlightLivePoll()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        // Trigger Restore while live poll is in-flight holding the fan gate
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+
+        // Release polling read; Restore now acquires gate and opens write session
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.False(viewModel.IsBusy);
+        Assert.Contains("restored successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanPolling_SkipsCycleWhenApplyOwnsFanOperationGate()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var applyGate = new AsyncGate();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = async () =>
+            {
+                await applyGate.WaitAsync();
+                return new TestFanExecutionSession();
+            }
+        };
+
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        viewModel.StartFanMonitoring();
+        Assert.Equal(1, pollingDelay.RequestCount);
+
+        // Start Apply which will enter OpenSessionHandler and wait on applyGate while owning the fan gate
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await applyGate.WaitUntilEnteredAsync();
+        Assert.True(viewModel.IsBusy);
+
+        // Advance polling tick while Apply owns the gate
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        // Polling skipped because gate was owned / IsBusy
+        Assert.Equal(readCountBefore, fanControlService.ReadStatusCallCount);
+
+        // Release Apply gate so it completes
+        applyGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.False(viewModel.IsBusy);
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanPolling_SkipsCycleWhenRestoreOwnsFanOperationGate()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var restoreGate = new AsyncGate();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = async () =>
+            {
+                await restoreGate.WaitAsync();
+                return new TestFanExecutionSession();
+            }
+        };
+
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        viewModel.StartFanMonitoring();
+        Assert.Equal(1, pollingDelay.RequestCount);
+
+        // Start Restore which will wait on restoreGate while owning the fan gate
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await restoreGate.WaitUntilEnteredAsync();
+        Assert.True(viewModel.IsBusy);
+
+        // Advance polling tick while Restore owns the gate
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        // Polling skipped because gate was owned / IsBusy
+        Assert.Equal(readCountBefore, fanControlService.ReadStatusCallCount);
+
+        // Release Restore gate
+        restoreGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.False(viewModel.IsBusy);
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_Success_RefreshesFanStatusUnderGate()
+    {
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(1840f, 1691f),
+            VerifiedFanStatus(5616f, 5200f));
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(InitialPowerState(), new ProcessorPowerSettings(95, 95, 0, 0)),
+            InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(5616f, viewModel.FanStatus.Fan0?.ActualRpm);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_Success_RefreshesFanStatusUnderGate()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(5616f, 5200f),
+            VerifiedFanStatus(1840f, 1691f));
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
     }
 
     [Fact]
@@ -2089,7 +2366,7 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
         gamingCommand.Execute(null);
 
-        Assert.Equal(1, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(2, hardwareDetectionService.DetectCallCount);
         Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
         Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
         Assert.Equal(1, powerManagementService.RestoreOriginalSettingsCallCount);
@@ -2111,12 +2388,35 @@ public sealed class MainViewModelTests
         FakeFanControlService? fanControlService = null,
         FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
         IApplicationOptionsService? applicationOptionsService = null,
-        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
+        IFanExecutionSessionFactory? fanExecutionSessionFactory = null)
     {
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
+        var fanProfileExecutionResolver = new FanProfileExecutionResolver();
         restoreSnapshotStore ??= new InMemoryRestoreSnapshotStore();
         powerManagementService.RestoreSnapshotStore = restoreSnapshotStore;
+        fanExecutionSessionFactory ??= new TestFanExecutionSessionFactory();
+
+        var gamingOptimisedApplyCoordinator = new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            fanExecutionSessionFactory);
+        var gamingOptimisedRestoreCoordinator = new GamingOptimisedRestoreCoordinator(
+            powerManagementService,
+            fanExecutionSessionFactory);
+
+        var profileApplyService = new ProfileApplyService(
+            hardwareDetectionService,
+            profileCatalog,
+            profileExecutionResolver,
+            powerManagementService,
+            gamingOptimisedApplyCoordinator);
+        var profileRestoreService = new ProfileRestoreService(
+            hardwareDetectionService,
+            powerManagementService,
+            gamingOptimisedRestoreCoordinator);
 
         return new MainViewModel(
             hardwareDetectionService,
@@ -2125,11 +2425,7 @@ public sealed class MainViewModelTests
             elevationLauncher ?? new FakeAppleSmcBackendElevationLauncher(),
             applicationOptionsService ?? new FakeApplicationOptionsService(),
             profileCatalog,
-            new ProfileApplyService(
-                hardwareDetectionService,
-                profileCatalog,
-                profileExecutionResolver,
-                powerManagementService),
+            profileApplyService,
             restoreSnapshotStore,
             new ProcessorProfileStateEvaluator(
                 profileCatalog,
@@ -2141,7 +2437,8 @@ public sealed class MainViewModelTests
             logger ?? new TestApplicationLogger(),
             userConfirmationService,
             fanPollingInterval: TimeSpan.FromSeconds(2),
-            fanPollingDelayAsync: fanPollingDelayAsync);
+            fanPollingDelayAsync: fanPollingDelayAsync,
+            profileRestoreService: profileRestoreService);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)

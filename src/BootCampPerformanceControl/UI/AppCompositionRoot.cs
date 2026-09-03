@@ -2,6 +2,7 @@ using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 using BootCampPerformanceControl.PowerManagement;
@@ -19,17 +20,32 @@ public static class AppCompositionRoot
         var hardwareDetectionService = new HardwareDetectionService(modelSupportRegistry);
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
+        var fanProfileExecutionResolver = new FanProfileExecutionResolver();
+        var fanExecutionSessionFactory = new CrystalIdeaFanExecutionSessionFactory(logger);
         var processorProfileStateEvaluator = new ProcessorProfileStateEvaluator(
             profileCatalog,
             profileExecutionResolver);
         var powerManagementService = new WindowsPowerManagementService(
             restoreSnapshotStore,
             logger);
+        var gamingOptimisedApplyCoordinator = new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            fanExecutionSessionFactory);
+        var gamingOptimisedRestoreCoordinator = new GamingOptimisedRestoreCoordinator(
+            powerManagementService,
+            fanExecutionSessionFactory);
         var profileApplyService = new ProfileApplyService(
             hardwareDetectionService,
             profileCatalog,
             profileExecutionResolver,
-            powerManagementService);
+            powerManagementService,
+            gamingOptimisedApplyCoordinator);
+        var profileRestoreService = new ProfileRestoreService(
+            hardwareDetectionService,
+            powerManagementService,
+            gamingOptimisedRestoreCoordinator);
         var diagnosticReportService = new DiagnosticReportService(
             hardwareDetectionService,
             powerManagementService,
@@ -60,6 +76,7 @@ public static class AppCompositionRoot
             compatibilityReportService,
             new WpfCompatibilityReportDialogService(logger),
             logger,
-            new WpfUserConfirmationService());
+            new WpfUserConfirmationService(),
+            profileRestoreService: profileRestoreService);
     }
 }

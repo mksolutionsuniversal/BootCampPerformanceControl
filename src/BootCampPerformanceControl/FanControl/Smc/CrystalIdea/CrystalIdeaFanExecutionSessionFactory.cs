@@ -4,16 +4,16 @@ using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 
-// Research-only factory for a short-lived write-capable AppleSMC fan session.
+// Factory for a short-lived write-capable AppleSMC fan session.
 // It requires AppleSMC to already be running and does not start/elevate it.
-internal sealed class CrystalIdeaResearchFanExecutionSessionFactory : IFanExecutionSessionFactory
+internal sealed class CrystalIdeaFanExecutionSessionFactory : IFanExecutionSessionFactory
 {
     private readonly IApplicationLogger _logger;
     private readonly Func<IAppleSmcServiceController> _openServiceController;
     private readonly Func<IDeviceIoControlClient> _openDeviceClient;
     private readonly Func<IFanOverrideOwnershipStore> _openOwnershipStore;
 
-    public CrystalIdeaResearchFanExecutionSessionFactory(IApplicationLogger logger)
+    public CrystalIdeaFanExecutionSessionFactory(IApplicationLogger logger)
         : this(
             logger,
             static () => new WindowsAppleSmcServiceController(),
@@ -23,7 +23,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSessionFactory : IFanExecut
     {
     }
 
-    internal CrystalIdeaResearchFanExecutionSessionFactory(
+    internal CrystalIdeaFanExecutionSessionFactory(
         IApplicationLogger logger,
         Func<IAppleSmcServiceController> openServiceController,
         Func<IDeviceIoControlClient> openDeviceClient,
@@ -44,7 +44,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSessionFactory : IFanExecut
 
         IAppleSmcServiceController? serviceController = null;
         IDeviceIoControlClient? sharedDevice = null;
-        CrystalIdeaResearchFanExecutionSession? session = null;
+        CrystalIdeaFanExecutionSession? session = null;
 
         try
         {
@@ -68,7 +68,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSessionFactory : IFanExecut
                 ?? throw new InvalidOperationException(
                     "The fan ownership store factory returned no store.");
 
-            session = CrystalIdeaResearchFanExecutionSession.Create(
+            session = CrystalIdeaFanExecutionSession.Create(
                 serviceController,
                 sharedDevice,
                 ownershipStore,
@@ -91,7 +91,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSessionFactory : IFanExecut
 
     private static void CleanupAfterOpenFailure(
         Exception operationException,
-        CrystalIdeaResearchFanExecutionSession? session,
+        CrystalIdeaFanExecutionSession? session,
         IDeviceIoControlClient? sharedDevice,
         IAppleSmcServiceController? serviceController)
     {

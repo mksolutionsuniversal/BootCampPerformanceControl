@@ -26,6 +26,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IApplicationOptionsService _applicationOptionsService;
     private readonly IProfileCatalog _profileCatalog;
     private readonly ProfileApplyService _profileApplyService;
+    private readonly ProfileRestoreService _profileRestoreService;
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
     private readonly ProcessorProfileStateEvaluator _processorProfileStateEvaluator;
     private readonly IDiagnosticReportService _diagnosticReportService;
@@ -87,7 +88,8 @@ public sealed class MainViewModel : ViewModelBase
         IApplicationLogger logger,
         IUserConfirmationService? userConfirmationService = null,
         TimeSpan? fanPollingInterval = null,
-        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
+        ProfileRestoreService? profileRestoreService = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareDetectionService);
         ArgumentNullException.ThrowIfNull(powerManagementService);
@@ -111,6 +113,8 @@ public sealed class MainViewModel : ViewModelBase
         _applicationOptionsService = applicationOptionsService;
         _profileCatalog = profileCatalog;
         _profileApplyService = profileApplyService;
+        _profileRestoreService = profileRestoreService
+            ?? new ProfileRestoreService(hardwareDetectionService, powerManagementService);
         _restoreSnapshotStore = restoreSnapshotStore;
         _processorProfileStateEvaluator = processorProfileStateEvaluator;
         _diagnosticReportService = diagnosticReportService;
@@ -852,9 +856,13 @@ public sealed class MainViewModel : ViewModelBase
 
         IsBusy = true;
         StatusMessage = $"Applying profile '{profileId}'...";
+        var fanGateAcquired = false;
 
         try
         {
+            await _fanOperationGate.WaitAsync(cancellationToken);
+            fanGateAcquired = true;
+
             _logger.Info($"Profile application started: {profileId}.");
             var result = await _profileApplyService.ApplyProfileAsync(profileId, cancellationToken);
 
@@ -902,9 +910,16 @@ public sealed class MainViewModel : ViewModelBase
                     $"Power-state UI refresh failed after successful profile application for '{profileId}'.",
                     exception);
             }
+
+            await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
         }
         finally
         {
+            if (fanGateAcquired)
+            {
+                _fanOperationGate.Release();
+            }
+
             IsBusy = false;
         }
     }
@@ -912,16 +927,20 @@ public sealed class MainViewModel : ViewModelBase
     private async Task RestoreOriginalSettingsAsync(CancellationToken cancellationToken)
     {
         IsBusy = true;
-        StatusMessage = "Restoring original power settings...";
+        StatusMessage = "Restoring original settings...";
+        var fanGateAcquired = false;
 
         try
         {
+            await _fanOperationGate.WaitAsync(cancellationToken);
+            fanGateAcquired = true;
+
             _logger.Info("Restore started.");
-            var result = await _powerManagementService.RestoreOriginalSettingsAsync(cancellationToken);
+            var result = await _profileRestoreService.RestoreAsync(cancellationToken);
 
             if (!result.IsSuccessful)
             {
-                var failureMessage = result.FailureMessage ?? "Restore operation failed.";
+                var failureMessage = result.FailureMessage;
                 StatusMessage = $"Restore failed: {failureMessage}";
                 UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
                 _logger.Error(
@@ -931,6 +950,7 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             _logger.Info("Restore succeeded. Re-reading power state.");
+            SetLastVerificationResult(result.ModelVerificationResult);
 
             try
             {
@@ -961,10 +981,43 @@ public sealed class MainViewModel : ViewModelBase
                     "Power-state UI refresh failed after successful restore.",
                     exception);
             }
+
+            await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
         }
         finally
         {
+            if (fanGateAcquired)
+            {
+                _fanOperationGate.Release();
+            }
+
             IsBusy = false;
+        }
+    }
+
+    private async Task TryRefreshFanStatusUnderGateAsync(
+        string? model,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(model) || !HasUsableFanModelIdentity(_lastVerificationResult))
+        {
+            return;
+        }
+
+        try
+        {
+            var status = await _fanControlService
+                .ReadStatusAsync(model, cancellationToken)
+                .ConfigureAwait(false);
+            ApplyFanStatus(status);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation during UI status refresh should not fail the overall operation.
+        }
+        catch (Exception exception)
+        {
+            _logger.Info($"Post-operation fan status refresh skipped or failed: {exception.Message}");
         }
     }
 

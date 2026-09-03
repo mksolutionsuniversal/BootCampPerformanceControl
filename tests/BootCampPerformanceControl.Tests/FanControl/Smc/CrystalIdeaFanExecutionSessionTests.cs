@@ -9,7 +9,7 @@ using BootCampPerformanceControl.Tests.TestDoubles;
 
 namespace BootCampPerformanceControl.Tests.FanControl.Smc;
 
-public sealed class CrystalIdeaResearchFanExecutionSessionTests
+public sealed class CrystalIdeaFanExecutionSessionTests
 {
     [Fact]
     public async Task OpenAsync_ServiceRunning_OpensSingleSharedDeviceWithoutStartingOrStoppingService()
@@ -73,7 +73,7 @@ public sealed class CrystalIdeaResearchFanExecutionSessionTests
     {
         var serviceFactoryCallCount = 0;
         var openDeviceCount = 0;
-        var factory = new CrystalIdeaResearchFanExecutionSessionFactory(
+        var factory = new CrystalIdeaFanExecutionSessionFactory(
             new TestApplicationLogger(),
             () =>
             {
@@ -178,7 +178,7 @@ public sealed class CrystalIdeaResearchFanExecutionSessionTests
     public async Task WriteBackendDispose_WithNonOwningClient_DoesNotDisposeSharedDevice()
     {
         var device = new FakeAppleSmcDevice();
-        var backend = new CrystalIdeaResearchFanSmcWriteBackend(
+        var backend = new CrystalIdeaFanSmcWriteBackend(
             new NonOwningDeviceIoControlClient(device));
 
         await backend.DisposeAsync();
@@ -266,12 +266,12 @@ public sealed class CrystalIdeaResearchFanExecutionSessionTests
         Assert.Equal(0, service.StopCallCount);
     }
 
-    private static CrystalIdeaResearchFanExecutionSessionFactory CreateFactory(
+    private static CrystalIdeaFanExecutionSessionFactory CreateFactory(
         FakeAppleSmcServiceController serviceController,
         Func<IDeviceIoControlClient> openDeviceClient,
         Func<IFanOverrideOwnershipStore>? openOwnershipStore = null)
     {
-        return new CrystalIdeaResearchFanExecutionSessionFactory(
+        return new CrystalIdeaFanExecutionSessionFactory(
             new TestApplicationLogger(),
             () => serviceController,
             openDeviceClient,

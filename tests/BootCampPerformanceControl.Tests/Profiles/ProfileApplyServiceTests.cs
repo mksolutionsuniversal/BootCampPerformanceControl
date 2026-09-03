@@ -1,6 +1,10 @@
+using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
+using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
+using BootCampPerformanceControl.Tests.TestDoubles;
 
 namespace BootCampPerformanceControl.Tests.Profiles;
 
@@ -257,15 +261,106 @@ public sealed class ProfileApplyServiceTests
         Assert.Equal(0, powerManagement.UnguardedApplyCallCount);
     }
 
-    private static ProfileApplyService CreateService(
-        FakeHardwareDetectionService hardwareDetectionService,
-        FakePowerManagementService powerManagementService)
+    [Fact]
+    public async Task ApplyProfileAsync_ExactVerifiedMacBookPro16_1_WithoutCoordinator_FailsClosedAndDoesNotTouchPower()
     {
-        return new ProfileApplyService(
-            hardwareDetectionService,
+        var hardware = new FakeHardwareDetectionService(SupportedMacBookPro16_1());
+        var power = new FakePowerManagementService();
+        var service = new ProfileApplyService(
+            hardware,
             new ProfileCatalog(),
             new ProfileExecutionResolver(),
-            powerManagementService);
+            power);
+
+        var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
+
+        Assert.False(result.IsSuccessful);
+        Assert.Contains("Transactional fan coordinator is required", result.FailureReason);
+        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.Equal(0, power.UnguardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_ExactVerifiedMacBookPro16_1_AppleSmcServiceStopped_FailsClosedWithClearMessage()
+    {
+        var hardware = new FakeHardwareDetectionService(SupportedMacBookPro16_1());
+        var power = new FakePowerManagementService();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
+        var profileExecutionResolver = new ProfileExecutionResolver();
+        var coordinator = new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            new FanProfileExecutionResolver(),
+            power,
+            sessionFactory);
+        var service = CreateService(hardware, power, coordinator);
+
+        var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
+
+        Assert.False(result.IsSuccessful);
+        Assert.Contains("AppleSMC service is not running", result.FailureReason);
+        Assert.Equal(0, power.GuardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_ExactVerifiedMacBookPro16_1_CompensationException_Propagates()
+    {
+        var hardware = new FakeHardwareDetectionService(SupportedMacBookPro16_1());
+        var expectedStateBefore = CurrentPowerState();
+        var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
+        var powerOperation = FailedPowerOperation(expectedStateBefore, requestedSettings, "Apply failure");
+        var power = new FakePowerManagementService(expectedStateBefore, powerOperation);
+
+        var compensationException = new GamingOptimisedApplyCompensationException(
+            "Rollback failed.",
+            new Exception("Inner error"),
+            recoveryDecision: null);
+
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, c, ct) => throw compensationException
+                }))
+        };
+
+        var profileExecutionResolver = new ProfileExecutionResolver();
+        var coordinator = new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            new FanProfileExecutionResolver(),
+            power,
+            sessionFactory);
+        var service = CreateService(hardware, power, coordinator);
+
+        var thrown = await Assert.ThrowsAsync<GamingOptimisedApplyCompensationException>(
+            () => service.ApplyProfileAsync("gaming-optimised", CancellationToken.None));
+
+        Assert.Same(compensationException, thrown.CompensationException);
+    }
+
+    private static ProfileApplyService CreateService(
+        FakeHardwareDetectionService hardwareDetectionService,
+        FakePowerManagementService powerManagementService,
+        GamingOptimisedApplyCoordinator? gamingOptimisedApplyCoordinator = null)
+    {
+        var profileCatalog = new ProfileCatalog();
+        var profileExecutionResolver = new ProfileExecutionResolver();
+        var fanProfileExecutionResolver = new FanProfileExecutionResolver();
+        gamingOptimisedApplyCoordinator ??= new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            new TestFanExecutionSessionFactory());
+
+        return new ProfileApplyService(
+            hardwareDetectionService,
+            profileCatalog,
+            profileExecutionResolver,
+            powerManagementService,
+            gamingOptimisedApplyCoordinator);
     }
 
     private static ModelVerificationResult SupportedMacBookPro16_1()

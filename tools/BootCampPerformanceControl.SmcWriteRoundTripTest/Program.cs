@@ -86,7 +86,7 @@ try
     var recoveryPolicy = new FanOverrideRecoveryPolicy();
     var ownershipStore = new JsonFanOverrideOwnershipStore(logger);
 
-    await using var writeBackend = new CrystalIdeaResearchFanSmcWriteBackend(
+    await using var writeBackend = new CrystalIdeaFanSmcWriteBackend(
         new NonOwningDeviceIoControlClient(sharedDevice));
 
     var writer = new VerifiedFanOverrideWriter(

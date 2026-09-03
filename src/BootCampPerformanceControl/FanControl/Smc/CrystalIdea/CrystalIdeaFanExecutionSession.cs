@@ -4,23 +4,22 @@ using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 
-// Research-only write-capable fan execution session. It is intentionally not
-// wired into production composition; callers must opt into this factory.
-internal sealed class CrystalIdeaResearchFanExecutionSession : IFanExecutionSession
+// Write-capable AppleSMC fan execution session for the independently installed compatibility driver.
+internal sealed class CrystalIdeaFanExecutionSession : IFanExecutionSession
 {
     private readonly IAppleSmcServiceController _serviceController;
     private readonly IDeviceIoControlClient _sharedDevice;
     private readonly CrystalIdeaAppleSmcTransport _readTransport;
-    private readonly CrystalIdeaResearchFanSmcWriteBackend _writeBackend;
+    private readonly CrystalIdeaFanSmcWriteBackend _writeBackend;
     private readonly object _disposeSync = new();
 
     private Task? _disposeTask;
 
-    private CrystalIdeaResearchFanExecutionSession(
+    private CrystalIdeaFanExecutionSession(
         IAppleSmcServiceController serviceController,
         IDeviceIoControlClient sharedDevice,
         CrystalIdeaAppleSmcTransport readTransport,
-        CrystalIdeaResearchFanSmcWriteBackend writeBackend,
+        CrystalIdeaFanSmcWriteBackend writeBackend,
         IFanCapabilityProbe capabilityProbe,
         IFanOverrideCoordinator overrideCoordinator)
     {
@@ -36,7 +35,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSession : IFanExecutionSess
 
     public IFanOverrideCoordinator OverrideCoordinator { get; }
 
-    internal static CrystalIdeaResearchFanExecutionSession Create(
+    internal static CrystalIdeaFanExecutionSession Create(
         IAppleSmcServiceController serviceController,
         IDeviceIoControlClient sharedDevice,
         IFanOverrideOwnershipStore ownershipStore,
@@ -49,7 +48,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSession : IFanExecutionSess
 
         var readTransport = new CrystalIdeaAppleSmcTransport(
             new NonOwningDeviceIoControlClient(sharedDevice));
-        var writeBackend = new CrystalIdeaResearchFanSmcWriteBackend(
+        var writeBackend = new CrystalIdeaFanSmcWriteBackend(
             new NonOwningDeviceIoControlClient(sharedDevice));
         var protocol = new AppleSmcProtocol(readTransport);
         var safetyPolicy = new FanSafetyPolicy();
@@ -69,7 +68,7 @@ internal sealed class CrystalIdeaResearchFanExecutionSession : IFanExecutionSess
             writer,
             logger);
 
-        return new CrystalIdeaResearchFanExecutionSession(
+        return new CrystalIdeaFanExecutionSession(
             serviceController,
             sharedDevice,
             readTransport,

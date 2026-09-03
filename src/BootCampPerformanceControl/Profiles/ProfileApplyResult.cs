@@ -49,4 +49,22 @@ public sealed record ProfileApplyResult(
             profileExecutionResolution,
             powerOperation);
     }
+
+    internal static ProfileApplyResult FromGamingOptimisedResult(
+        GamingOptimisedApplyResult gamingResult,
+        ModelVerificationResult modelVerificationResult)
+    {
+        ArgumentNullException.ThrowIfNull(gamingResult);
+        ArgumentNullException.ThrowIfNull(modelVerificationResult);
+
+        return new ProfileApplyResult(
+            gamingResult.ProfileId,
+            gamingResult.IsSuccessful,
+            gamingResult.IsSuccessful
+                ? string.Empty
+                : gamingResult.FailureReason,
+            modelVerificationResult,
+            gamingResult.ProcessorResolution,
+            gamingResult.PowerOperation);
+    }
 }

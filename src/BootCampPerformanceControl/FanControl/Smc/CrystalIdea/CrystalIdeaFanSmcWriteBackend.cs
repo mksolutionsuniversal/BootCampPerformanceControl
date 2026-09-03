@@ -3,9 +3,8 @@ using BootCampPerformanceControl.FanControl.Smc.Windows;
 
 namespace BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 
-// Research-only concrete backend. It is intentionally not exposed through a
-// production factory or composition root; deliberate device injection is required.
-internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
+// Concrete write backend for the independently installed AppleSMC compatibility driver.
+internal sealed class CrystalIdeaFanSmcWriteBackend :
     IFanSmcWriteBackend,
     IAsyncDisposable
 {
@@ -13,7 +12,7 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
 
     private readonly IDeviceIoControlClient _device;
 
-    public CrystalIdeaResearchFanSmcWriteBackend(IDeviceIoControlClient device)
+    public CrystalIdeaFanSmcWriteBackend(IDeviceIoControlClient device)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
     }
@@ -38,7 +37,7 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
         {
             throw new ArgumentOutOfRangeException(
                 nameof(targetRpm),
-                "The research backend only permits positive finite target RPM values.");
+                "The AppleSMC write backend only permits positive finite target RPM values.");
         }
 
         Span<byte> data = stackalloc byte[sizeof(float)];

@@ -1,0 +1,21 @@
+using BootCampPerformanceControl.Tests.TestDoubles;
+using BootCampPerformanceControl.UI;
+
+namespace BootCampPerformanceControl.Tests.UI;
+
+public sealed class AppCompositionRootTests
+{
+    [Fact]
+    public void CreateMainViewModel_SucceedsWithZeroSideEffects()
+    {
+        var logger = new TestApplicationLogger();
+
+        var viewModel = AppCompositionRoot.CreateMainViewModel(logger);
+
+        Assert.NotNull(viewModel);
+        Assert.NotNull(viewModel.RefreshCommand);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal("Not detected", viewModel.MacModel);
+        Assert.Empty(logger.Errors);
+    }
+}
