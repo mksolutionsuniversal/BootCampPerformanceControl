@@ -29,6 +29,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(FanBackendState.NotApplicable, status.BackendState);
         Assert.Equal(FanSafetyState.UnsupportedModel, status.SafetyState);
         Assert.False(status.IsAvailable);
+        Assert.Equal("Disabled (unsupported model)", status.WriteControlDisplayText);
         Assert.Contains("not verified", status.Details, StringComparison.Ordinal);
         Assert.Equal(0, serviceOpenCount);
         Assert.Equal(0, transportFactory.OpenCount);
@@ -72,6 +73,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
 
         Assert.Equal(FanBackendState.NotInstalled, status.BackendState);
         Assert.Equal(FanSafetyState.MonitoringUnavailable, status.SafetyState);
+        Assert.Equal("Unavailable (AppleSMC unavailable)", status.WriteControlDisplayText);
         Assert.Equal(0, transportFactory.OpenCount);
     }
 
@@ -87,6 +89,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
             CancellationToken.None);
 
         Assert.Equal(FanBackendState.InstalledStopped, status.BackendState);
+        Assert.Equal("Unavailable (AppleSMC stopped)", status.WriteControlDisplayText);
         Assert.Equal(0, controller.StartCount);
         Assert.Equal(0, controller.StopCount);
         Assert.Equal(0, transportFactory.OpenCount);
@@ -150,10 +153,12 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
 
         Assert.Equal(FanBackendState.Running, status.BackendState);
         Assert.Equal(FanSafetyState.ReadOnlyVerified, status.SafetyState);
+        Assert.Equal(FanWriteControlState.Available, status.WriteControlState);
         Assert.True(status.IsAvailable);
         Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), status.Fan0);
         Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), status.Fan1);
-        Assert.False(status.IsWriteControlEnabled);
+        Assert.True(status.IsWriteControlEnabled);
+        Assert.Equal("Available (verified MacBookPro16,1)", status.WriteControlDisplayText);
         Assert.Equal(0, controller.StartCount);
         Assert.Equal(0, controller.StopCount);
         Assert.Equal(1, transportFactory.OpenCount);

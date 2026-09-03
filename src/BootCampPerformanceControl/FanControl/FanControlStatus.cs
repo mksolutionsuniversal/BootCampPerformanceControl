@@ -33,6 +33,14 @@ public enum FanOperatingMode
     Unknown
 }
 
+public enum FanWriteControlState
+{
+    NotAvailable,
+    Available,
+    ManualModeDetected,
+    MaximumSafeRpmDetected
+}
+
 public sealed record FanReading(
     float ActualRpm,
     float MaximumRpm,
@@ -43,11 +51,14 @@ public sealed record FanControlStatus(
     FanSafetyState SafetyState,
     FanReading? Fan0,
     FanReading? Fan1,
-    string Details)
+    string Details,
+    FanWriteControlState WriteControlState = FanWriteControlState.NotAvailable)
 {
     public bool IsAvailable => SafetyState == FanSafetyState.ReadOnlyVerified;
 
-    public bool IsWriteControlEnabled => false;
+    // Physical Manual mode is observed hardware state, not proof of BCPC ownership.
+    // Only the verified Apple Auto state is eligible for a new guarded BCPC write.
+    public bool IsWriteControlEnabled => WriteControlState == FanWriteControlState.Available;
 
     public string BackendDisplayText => BackendState switch
     {
@@ -70,7 +81,7 @@ public sealed record FanControlStatus(
         FanSafetyState.UnsupportedModel => "Unsupported model",
         FanSafetyState.MonitoringUnavailable => "Monitoring unavailable",
         FanSafetyState.ReadOnlyUnavailable => "Read-only unavailable",
-        FanSafetyState.ReadOnlyVerified => "Read-only verified",
+        FanSafetyState.ReadOnlyVerified => "Read-only monitoring verified",
         FanSafetyState.Error => "Error",
         _ => "Unknown"
     };
@@ -81,11 +92,17 @@ public sealed record FanControlStatus(
 
     public string ModeDisplayText => FormatModes(Fan0, Fan1);
 
-    public string WriteControlDisplayText => "Disabled";
+    public string WriteControlDisplayText => WriteControlState switch
+    {
+        FanWriteControlState.Available => "Available (verified MacBookPro16,1)",
+        FanWriteControlState.ManualModeDetected => "Manual mode detected",
+        FanWriteControlState.MaximumSafeRpmDetected => "Maximum Safe RPM detected (Manual mode)",
+        _ => FormatUnavailableWriteControl()
+    };
 
     public string DisplayText => IsAvailable
-        ? $"Fan Control: read-only verified. Fan 0: {FormatReadingWithMode(Fan0)}; "
-            + $"Fan 1: {FormatReadingWithMode(Fan1)}. Write control is not enabled."
+        ? $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. Fan 0: {FormatReadingWithMode(Fan0)}; "
+            + $"Fan 1: {FormatReadingWithMode(Fan1)}. Write control: {WriteControlDisplayText}."
         : $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {Details}";
 
     public static FanControlStatus NotChecked { get; } = new(
@@ -148,6 +165,28 @@ public sealed record FanControlStatus(
             FanOperatingMode.AppleAuto => "Apple Auto",
             FanOperatingMode.Manual => "Manual",
             _ => "Unknown"
+        };
+    }
+
+    private string FormatUnavailableWriteControl()
+    {
+        if (SafetyState == FanSafetyState.UnsupportedModel)
+        {
+            return "Disabled (unsupported model)";
+        }
+
+        return BackendState switch
+        {
+            FanBackendState.InstalledStopped => "Unavailable (AppleSMC stopped)",
+            FanBackendState.NotInstalled
+                or FanBackendState.Busy
+                or FanBackendState.AccessDenied
+                or FanBackendState.Transitional
+                or FanBackendState.Unavailable
+                or FanBackendState.Error => "Unavailable (AppleSMC unavailable)",
+            _ when SafetyState == FanSafetyState.ReadOnlyUnavailable =>
+                "Disabled (write capability not verified)",
+            _ => "Disabled (write capability not verified)"
         };
     }
 }

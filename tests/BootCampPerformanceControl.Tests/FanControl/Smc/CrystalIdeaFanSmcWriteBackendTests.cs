@@ -4,7 +4,7 @@ using BootCampPerformanceControl.FanControl.Smc.Windows;
 
 namespace BootCampPerformanceControl.Tests.FanControl.Smc;
 
-public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
+public sealed class CrystalIdeaFanSmcWriteBackendTests
 {
     [Fact]
     public void WriteIoctl_MatchesConfirmedValue()
@@ -17,7 +17,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     {
         using var device = ExpectSingleWrite(
             new byte[] { 0x46, 0x30, 0x4D, 0x64, 0x01, 0x01 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await backend.SetManualModeAsync(FanIndex.Fan0, CancellationToken.None);
 
@@ -29,57 +29,33 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     {
         using var device = ExpectSingleWrite(
             new byte[] { 0x46, 0x31, 0x4D, 0x64, 0x01, 0x01 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await backend.SetManualModeAsync(FanIndex.Fan1, CancellationToken.None);
 
         Assert.Equal(1, device.InvocationCount);
     }
 
-    [Fact]
-    public async Task SetTargetRpmAsync_Fan0_EncodesVerifiedMaximumAsLittleEndianFloat32()
-    {
-        using var device = ExpectSingleWrite(
-            new byte[] { 0x46, 0x30, 0x54, 0x67, 0x04, 0x00, 0x80, 0xAF, 0x45 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
-
-        await backend.SetTargetRpmAsync(FanIndex.Fan0, 5616f, CancellationToken.None);
-
-        Assert.Equal(1, device.InvocationCount);
-    }
-
-    [Fact]
-    public async Task SetTargetRpmAsync_Fan1_EncodesVerifiedMaximumAsLittleEndianFloat32()
-    {
-        using var device = ExpectSingleWrite(
-            new byte[] { 0x46, 0x31, 0x54, 0x67, 0x04, 0x00, 0x80, 0xA2, 0x45 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
-
-        await backend.SetTargetRpmAsync(FanIndex.Fan1, 5200f, CancellationToken.None);
-
-        Assert.Equal(1, device.InvocationCount);
-    }
-
     [Theory]
-    [InlineData(0, 5200f)]
-    [InlineData(0, 3000f)]
-    [InlineData(1, 5616f)]
-    [InlineData(1, 3000f)]
-    public async Task SetTargetRpmAsync_RejectsAnyNonMaximumTargetBeforeDeviceAccess(
+    [InlineData(0, 0x30, 4321.25f, 0x00, 0x0A, 0x87, 0x45)]
+    [InlineData(1, 0x31, 4789.5f, 0x00, 0xAC, 0x95, 0x45)]
+    public async Task SetTargetRpmAsync_EncodesSuppliedRpmAsLittleEndianFloat32(
         int fanValue,
-        float targetRpm)
+        byte fanAscii,
+        float targetRpm,
+        byte byte0,
+        byte byte1,
+        byte byte2,
+        byte byte3)
     {
-        using var device = new FakeDeviceIoControlClient();
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        using var device = ExpectSingleWrite(
+            new byte[] { 0x46, fanAscii, 0x54, 0x67, 0x04, byte0, byte1, byte2, byte3 });
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
         var fan = (FanIndex)fanValue;
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => backend.SetTargetRpmAsync(
-                fan,
-                targetRpm,
-                CancellationToken.None));
+        await backend.SetTargetRpmAsync(fan, targetRpm, CancellationToken.None);
 
-        Assert.Equal(0, device.InvocationCount);
+        Assert.Equal(1, device.InvocationCount);
     }
 
     [Theory]
@@ -91,7 +67,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     {
         using var device = ExpectSingleWrite(
             new byte[] { 0x46, fanAscii, 0x4D, 0x64, 0x01, 0x00 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
         var fan = (FanIndex)fanValue;
 
         await backend.SetAppleAutoAsync(fan, CancellationToken.None);
@@ -108,7 +84,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     public async Task SetTargetRpmAsync_RejectsInvalidValuesBeforeDeviceAccess(float targetRpm)
     {
         using var device = new FakeDeviceIoControlClient();
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => backend.SetTargetRpmAsync(
@@ -123,7 +99,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     public async Task WriteOperations_HonourCancellationBeforeDeviceAccess()
     {
         using var device = new FakeDeviceIoControlClient();
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -139,7 +115,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     public async Task InvalidFanIndex_IsRejectedBeforeDeviceAccess()
     {
         using var device = new FakeDeviceIoControlClient();
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => backend.SetAppleAutoAsync(
@@ -182,7 +158,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
                 return [0x00];
             }
         };
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await backend.SetAppleAutoAsync(FanIndex.Fan0, CancellationToken.None);
 
@@ -193,7 +169,7 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
     public async Task DisposeAsync_DisposesDeviceClient()
     {
         var device = new FakeDeviceIoControlClient();
-        var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
+        var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
         await backend.DisposeAsync();
 

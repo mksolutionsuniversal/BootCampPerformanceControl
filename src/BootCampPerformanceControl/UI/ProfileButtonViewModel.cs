@@ -10,15 +10,28 @@ public sealed class ProfileButtonViewModel
 
     public ProfileButtonViewModel(
         PerformanceProfile profile,
-        ICommand command,
+        ICommand? command,
         bool isRestoreSnapshotAvailable = false,
-        bool isPowerStateReadable = false)
+        bool isPowerStateReadable = false,
+        bool hasFanRecoveryContext = false,
+        bool isExactVerifiedMacBookPro16_1 = false)
     {
         ProfileId = profile.Id;
         DisplayName = profile.DisplayName;
-        IsEnabled = IsProfileEnabled(profile, isRestoreSnapshotAvailable, isPowerStateReadable);
+        IsEnabled = IsProfileEnabled(
+            profile,
+            isRestoreSnapshotAvailable,
+            isPowerStateReadable,
+            hasFanRecoveryContext,
+            isExactVerifiedMacBookPro16_1);
         Command = IsEnabled ? command : null;
-        ToolTip = CreateToolTip(profile, IsEnabled, isRestoreSnapshotAvailable, isPowerStateReadable);
+        ToolTip = CreateToolTip(
+            profile,
+            IsEnabled,
+            isRestoreSnapshotAvailable,
+            isPowerStateReadable,
+            hasFanRecoveryContext,
+            isExactVerifiedMacBookPro16_1);
     }
 
     public string ProfileId { get; }
@@ -34,13 +47,20 @@ public sealed class ProfileButtonViewModel
     private static bool IsProfileEnabled(
         PerformanceProfile profile,
         bool isRestoreSnapshotAvailable,
-        bool isPowerStateReadable)
+        bool isPowerStateReadable,
+        bool hasFanRecoveryContext,
+        bool isExactVerifiedMacBookPro16_1)
     {
         if (string.Equals(
                 profile.Id,
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
+            if (isExactVerifiedMacBookPro16_1 && hasFanRecoveryContext)
+            {
+                return false;
+            }
+
             return profile.IsAvailableForDetectedModel && isPowerStateReadable;
         }
 
@@ -49,7 +69,7 @@ public sealed class ProfileButtonViewModel
                 RestoreProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return isRestoreSnapshotAvailable;
+            return isRestoreSnapshotAvailable || hasFanRecoveryContext;
         }
 
         return false;
@@ -59,7 +79,9 @@ public sealed class ProfileButtonViewModel
         PerformanceProfile profile,
         bool isEnabled,
         bool isRestoreSnapshotAvailable,
-        bool isPowerStateReadable)
+        bool isPowerStateReadable,
+        bool hasFanRecoveryContext,
+        bool isExactVerifiedMacBookPro16_1)
     {
         if (isEnabled)
         {
@@ -68,6 +90,16 @@ public sealed class ProfileButtonViewModel
                     RestoreProfileId,
                     StringComparison.OrdinalIgnoreCase))
             {
+                if (hasFanRecoveryContext && isRestoreSnapshotAvailable)
+                {
+                    return "Restore fan control to Apple Auto and restore the exact original saved power state.";
+                }
+
+                if (hasFanRecoveryContext)
+                {
+                    return "Restore fan control to Apple Auto.";
+                }
+
                 return "Restore the exact original saved power state.";
             }
 
@@ -79,6 +111,11 @@ public sealed class ProfileButtonViewModel
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
+            if (isExactVerifiedMacBookPro16_1 && hasFanRecoveryContext)
+            {
+                return "Restore the previous fan override before applying Gaming Optimised again.";
+            }
+
             if (!profile.IsAvailableForDetectedModel)
             {
                 return "Gaming Optimised is available for supported Intel Mac models.";
@@ -95,7 +132,7 @@ public sealed class ProfileButtonViewModel
                 RestoreProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return isRestoreSnapshotAvailable
+            return (isRestoreSnapshotAvailable || hasFanRecoveryContext)
                 ? "Restore is not currently executable."
                 : "No original restore snapshot exists yet.";
         }

@@ -1,8 +1,12 @@
+using System.Buffers.Binary;
 using System.Reflection;
 using BootCampPerformanceControl.ApplicationSettings;
 using BootCampPerformanceControl.Diagnostics;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.BackendActivation;
+using BootCampPerformanceControl.FanControl.Smc;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
+using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
@@ -849,6 +853,63 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task FanMonitoring_SkipsTickWhileFanGateIsHeldDuringRecovery()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(VerifiedFanStatus(), VerifiedFanStatus());
+        var hardwareDetectionService = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var recoveryGate = new AsyncGate();
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = async () =>
+            {
+                await recoveryGate.WaitAsync();
+                ownershipStore.Marker = null;
+                return new TestFanExecutionSession(
+                    overrideCoordinator: new TestFanOverrideCoordinator
+                    {
+                        RecoverHandler = (m, cap, ct) => Task.FromResult(new FanOverrideRecoveryDecision(
+                            FanOverrideRecoveryAction.RestoreAppleAuto,
+                            "Restored."))
+                    });
+            }
+        };
+        var viewModel = CreateViewModel(
+            hardwareDetectionService,
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore,
+            fanPollingDelayAsync: pollingDelay.DelayAsync);
+
+        viewModel.RefreshCommand.Execute(null);
+        await recoveryGate.WaitUntilEnteredAsync();
+
+        Assert.True(viewModel.IsBusy);
+
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        Assert.Equal(0, fanControlService.ReadStatusCallCount);
+
+        recoveryGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
     public async Task FanMonitoring_HardwareDetectionFailureClearsStaleModel()
     {
         var pollingDelay = new ManualFanPollingDelay();
@@ -904,6 +965,281 @@ public sealed class MainViewModelTests
 
         Assert.Equal(2, fanControlService.ReadStatusCallCount);
         Assert.Equal(1, pollingDelay.RequestCount);
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_WaitsForInFlightLivePoll()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(InitialPowerState(), new ProcessorPowerSettings(95, 95, 0, 0)),
+            InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        // Trigger Apply while live poll is in-flight holding the fan gate
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+
+        // Release polling read; Apply now acquires gate and opens write session
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.False(viewModel.IsBusy);
+        Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task RestoreAsync_WaitsForInFlightLivePoll()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var liveReadGate = new AsyncGate();
+        fanControlService.QueueReadGate(liveReadGate);
+        viewModel.StartFanMonitoring();
+        pollingDelay.Advance();
+        await liveReadGate.WaitUntilEnteredAsync();
+
+        // Trigger Restore while live poll is in-flight holding the fan gate
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        Assert.True(viewModel.IsBusy);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+
+        // Release polling read; Restore now acquires gate and opens write session
+        liveReadGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.False(viewModel.IsBusy);
+        Assert.Contains("restored successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanPolling_SkipsCycleWhenApplyOwnsFanOperationGate()
+    {
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var applyGate = new AsyncGate();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = async () =>
+            {
+                await applyGate.WaitAsync();
+                return new TestFanExecutionSession();
+            }
+        };
+
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(InitialPowerState()),
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        viewModel.StartFanMonitoring();
+        Assert.Equal(1, pollingDelay.RequestCount);
+
+        // Start Apply which will enter OpenSessionHandler and wait on applyGate while owning the fan gate
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await applyGate.WaitUntilEnteredAsync();
+        Assert.True(viewModel.IsBusy);
+
+        // Advance polling tick while Apply owns the gate
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        // Polling skipped because gate was owned / IsBusy
+        Assert.Equal(readCountBefore, fanControlService.ReadStatusCallCount);
+
+        // Release Apply gate so it completes
+        applyGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.False(viewModel.IsBusy);
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task FanPolling_SkipsCycleWhenRestoreOwnsFanOperationGate()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var pollingDelay = new ManualFanPollingDelay();
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            VerifiedFanStatus());
+        var restoreGate = new AsyncGate();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = async () =>
+            {
+                await restoreGate.WaitAsync();
+                return new TestFanExecutionSession();
+            }
+        };
+
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService,
+            fanPollingDelayAsync: pollingDelay.DelayAsync,
+            fanExecutionSessionFactory: sessionFactory);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        viewModel.StartFanMonitoring();
+        Assert.Equal(1, pollingDelay.RequestCount);
+
+        // Start Restore which will wait on restoreGate while owning the fan gate
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await restoreGate.WaitUntilEnteredAsync();
+        Assert.True(viewModel.IsBusy);
+
+        // Advance polling tick while Restore owns the gate
+        pollingDelay.Advance();
+        await WaitUntilAsync(() => pollingDelay.RequestCount == 2);
+
+        // Polling skipped because gate was owned / IsBusy
+        Assert.Equal(readCountBefore, fanControlService.ReadStatusCallCount);
+
+        // Release Restore gate
+        restoreGate.Release();
+        await WaitForIdleAsync(viewModel);
+
+        Assert.False(viewModel.IsBusy);
+        await viewModel.StopFanMonitoringAsync();
+    }
+
+    [Fact]
+    public async Task ApplyProfileAsync_Success_RefreshesFanStatusUnderGate()
+    {
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(1840f, 1691f),
+            VerifiedFanStatus(5616f, 5200f));
+        var powerManagementService = new FakePowerManagementService(
+            SuccessfulPowerOperation(InitialPowerState(), new ProcessorPowerSettings(95, 95, 0, 0)),
+            InitialPowerState());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(5616f, viewModel.FanStatus.Fan0?.ActualRpm);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_Success_RefreshesFanStatusUnderGate()
+    {
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        var powerManagementService = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot);
+        powerManagementService.RestoreResult = SuccessfulRestoreOperation(
+            GamingOptimisedPowerState(),
+            ProcessorPowerSettings.FromSnapshot(originalSnapshot));
+        await restoreSnapshotStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+
+        var fanControlService = new FakeFanControlService(
+            VerifiedFanStatus(5616f, 5200f),
+            VerifiedFanStatus(1840f, 1691f));
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            powerManagementService,
+            restoreSnapshotStore,
+            fanControlService: fanControlService);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var readCountBefore = fanControlService.ReadStatusCallCount;
+
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
+        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
     }
 
     [Fact]
@@ -2089,13 +2425,1087 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
         gamingCommand.Execute(null);
 
-        Assert.Equal(1, hardwareDetectionService.DetectCallCount);
+        Assert.Equal(2, hardwareDetectionService.DetectCallCount);
         Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
         Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
         Assert.Equal(1, powerManagementService.RestoreOriginalSettingsCallCount);
 
         restoreUiReadGate.Release();
         await WaitForIdleAsync(viewModel);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_NoMarker_DoesNotOpenFanExecutionSession()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var ownershipStore = new TestFanOverrideOwnershipStore { Marker = null };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_MatchingMarkerAndManualFans_RecoversAppleAutoAndClearsMarker()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.Marker = null;
+                        return Task.FromResult(new FanOverrideRecoveryDecision(
+                            FanOverrideRecoveryAction.RestoreAppleAuto,
+                            "Restored to Apple Auto."));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+        Assert.Null(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_MatchingMarkerAndFansAlreadyAuto_StaleMarkerClearedWithoutWrite()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.Marker = null;
+                        return Task.FromResult(new FanOverrideRecoveryDecision(
+                            FanOverrideRecoveryAction.None,
+                            "Fans already in Apple Auto. Stale marker cleared."));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+        Assert.Null(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_MarkerPresentAndAppleSmcStopped_LeavesMarkerIntactAndPending()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var elevation = new FakeAppleSmcBackendElevationLauncher();
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            elevationLauncher: elevation,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, elevation.LaunchCallCount);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(FanRecoveryState.PreviousSessionRecoveryPending, viewModel.RecoveryState);
+        Assert.Equal("Previous fan override detected. Recovery to Apple Auto is pending.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_MismatchedMarkerModel_RetainsMarkerAndBlocksRecovery()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                "MacBookPro15,1",
+                5000f,
+                4500f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+        Assert.Equal("Fan recovery is blocked because current hardware state does not match the ownership marker.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_UnsupportedOrUnverifiedHardware_RetainsMarkerAndBlocksRecovery()
+    {
+        var hardware = new FakeHardwareDetectionService(UnverifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_MarkerReadException_SetsInspectionFailedAndRetainsMarker()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            LoadException = new IOException("Disk failure")
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.Equal(FanRecoveryState.InspectionFailed, viewModel.RecoveryState);
+        Assert.Equal("Inspection failed. Could not verify fan ownership marker.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_NeverInvokesPowerRestore()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_OneShot_SubsequentRefreshDoesNotRecoverCurrentProcessOverride()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        gamingCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.CurrentSessionOverrideActive, viewModel.RecoveryState);
+
+        var openCountBefore = sessionFactory.OpenCallCount;
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(openCountBefore, sessionFactory.OpenCallCount);
+        Assert.Equal(FanRecoveryState.CurrentSessionOverrideActive, viewModel.RecoveryState);
+    }
+
+    [Fact]
+    public async Task Refresh_FirstStartupRecoveryCanceled_NextRefreshRetriesStartupRecovery()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var firstLoad = true;
+        ownershipStore.LoadHandler = ct =>
+        {
+            if (firstLoad)
+            {
+                firstLoad = false;
+                throw new OperationCanceledException("First refresh was canceled during startup recovery check.");
+            }
+
+            return Task.FromResult<FanOverrideOwnershipMarker?>(ownershipStore.Marker);
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        // First refresh: canceled during startup recovery check
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        // Marker must still be present on disk and recovery not yet evaluated
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+
+        // Second refresh: retries startup recovery, succeeds and clears marker
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Null(ownershipStore.Marker);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task GamingApply_SetsCurrentSessionOverrideActive()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        gamingCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.CurrentSessionOverrideActive, viewModel.RecoveryState);
+        Assert.Equal("Gaming Optimised fan override is active. Restore returns fans to Apple Auto.", viewModel.FanRecoveryStatus);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(VerifiedHardwareModels.MacBookPro16_1, ownershipStore.Marker.Model);
+    }
+
+    [Fact]
+    public async Task GamingApply_SuccessfulApplyWithMarkerUnexpectedlyMissing_SetsRecoveryBlocked()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    ApplyHandler = (m, cap, ct) => Task.FromResult(FanOverrideExecutionResult.Applied(
+                        new FanOverrideOwnershipMarker(m, 5321.25f, 4789.5f, DateTimeOffset.UtcNow)))
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        gamingCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+        Assert.Contains("blocked", viewModel.FanRecoveryStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.False(GetProfile(viewModel, "gaming-optimised").IsEnabled);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+    }
+
+    [Fact]
+    public async Task GamingApply_SuccessfulApplyWithMismatchedMarker_SetsRecoveryBlocked()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    ApplyHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.Marker = new FanOverrideOwnershipMarker(
+                            "MacBookPro15,1",
+                            5000f,
+                            4500f,
+                            DateTimeOffset.UtcNow);
+                        return Task.FromResult(FanOverrideExecutionResult.Applied(ownershipStore.Marker));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        gamingCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+        Assert.Contains("blocked", viewModel.FanRecoveryStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.False(GetProfile(viewModel, "gaming-optimised").IsEnabled);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+    }
+
+    [Fact]
+    public async Task GamingApply_SuccessfulApplyWithMarkerReadFailure_SetsInspectionFailed()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    ApplyHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.LoadException = new IOException("Disk failure reading marker.");
+                        return Task.FromResult(FanOverrideExecutionResult.Applied(
+                            new FanOverrideOwnershipMarker(m, 5321.25f, 4789.5f, DateTimeOffset.UtcNow)));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingCommand = GetProfile(viewModel, "gaming-optimised").Command!;
+        gamingCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.InspectionFailed, viewModel.RecoveryState);
+        Assert.Contains("Inspection failed", viewModel.FanRecoveryStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.False(GetProfile(viewModel, "gaming-optimised").IsEnabled);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+    }
+
+    [Fact]
+    public async Task CurrentSessionOverrideActive_DisablesNextGamingApplyOnMBP16_1()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingProfile = GetProfile(viewModel, "gaming-optimised");
+        Assert.True(gamingProfile.IsEnabled);
+
+        gamingProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var gamingProfileAfter = GetProfile(viewModel, "gaming-optimised");
+        Assert.False(gamingProfileAfter.IsEnabled);
+        Assert.Equal("Restore the previous fan override before applying Gaming Optimised again.", gamingProfileAfter.ToolTip);
+    }
+
+    [Fact]
+    public async Task CurrentSessionOverrideActive_EnablesRestore()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var gamingPower = GamingOptimisedPowerState();
+        var power = new FakePowerManagementService(
+            SuccessfulPowerOperation(initialPower, new ProcessorPowerSettings(95, 95, 0, 0)),
+            initialPower,
+            gamingPower);
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreBefore = GetProfile(viewModel, "restore");
+        Assert.False(restoreBefore.IsEnabled);
+
+        var gamingProfile = GetProfile(viewModel, "gaming-optimised");
+        gamingProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreAfter = GetProfile(viewModel, "restore");
+        Assert.True(restoreAfter.IsEnabled);
+    }
+
+    [Fact]
+    public async Task Restore_EnabledWithFanMarkerAndNoPowerSnapshot()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        Assert.True(restoreProfile.IsEnabled);
+        Assert.Equal("Available - fan override recovery can be performed.", viewModel.RestoreSnapshotStatus);
+    }
+
+    [Fact]
+    public async Task Restore_WithFanMarkerAndNoPowerSnapshot_PerformsFanOnlyRecovery()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionOpenAttempt = 0;
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () =>
+            {
+                sessionOpenAttempt++;
+                if (sessionOpenAttempt == 1)
+                {
+                    // Startup check: AppleSMC stopped, pending recovery
+                    throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped);
+                }
+
+                return Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                    overrideCoordinator: new TestFanOverrideCoordinator
+                    {
+                        RecoverHandler = (m, cap, ct) =>
+                        {
+                            ownershipStore.Marker = null;
+                            return Task.FromResult(new FanOverrideRecoveryDecision(
+                                FanOverrideRecoveryAction.RestoreAppleAuto,
+                                "Restored to Apple Auto."));
+                        }
+                    }));
+            }
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        Assert.True(restoreProfile.IsEnabled);
+
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+        Assert.Contains("No original processor snapshot required restoration", viewModel.StatusMessage);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task Restore_WithFanMarkerAndPowerSnapshot_PerformsFansThenPower()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var power = new FakePowerManagementService(initialPower)
+        {
+            RestoreResult = SuccessfulRestoreOperation(initialPower, ProcessorPowerSettings.FromSnapshot(initialPower))
+        };
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(initialPower, CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionOpenAttempt = 0;
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () =>
+            {
+                sessionOpenAttempt++;
+                if (sessionOpenAttempt == 1)
+                {
+                    // Startup check: AppleSMC stopped, pending recovery
+                    throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped);
+                }
+
+                return Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                    overrideCoordinator: new TestFanOverrideCoordinator
+                    {
+                        RecoverHandler = (m, cap, ct) =>
+                        {
+                            ownershipStore.Marker = null;
+                            return Task.FromResult(new FanOverrideRecoveryDecision(
+                                FanOverrideRecoveryAction.RestoreAppleAuto,
+                                "Restored to Apple Auto."));
+                        }
+                    }));
+            }
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(2, sessionOpenAttempt);
+        Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Null(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task Restore_WithoutFanMarkerAndWithPowerSnapshot_VerifiesFanBaselineThenPower()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var power = new FakePowerManagementService(initialPower)
+        {
+            RestoreResult = SuccessfulRestoreOperation(initialPower, ProcessorPowerSettings.FromSnapshot(initialPower))
+        };
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(initialPower, CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore { Marker = null };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
+    }
+
+    [Fact]
+    public async Task Restore_MismatchedMarker_BlocksRestore()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(InitialPowerState(), CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                "MacBookPro15,1",
+                5000f,
+                4500f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory();
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+        Assert.Contains("Restore failed", viewModel.StatusMessage);
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+        Assert.NotNull(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task Restore_Successful_ReloadsOwnershipStateAndObservesAbsent()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var power = new FakePowerManagementService(initialPower)
+        {
+            RestoreResult = SuccessfulRestoreOperation(initialPower, ProcessorPowerSettings.FromSnapshot(initialPower))
+        };
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(initialPower, CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.Marker = null;
+                        return Task.FromResult(new FanOverrideRecoveryDecision(
+                            FanOverrideRecoveryAction.RestoreAppleAuto,
+                            "Restored."));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var loadCallsBefore = ownershipStore.LoadCallCount;
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.True(ownershipStore.LoadCallCount > loadCallsBefore);
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+    }
+
+    [Fact]
+    public async Task Restore_LateCancellationAfterSuccessfulRestore_StillInspectsOwnershipState()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var initialPower = InitialPowerState();
+        var power = new FakePowerManagementService(initialPower)
+        {
+            RestoreResult = SuccessfulRestoreOperation(initialPower, ProcessorPowerSettings.FromSnapshot(initialPower))
+        };
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(initialPower, CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) =>
+                    {
+                        ownershipStore.Marker = null;
+                        return Task.FromResult(new FanOverrideRecoveryDecision(
+                            FanOverrideRecoveryAction.RestoreAppleAuto,
+                            "Restored."));
+                    }
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+        Assert.Contains(CancellationToken.None, ownershipStore.LoadTokens);
+    }
+
+    [Fact]
+    public void RestoreButton_Tooltip_AccuratelyReflectsContext()
+    {
+        var profileCatalog = new ProfileCatalog();
+        var restoreProfile = profileCatalog.GetProfiles(VerifiedMacBookPro16_1())
+            .First(p => string.Equals(p.Id, "restore", StringComparison.OrdinalIgnoreCase));
+
+        // 1. Fan marker only
+        var fanOnlyVm = new ProfileButtonViewModel(
+            restoreProfile,
+            command: null,
+            isRestoreSnapshotAvailable: false,
+            isPowerStateReadable: true,
+            hasFanRecoveryContext: true,
+            isExactVerifiedMacBookPro16_1: true);
+        Assert.True(fanOnlyVm.IsEnabled);
+        Assert.Equal("Restore fan control to Apple Auto.", fanOnlyVm.ToolTip);
+
+        // 2. Fan marker + CPU snapshot
+        var fanAndCpuVm = new ProfileButtonViewModel(
+            restoreProfile,
+            command: null,
+            isRestoreSnapshotAvailable: true,
+            isPowerStateReadable: true,
+            hasFanRecoveryContext: true,
+            isExactVerifiedMacBookPro16_1: true);
+        Assert.True(fanAndCpuVm.IsEnabled);
+        Assert.Equal("Restore fan control to Apple Auto and restore the exact original saved power state.", fanAndCpuVm.ToolTip);
+
+        // 3. CPU snapshot only
+        var cpuOnlyVm = new ProfileButtonViewModel(
+            restoreProfile,
+            command: null,
+            isRestoreSnapshotAvailable: true,
+            isPowerStateReadable: true,
+            hasFanRecoveryContext: false,
+            isExactVerifiedMacBookPro16_1: true);
+        Assert.True(cpuOnlyVm.IsEnabled);
+        Assert.Equal("Restore the exact original saved power state.", cpuOnlyVm.ToolTip);
+    }
+
+    [Fact]
+    public async Task Restore_Failed_RetainsMarkerDerivedState()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(InitialPowerState(), CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) => Task.FromResult(new FanOverrideRecoveryDecision(
+                        FanOverrideRecoveryAction.Blocked,
+                        "Hardware readback check failed."))
+                }))
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        var restoreProfile = GetProfile(viewModel, "restore");
+        restoreProfile.Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Contains("Restore failed", viewModel.StatusMessage);
+        Assert.NotEqual(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.NotNull(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task EnableFanMonitoring_AfterStoppedAppleSmc_RetriesPendingRecoveryUnderGate()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var fanService = new FakeFanControlService(InstalledStoppedFanStatus(), VerifiedFanStatus());
+        var elevation = new FakeAppleSmcBackendElevationLauncher();
+        elevation.QueueResult(CompletedElevationResult());
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionOpenAttempt = 0;
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () =>
+            {
+                sessionOpenAttempt++;
+                if (sessionOpenAttempt == 1)
+                {
+                    throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped);
+                }
+
+                return Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                    overrideCoordinator: new TestFanOverrideCoordinator
+                    {
+                        RecoverHandler = (m, cap, ct) =>
+                        {
+                            ownershipStore.Marker = null;
+                            return Task.FromResult(new FanOverrideRecoveryDecision(
+                                FanOverrideRecoveryAction.RestoreAppleAuto,
+                                "Restored Apple Auto."));
+                        }
+                    }));
+            }
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            fanControlService: fanService,
+            elevationLauncher: elevation,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.PreviousSessionRecoveryPending, viewModel.RecoveryState);
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+
+        viewModel.EnableFanMonitoringCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.None, viewModel.RecoveryState);
+        Assert.Equal("No pending fan recovery.", viewModel.FanRecoveryStatus);
+        Assert.Contains("Previous fan override was restored to Apple Auto", viewModel.StatusMessage);
+        Assert.Null(ownershipStore.Marker);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_SessionCleanupException_LoggedAndHandled()
+    {
+        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var power = new FakePowerManagementService(InitialPowerState());
+        var logger = new TestApplicationLogger();
+        var ownershipStore = new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(new TestFanExecutionSession(
+                overrideCoordinator: new TestFanOverrideCoordinator
+                {
+                    RecoverHandler = (m, cap, ct) => throw new InvalidOperationException("Recovery probe error")
+                })
+            {
+                DisposeHandler = () => throw new InvalidOperationException("Session dispose error")
+            })
+        };
+        var viewModel = CreateViewModel(
+            hardware,
+            power,
+            logger: logger,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(FanRecoveryState.RecoveryBlocked, viewModel.RecoveryState);
+        Assert.NotEmpty(logger.Errors);
     }
 
     private static MainViewModel CreateViewModel(
@@ -2111,12 +3521,42 @@ public sealed class MainViewModelTests
         FakeFanControlService? fanControlService = null,
         FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
         IApplicationOptionsService? applicationOptionsService = null,
-        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
+        IFanExecutionSessionFactory? fanExecutionSessionFactory = null,
+        TestFanOverrideOwnershipStore? ownershipStore = null,
+        GamingOptimisedRestoreCoordinator? gamingOptimisedRestoreCoordinator = null,
+        ProfileRestoreService? profileRestoreService = null)
     {
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
+        var fanProfileExecutionResolver = new FanProfileExecutionResolver();
         restoreSnapshotStore ??= new InMemoryRestoreSnapshotStore();
         powerManagementService.RestoreSnapshotStore = restoreSnapshotStore;
+        ownershipStore ??= new TestFanOverrideOwnershipStore();
+        fanExecutionSessionFactory ??= new TestFanExecutionSessionFactory(ownershipStore);
+
+        var gamingOptimisedApplyCoordinator = new GamingOptimisedApplyCoordinator(
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            fanExecutionSessionFactory);
+        gamingOptimisedRestoreCoordinator ??= new GamingOptimisedRestoreCoordinator(
+            powerManagementService,
+            fanExecutionSessionFactory);
+
+        var profileApplyService = new ProfileApplyService(
+            hardwareDetectionService,
+            profileCatalog,
+            profileExecutionResolver,
+            powerManagementService,
+            gamingOptimisedApplyCoordinator);
+        profileRestoreService ??= new ProfileRestoreService(
+            hardwareDetectionService,
+            powerManagementService,
+            gamingOptimisedRestoreCoordinator,
+            restoreSnapshotStore,
+            ownershipStore,
+            logger ?? new TestApplicationLogger());
 
         return new MainViewModel(
             hardwareDetectionService,
@@ -2125,11 +3565,7 @@ public sealed class MainViewModelTests
             elevationLauncher ?? new FakeAppleSmcBackendElevationLauncher(),
             applicationOptionsService ?? new FakeApplicationOptionsService(),
             profileCatalog,
-            new ProfileApplyService(
-                hardwareDetectionService,
-                profileCatalog,
-                profileExecutionResolver,
-                powerManagementService),
+            profileApplyService,
             restoreSnapshotStore,
             new ProcessorProfileStateEvaluator(
                 profileCatalog,
@@ -2141,7 +3577,10 @@ public sealed class MainViewModelTests
             logger ?? new TestApplicationLogger(),
             userConfirmationService,
             fanPollingInterval: TimeSpan.FromSeconds(2),
-            fanPollingDelayAsync: fanPollingDelayAsync);
+            fanPollingDelayAsync: fanPollingDelayAsync,
+            profileRestoreService: profileRestoreService,
+            ownershipReader: ownershipStore,
+            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)

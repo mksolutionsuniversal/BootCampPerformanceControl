@@ -48,11 +48,11 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
         Assert.Contains("Original Restore snapshot present: Yes", result.Content);
         Assert.Contains("AppleSMC backend state: Running", result.Content);
-        Assert.Contains("Fan safety state: Read-only verified", result.Content);
+        Assert.Contains("Fan safety state: Read-only monitoring verified", result.Content);
         Assert.Contains("Fan 0 RPM: 1840 / 5616 RPM", result.Content);
         Assert.Contains("Fan 1 RPM: 1691 / 5200 RPM", result.Content);
         Assert.Contains("Mode: Apple Auto", result.Content);
-        Assert.Contains("Write control state: Disabled", result.Content);
+        Assert.Contains("Write control state: Available (verified MacBookPro16,1)", result.Content);
         Assert.Contains("Fan status/details: Verified in test.", result.Content);
     }
 
@@ -72,7 +72,7 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("Fan 0 RPM: Unavailable", result.Content);
         Assert.Contains("Fan 1 RPM: Unavailable", result.Content);
         Assert.Contains("Mode: Unavailable", result.Content);
-        Assert.Contains("Write control state: Disabled", result.Content);
+        Assert.Contains("Write control state: Unavailable (AppleSMC unavailable)", result.Content);
     }
 
     [Fact]
@@ -255,7 +255,8 @@ public sealed class CompatibilityReportServiceTests
             FanSafetyState.ReadOnlyVerified,
             new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto),
             new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto),
-            "Verified in test.");
+            "Verified in test.",
+            FanWriteControlState.Available);
     }
 
     private static string ExpectedApplicationVersion()
