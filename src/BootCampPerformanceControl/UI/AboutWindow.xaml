@@ -52,7 +52,7 @@
 
             <TextBlock Text="Fan control:"
                        Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="Read-only fan monitoring is included; fan speed control is not included."
+            <TextBlock Text="Fan monitoring and production fan write control are verified only for MacBookPro16,1; other Mac models are not verified."
                        Style="{StaticResource BodyTextStyle}"
                        Margin="0,0,0,16" />
         </StackPanel>
