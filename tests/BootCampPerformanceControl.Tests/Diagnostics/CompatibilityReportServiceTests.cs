@@ -164,7 +164,7 @@ public sealed class CompatibilityReportServiceTests
             "BootCampPerformanceControl-Compatibility-MacBookPro16_1_Debug_Name_",
             result.SuggestedFileName,
             StringComparison.Ordinal);
-        Assert.EndsWith("-0.3.0-rc.2.txt", result.SuggestedFileName, StringComparison.Ordinal);
+        Assert.EndsWith($"-{ExpectedApplicationVersion()}.txt", result.SuggestedFileName, StringComparison.Ordinal);
         foreach (var invalidCharacter in Path.GetInvalidFileNameChars())
         {
             Assert.DoesNotContain(invalidCharacter, result.SuggestedFileName);
