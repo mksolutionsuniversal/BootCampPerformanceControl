@@ -2,7 +2,7 @@ using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl;
 
-internal sealed class FanOverrideCoordinator
+internal sealed class FanOverrideCoordinator : IFanOverrideCoordinator
 {
     private readonly FanOverridePreflightPolicy _preflightPolicy;
     private readonly FanOverrideRecoveryPolicy _recoveryPolicy;
