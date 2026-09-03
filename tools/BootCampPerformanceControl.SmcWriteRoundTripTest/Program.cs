@@ -78,7 +78,7 @@ try
 
     Console.WriteLine();
     Console.WriteLine("WRITE PHASE: ARMED");
-    Console.WriteLine("Target state is fixed to the verified MacBookPro16,1 maxima: Fan 0 = 5616 RPM; Fan 1 = 5200 RPM.");
+    Console.WriteLine("Target state is derived from verified live F0Mx/F1Mx and revalidated immediately before write.");
     Console.WriteLine("The tool will restore Apple Auto in a non-cancelable cleanup path.");
 
     var logger = new ConsoleApplicationLogger();
@@ -106,6 +106,7 @@ try
     var exitCode = 0;
     var applied = false;
     var proceedWithApply = true;
+    ExpectedMaximumTargets? expectedMaximumTargets = null;
 
     try
     {
@@ -127,6 +128,16 @@ try
         {
             var preApplyCapability = await probe.ProbeAsync(model, cancellationSource.Token);
             PrintCapability("PRE-APPLY", preApplyCapability);
+
+            if (TryGetExpectedMaximumTargets(preApplyCapability, out var targets))
+            {
+                expectedMaximumTargets = targets;
+                Console.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Target state derived from verified live F0Mx/F1Mx: Fan 0 = {0:0.###} RPM; Fan 1 = {1:0.###} RPM.",
+                    targets.Fan0TargetRpm,
+                    targets.Fan1TargetRpm));
+            }
 
             var result = await coordinator.ApplyMaximumSafeRpmAsync(
                 model,
@@ -153,10 +164,11 @@ try
             var maximumCapability = await probe.ProbeAsync(model, cancellationSource.Token);
             PrintCapability("MAXIMUM", maximumCapability);
 
-            if (!IsVerifiedMaximumState(maximumCapability))
+            if (expectedMaximumTargets is null ||
+                !IsVerifiedMaximumState(maximumCapability, expectedMaximumTargets.Value))
             {
                 throw new InvalidOperationException(
-                    "Maximum state readback after the ramp delay did not remain at the verified manual targets.");
+                    "Maximum state readback after the ramp delay did not remain at the live-derived manual targets.");
             }
         }
     }
@@ -225,7 +237,29 @@ catch (Exception exception)
     return 11;
 }
 
-static bool IsVerifiedMaximumState(FanControlCapabilityResult capability)
+static bool TryGetExpectedMaximumTargets(
+    FanControlCapabilityResult capability,
+    out ExpectedMaximumTargets expectedTargets)
+{
+    expectedTargets = default;
+
+    if (!capability.IsReadSupported ||
+        !capability.IsHardwareSafetyGateSatisfied ||
+        capability.Snapshot is null)
+    {
+        return false;
+    }
+
+    var snapshot = capability.Snapshot;
+    expectedTargets = new ExpectedMaximumTargets(
+        snapshot.Fan0Maximum.GetFloat32(),
+        snapshot.Fan1Maximum.GetFloat32());
+    return true;
+}
+
+static bool IsVerifiedMaximumState(
+    FanControlCapabilityResult capability,
+    ExpectedMaximumTargets expectedTargets)
 {
     if (!capability.IsHardwareSafetyGateSatisfied || capability.Snapshot is null)
     {
@@ -235,8 +269,10 @@ static bool IsVerifiedMaximumState(FanControlCapabilityResult capability)
     var snapshot = capability.Snapshot;
     return snapshot.Fan0Mode.GetUInt8() == 1 &&
            snapshot.Fan1Mode.GetUInt8() == 1 &&
-           Math.Abs(snapshot.Fan0Target.GetFloat32() - 5616f) <= 1f &&
-           Math.Abs(snapshot.Fan1Target.GetFloat32() - 5200f) <= 1f;
+           Math.Abs(snapshot.Fan0Maximum.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fan1Maximum.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fan0Target.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fan1Target.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f;
 }
 
 static bool IsVerifiedAppleAutoState(FanControlCapabilityResult capability)
@@ -281,6 +317,10 @@ static void PrintCapability(string label, FanControlCapabilityResult capability)
         snapshot.Fan1Mode.GetUInt8(),
         snapshot.Fan1Target.GetFloat32()));
 }
+
+file readonly record struct ExpectedMaximumTargets(
+    float Fan0TargetRpm,
+    float Fan1TargetRpm);
 
 file sealed class NonOwningDeviceIoControlClient : IDeviceIoControlClient
 {

@@ -10,8 +10,6 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
     IAsyncDisposable
 {
     private const int WriteOutputBufferLength = 1;
-    private const float VerifiedFan0MaximumRpm = 5616f;
-    private const float VerifiedFan1MaximumRpm = 5200f;
 
     private readonly IDeviceIoControlClient _device;
 
@@ -35,14 +33,12 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
         cancellationToken.ThrowIfCancellationRequested();
 
         var targetKey = GetTargetKey(fan);
-        var verifiedMaximumRpm = GetVerifiedMaximumRpm(fan);
 
-        if (!float.IsFinite(targetRpm) || targetRpm != verifiedMaximumRpm)
+        if (!float.IsFinite(targetRpm) || targetRpm <= 0)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(targetRpm),
-                $"The research backend only permits the verified maximum target "
-                + $"for {fan}: {verifiedMaximumRpm:0} RPM.");
+                "The research backend only permits positive finite target RPM values.");
         }
 
         Span<byte> data = stackalloc byte[sizeof(float)];
@@ -88,16 +84,6 @@ internal sealed class CrystalIdeaResearchFanSmcWriteBackend :
             CrystalIdeaAppleSmcIoctl.WriteKey,
             request,
             WriteOutputBufferLength);
-    }
-
-    private static float GetVerifiedMaximumRpm(FanIndex fan)
-    {
-        return fan switch
-        {
-            FanIndex.Fan0 => VerifiedFan0MaximumRpm,
-            FanIndex.Fan1 => VerifiedFan1MaximumRpm,
-            _ => throw new ArgumentOutOfRangeException(nameof(fan))
-        };
     }
 
     private static string GetModeKey(FanIndex fan)

@@ -36,50 +36,26 @@ public sealed class CrystalIdeaResearchFanSmcWriteBackendTests
         Assert.Equal(1, device.InvocationCount);
     }
 
-    [Fact]
-    public async Task SetTargetRpmAsync_Fan0_EncodesVerifiedMaximumAsLittleEndianFloat32()
-    {
-        using var device = ExpectSingleWrite(
-            new byte[] { 0x46, 0x30, 0x54, 0x67, 0x04, 0x00, 0x80, 0xAF, 0x45 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
-
-        await backend.SetTargetRpmAsync(FanIndex.Fan0, 5616f, CancellationToken.None);
-
-        Assert.Equal(1, device.InvocationCount);
-    }
-
-    [Fact]
-    public async Task SetTargetRpmAsync_Fan1_EncodesVerifiedMaximumAsLittleEndianFloat32()
-    {
-        using var device = ExpectSingleWrite(
-            new byte[] { 0x46, 0x31, 0x54, 0x67, 0x04, 0x00, 0x80, 0xA2, 0x45 });
-        await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
-
-        await backend.SetTargetRpmAsync(FanIndex.Fan1, 5200f, CancellationToken.None);
-
-        Assert.Equal(1, device.InvocationCount);
-    }
-
     [Theory]
-    [InlineData(0, 5200f)]
-    [InlineData(0, 3000f)]
-    [InlineData(1, 5616f)]
-    [InlineData(1, 3000f)]
-    public async Task SetTargetRpmAsync_RejectsAnyNonMaximumTargetBeforeDeviceAccess(
+    [InlineData(0, 0x30, 4321.25f, 0x00, 0x0A, 0x87, 0x45)]
+    [InlineData(1, 0x31, 4789.5f, 0x00, 0xAC, 0x95, 0x45)]
+    public async Task SetTargetRpmAsync_EncodesSuppliedRpmAsLittleEndianFloat32(
         int fanValue,
-        float targetRpm)
+        byte fanAscii,
+        float targetRpm,
+        byte byte0,
+        byte byte1,
+        byte byte2,
+        byte byte3)
     {
-        using var device = new FakeDeviceIoControlClient();
+        using var device = ExpectSingleWrite(
+            new byte[] { 0x46, fanAscii, 0x54, 0x67, 0x04, byte0, byte1, byte2, byte3 });
         await using var backend = new CrystalIdeaResearchFanSmcWriteBackend(device);
         var fan = (FanIndex)fanValue;
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => backend.SetTargetRpmAsync(
-                fan,
-                targetRpm,
-                CancellationToken.None));
+        await backend.SetTargetRpmAsync(fan, targetRpm, CancellationToken.None);
 
-        Assert.Equal(0, device.InvocationCount);
+        Assert.Equal(1, device.InvocationCount);
     }
 
     [Theory]
