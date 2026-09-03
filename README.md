@@ -1,113 +1,184 @@
 # BootCamp Performance Control
 
-BootCamp Performance Control is an open-source Windows utility for Intel Macs running Windows through Boot Camp. Its purpose is to reduce unnecessary CPU heat and thermal throttling using safe Windows power-management mechanisms.
+BootCamp Performance Control (BCPC) is an open-source Windows utility for Intel Macs running Windows through Boot Camp.
+
+Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and, on explicitly verified hardware, guarded Apple SMC fan control.
 
 ## Release status
 
-- **Current release:** `0.2.0`
-- **Previous release:** `0.1.0-alpha.1`
-- **Development candidate:** current `main` is being validated as `0.3.0-rc.1`; this is not a published stable release.
+- **Current release train:** `0.4.0-rc.1`
+- **Release type:** pre-release / release candidate
+- **Fan-control milestone:** physically validated on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2)
 
-## Compatibility model
+`0.4.0-rc.1` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
 
-BootCamp Performance Control targets Intel Macs running Windows through Boot Camp.
+## What BCPC does
 
-Execution permission is capability-based:
+### Gaming Optimised
 
-- **Platform support:** Gaming Optimised is available on supported Intel Mac platforms (`SupportedIntelMac`) when the required Windows processor power settings can be read successfully.
-- **Model validation:** Model validation metadata is informational and does not grant or deny execution permission.
+On the fully validated `MacBookPro16,1` path:
 
-### Validation metadata status
+- Maximum Processor State AC/DC: `95% / 95%`
+- Intel processor boost (`PERFBOOSTMODE`) AC/DC: `Disabled / Disabled`
+- Fans: `Maximum Safe RPM`, derived from the live verified SMC maximum values
+- Display settings: unchanged
 
-- **MacBookPro16,1** (`PerformanceValidated`):
-  - 16-inch MacBook Pro (2019, Intel Core i9-9980HK)
-  - Full Apply / exact read-back / restart persistence / Restore round-trip tested
-  - Thermal and performance workload testing completed
-- **MacBookPro14,3** (`NotIndividuallyTested`):
-  - 15-inch MacBook Pro (2017)
-  - Application startup and processor power setting application have been observed
-  - Full controlled Restore round-trip has not yet been independently confirmed
-- **Other supported Intel Macs** (`NotIndividuallyTested` unless separately validated):
-  - Eligible for Gaming Optimised execution when Apple hardware, Intel CPU, and Windows processor power settings are readable
-  - A first-use confirmation warning is shown before applying Gaming Optimised on models that have not been individually performance-tested
+On other supported Intel Macs, Gaming Optimised remains processor-only unless that exact model is separately verified for fan writes.
 
-## Profiles
+### Restore Original Settings
 
-The product exposes two actions:
+BCPC restores the actual state captured before the profile was applied. It does not assume that the previous values were `100%` or Windows defaults.
 
-- **Gaming Optimised**
-  - Maximum Processor State AC/DC: `95%` / `95%` (`PROCTHROTTLEMAX`)
-  - CPU Boost AC/DC: `Disabled (0)` / `Disabled (0)` (`PERFBOOSTMODE`)
-- **Restore Original Settings**
-  - Restores the exact original saved processor power settings captured before changes were applied
+For the verified `MacBookPro16,1` fan-control path, Restore returns the fans to Apple Auto before restoring the saved Windows processor power state.
 
-## Safety behavior
+### Fan monitoring and recovery
 
-BootCamp Performance Control follows strict fail-closed safety principles:
+On verified hardware BCPC can:
 
-- Reads current Windows processor power state before any writes
-- Captures and persists an original Restore snapshot before any modification
-- Uses expected-state preconditions to detect concurrent configuration changes
-- Performs exact read-back verification after writing Windows processor power settings
-- Executes an automatic rollback attempt if write or read-back verification fails
-- Restores exact original saved values rather than assumed factory defaults
-- Model validation is not a write-permission gate
+- read live fan RPM, maximum RPM and mode,
+- report Apple Auto / Manual state,
+- apply Maximum Safe RPM through a guarded transaction,
+- persist fan-override ownership before the first hardware write,
+- recover the fans to Apple Auto after an unexpected BCPC process termination,
+- leave the saved processor profile untouched during startup fan recovery so the user can explicitly choose Restore.
 
-## Out of scope / Not included in 0.2.0
+## Hardware compatibility
 
-- Fan control (planned for a future release; not included in version 0.2.0)
-- Custom refresh-rate or display changes
-- CPU undervolting
-- MSR (Model-Specific Register) writes
-- Kernel-mode drivers
-- Firmware modifications
+### Fully verified
 
-## Requirements
+**MacBookPro16,1 — MacBook Pro 16-inch (2019), Apple T2**
 
-- Intel Mac running Windows (Windows 10 / Windows 11) through Boot Camp
-- .NET 8 SDK to build from source
-- Administrator permissions (required for Windows power-management operations)
+Physical validation includes:
 
-## Build
+- Windows processor Apply / exact read-back / Restore,
+- production fan monitoring,
+- Maximum Safe RPM apply,
+- Apple Auto restore,
+- forced-process-crash recovery,
+- exact processor-state restoration after recovery.
 
-Build the solution:
+Primary validation machine:
+
+- Windows 10 Boot Camp
+- Intel Core i9-9980HK
+- AMD Radeon Pro 5500M
+
+### Not yet fan-write verified
+
+**MacBookPro14,3 — MacBook Pro 15-inch (2017), Apple T1**
+
+Processor power-management behaviour has been observed, but the BCPC fan-write backend is not enabled for this model. Independent T1 fan write/read-back/restore validation is still required.
+
+### Other Intel Macs
+
+Processor profile availability is capability-based. Fan writes are **not** automatically enabled because a Mac has an Intel CPU, T1, or T2. Every fan-write model must be explicitly verified and whitelisted.
+
+See [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) for the detailed matrix.
+
+## Fan-control dependency: Macs Fan Control 1.5.16
+
+BCPC does **not** include, redistribute, modify, mirror, or install Macs Fan Control or its AppleSMC driver.
+
+The currently verified AppleSMC compatibility backend interoperates with a **separately installed** Windows copy of:
+
+- **Macs Fan Control 1.5.16 (Build 693)**
+- AppleSMC driver file version observed in the validated environment: `1.0.7.0`
+
+Download and install that version from the official CrystalIDEA GitHub release:
+
+- https://github.com/crystalidea/macs-fan-control/releases/tag/v1.5.16
+
+Use the official Windows installer (`macsfancontrol_setup.exe`). Do not copy `applesmc.sys` manually.
+
+After installation:
+
+1. Close the Macs Fan Control application if it is running. The AppleSMC device is exclusive and BCPC will not forcibly take ownership from another controller.
+2. Start BCPC normally.
+3. On a verified model, use **Enable Fan Monitoring** if the AppleSMC service is installed but stopped. This is the explicit action that may request elevation to start the service.
+4. Apply **Gaming Optimised** only after BCPC reports the verified fan capability as available.
+
+Other versions of Macs Fan Control may work, but they are not part of the current verified compatibility matrix.
+
+See [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md) and [Third-Party Software](THIRD_PARTY.md).
+
+## Safety model
+
+BCPC follows fail-closed rules for hardware-affecting operations:
+
+- read current state before writing,
+- persist the original processor Restore snapshot before modification,
+- verify expected current state before processor writes,
+- re-read fan capability immediately before fan writes,
+- derive fan targets from live verified SMC maxima rather than hard-coded RPM values,
+- allow only whitelisted fan mode/target keys,
+- verify hardware state after writes,
+- attempt Apple Auto compensation if the processor phase fails after fan takeover,
+- restore fans before processor settings,
+- retain recovery context across crashes,
+- never infer BCPC fan ownership from Manual mode alone,
+- never auto-start AppleSMC merely because a stale recovery marker exists,
+- never write fans on an unverified model.
+
+BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, or display-timing modification in this release.
+
+## Installation
+
+### Release build
+
+1. Download the `win-x64` ZIP from the BCPC GitHub Releases page.
+2. Extract it to a normal user-writable folder.
+3. Run `BootCampPerformanceControl.exe`.
+4. For verified fan control, separately install the tested Macs Fan Control dependency described above.
+
+The published Windows x64 build is self-contained and includes the required .NET runtime files.
+
+### Administrator permissions
+
+BCPC runs normally without blanket elevation. Windows requests administrator permission only for operations that require it, such as changing protected processor power settings or explicitly starting the AppleSMC compatibility service.
+
+## Build from source
+
+Requirements:
+
+- Windows x64
+- .NET 8 SDK
+
+Build:
 
 ```powershell
 dotnet build BootCampPerformanceControl.sln -c Release
 ```
 
-Create the self-contained Windows x64 release publish using the publish script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1
-```
-
-Or publish directly using the `win-x64-release` profile:
-
-```powershell
-dotnet publish src/BootCampPerformanceControl/BootCampPerformanceControl.csproj `
-  /p:PublishProfile=win-x64-release `
-  -o artifacts/BootCampPerformanceControl-win-x64
-```
-
-## Test
-
-Run the automated test suite:
+Run tests:
 
 ```powershell
 dotnet test BootCampPerformanceControl.sln -c Release
 ```
 
-## Security
+Create the self-contained Windows x64 release package:
 
-Please see [SECURITY.md](SECURITY.md) for vulnerability reporting and hardware-safety information.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1
+```
+
+The publish script creates a versioned directory and ZIP and prints the ZIP SHA-256 hash.
+
+## Documentation
+
+- [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
+- [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)
+- [Third-Party Software](THIRD_PARTY.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+BootCamp Performance Control is licensed under the [MIT License](LICENSE).
+
+Third-party software is not covered by the BCPC MIT license. See [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Disclaimer
 
-This is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Apple Inc. or Microsoft Corporation.
+BootCamp Performance Control is an independent open-source project by MK Universal Solutions LTD and is not affiliated with, endorsed by, or sponsored by Apple Inc., Microsoft Corporation, CrystalIDEA, or Macs Fan Control.
 
-Apple, Mac, MacBook Pro, Boot Camp, Windows, and Microsoft are trademarks or registered trademarks of their respective owners.
+Apple, Mac, MacBook Pro, Boot Camp, Windows, Microsoft, Macs Fan Control, CrystalIDEA, and other product names are trademarks or registered trademarks of their respective owners.
