@@ -130,6 +130,7 @@ public sealed class MainViewModelThreadAffinityTests
         Assert.Equal(2, ownershipStore.LoadCallCount);
         Assert.NotNull(ownershipStore.Marker);
         Assert.Equal(3, powerManagementService.ReadCurrentStateCallCount);
+        Assert.Equal(2, fanControlService.ReadStatusCallCount);
         Assert.Empty(logger.Errors);
 
         GC.KeepAlive(refreshButton);
@@ -354,19 +355,30 @@ public sealed class MainViewModelThreadAffinityTests
 
     private sealed class StubFanControlService : IFanControlService
     {
+        public int ReadStatusCallCount { get; private set; }
+
         public Task<FanControlStatus> ReadStatusAsync(
             string model,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ReadStatusCallCount++;
 
-            return Task.FromResult(new FanControlStatus(
-                FanBackendState.Running,
-                FanSafetyState.ReadOnlyVerified,
-                new FanReading(5616f, 5616f, FanOperatingMode.Manual),
-                new FanReading(5200f, 5200f, FanOperatingMode.Manual),
-                "Verified fan state in S0 dispatcher regression test.",
-                FanWriteControlState.MaximumSafeRpmDetected));
+            return Task.FromResult(ReadStatusCallCount == 1
+                ? new FanControlStatus(
+                    FanBackendState.Running,
+                    FanSafetyState.ReadOnlyVerified,
+                    new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto),
+                    new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto),
+                    "Apple Auto before Gaming Optimised apply.",
+                    FanWriteControlState.Available)
+                : new FanControlStatus(
+                    FanBackendState.Running,
+                    FanSafetyState.ReadOnlyVerified,
+                    new FanReading(5616f, 5616f, FanOperatingMode.Manual),
+                    new FanReading(5200f, 5200f, FanOperatingMode.Manual),
+                    "Maximum Safe RPM after Gaming Optimised apply.",
+                    FanWriteControlState.MaximumSafeRpmDetected));
         }
     }
 
