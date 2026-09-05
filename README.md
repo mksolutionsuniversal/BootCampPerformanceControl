@@ -14,7 +14,8 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 ## Release status
 
 - **Current stable release:** `0.4.0`
-- **Current release candidate:** `0.5.0-rc.1`
+- **Current published release candidate:** `0.5.0-rc.1`
+- **Current `main` development target:** `0.5.0-rc.2` — not tagged or published.
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
 - **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
 - **RC fan-control milestone:** dynamic topology plus capability-family T2-style fan-write eligibility.
@@ -31,7 +32,9 @@ ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
 Tests:         589 / 589 PASS
 ```
 
-The annotated release tag is immutable project evidence for this candidate. Documentation commits made after publication do not move or rewrite `v0.5.0-rc.1`.
+The annotated release tag is immutable project evidence for this candidate. Documentation and development commits made after publication do not move or rewrite `v0.5.0-rc.1`.
+
+Source builds from `main` after the release may report `0.5.0-rc.2`; that value identifies the next development target only and must not be represented as a published RC until a dedicated tag/release checkpoint is created.
 
 `0.5.0-rc.1` broadens runtime fan-write eligibility from the stable line's exact-model gate to a strict live SMC capability-family gate. That does **not** mean every T2 Mac has been physically validated.
 
