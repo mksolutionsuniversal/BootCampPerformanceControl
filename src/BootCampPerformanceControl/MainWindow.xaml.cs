@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using BootCampPerformanceControl.Logging;
+using BootCampPerformanceControl.Profiles;
 using BootCampPerformanceControl.UI;
 
 namespace BootCampPerformanceControl;
@@ -9,8 +10,11 @@ namespace BootCampPerformanceControl;
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan FanMonitoringShutdownTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ActiveOperationShutdownTimeout = TimeSpan.FromSeconds(10);
 
     private readonly WindowsSystemTrayIcon _systemTrayIcon;
+    private readonly CleanExitFanRecoveryService _cleanExitFanRecoveryService;
+    private readonly IApplicationLogger _logger;
 
     private bool _isLoaded;
     private bool _closeDeferralStarted;
@@ -20,14 +24,31 @@ public partial class MainWindow : Window
     private WindowState _windowStateBeforeTray = WindowState.Normal;
 
     public MainWindow()
-        : this(AppCompositionRoot.CreateMainViewModel(new FileApplicationLogger()))
+        : this(AppCompositionRoot.CreateMainApplication(new FileApplicationLogger()))
     {
     }
 
-    public MainWindow(MainViewModel viewModel)
+    internal MainWindow(MainApplicationComposition composition)
+        : this(
+            composition.ViewModel,
+            composition.CleanExitFanRecoveryService,
+            composition.Logger)
     {
+    }
+
+    internal MainWindow(
+        MainViewModel viewModel,
+        CleanExitFanRecoveryService cleanExitFanRecoveryService,
+        IApplicationLogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(cleanExitFanRecoveryService);
+        ArgumentNullException.ThrowIfNull(logger);
+
         InitializeComponent();
         _systemTrayIcon = new WindowsSystemTrayIcon();
+        _cleanExitFanRecoveryService = cleanExitFanRecoveryService;
+        _logger = logger;
         DataContext = viewModel;
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -84,24 +105,22 @@ public partial class MainWindow : Window
         }
 
         _closeDeferralStarted = true;
+        IsEnabled = false;
 
         try
         {
             if (DataContext is MainViewModel shutdownViewModel)
             {
-                await shutdownViewModel
-                    .StopFanMonitoringAsync()
-                    .WaitAsync(FanMonitoringShutdownTimeout);
+                var monitoringStopped = await TryStopFanMonitoringAsync(shutdownViewModel);
+                if (monitoringStopped)
+                {
+                    var activeOperationCompleted = await WaitForActiveOperationAsync(shutdownViewModel);
+                    if (activeOperationCompleted)
+                    {
+                        await TryRestoreOwnedFansForExitAsync();
+                    }
+                }
             }
-        }
-        catch (TimeoutException)
-        {
-            Trace.TraceWarning(
-                $"Fan monitoring did not stop within {FanMonitoringShutdownTimeout.TotalSeconds:0} seconds. Window shutdown will continue.");
-        }
-        catch (Exception exception)
-        {
-            Trace.TraceError($"Fan monitoring shutdown failed: {exception}");
         }
         finally
         {
@@ -115,6 +134,79 @@ public partial class MainWindow : Window
             {
                 Trace.TraceError($"Final window close failed: {exception}");
             }
+        }
+    }
+
+    private async Task<bool> TryStopFanMonitoringAsync(MainViewModel viewModel)
+    {
+        try
+        {
+            await viewModel
+                .StopFanMonitoringAsync()
+                .WaitAsync(FanMonitoringShutdownTimeout);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            var message =
+                $"Fan monitoring did not stop within {FanMonitoringShutdownTimeout.TotalSeconds:0} seconds. "
+                + "Clean exit fan recovery will be skipped to avoid opening a concurrent AppleSMC session; any ownership marker is retained for startup recovery.";
+            Trace.TraceWarning(message);
+            _logger.Info(message);
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError($"Fan monitoring shutdown failed: {exception}");
+            _logger.Error(
+                "Fan monitoring shutdown failed. Clean exit fan recovery will be skipped; any ownership marker is retained for startup recovery.",
+                exception);
+            return false;
+        }
+    }
+
+    private async Task<bool> WaitForActiveOperationAsync(MainViewModel viewModel)
+    {
+        if (!viewModel.IsBusy)
+        {
+            return true;
+        }
+
+        _logger.Info("Clean exit is waiting for the active UI operation to finish before fan recovery.");
+
+        using var timeoutSource = new CancellationTokenSource(ActiveOperationShutdownTimeout);
+        try
+        {
+            while (viewModel.IsBusy)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), timeoutSource.Token);
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
+        {
+            var message =
+                $"The active UI operation did not finish within {ActiveOperationShutdownTimeout.TotalSeconds:0} seconds. "
+                + "Clean exit fan recovery will be skipped to avoid racing an in-flight operation; any ownership marker is retained for startup recovery.";
+            Trace.TraceWarning(message);
+            _logger.Info(message);
+            return false;
+        }
+    }
+
+    private async Task TryRestoreOwnedFansForExitAsync()
+    {
+        try
+        {
+            await _cleanExitFanRecoveryService
+                .RestoreOwnedFansAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // The recovery service logs the safety failure and deliberately leaves
+            // any surviving ownership marker in place for next-start recovery.
+            Trace.TraceError($"Clean exit fan recovery failed: {exception}");
         }
     }
 
