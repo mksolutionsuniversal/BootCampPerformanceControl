@@ -78,7 +78,7 @@ Known project state:
 
 BCPC production fan writes remain **disabled** on this model. Independent T1 read/write/read-back/restore validation is required before any whitelist expansion.
 
-## What “T2 support” means in 0.4.0-rc.1
+## What “T2 support” means in 0.4.0
 
 The project has **initial verified Apple T2 fan-control support**, but that does **not** mean every T2 Mac is supported for fan writes.
 

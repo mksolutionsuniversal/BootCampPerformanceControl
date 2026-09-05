@@ -7,7 +7,7 @@ The first production fan-control goal is deliberately narrow:
 - **Apple Auto**
 - **Maximum Safe RPM**
 
-BCPC does not expose an arbitrary fan-speed slider in `0.4.0-rc.1`.
+BCPC does not expose an arbitrary fan-speed slider in `0.4.0`.
 
 ## Current production support
 
