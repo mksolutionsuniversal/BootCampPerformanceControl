@@ -1527,3 +1527,68 @@ jobs:
             --configuration Release `
             --no-build `
             --no-restore
+
+      - name: Validate release packaging
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release packaging failed with exit code $LASTEXITCODE."
+          }
+
+          $projectFile = 'src\BootCampPerformanceControl\BootCampPerformanceControl.csproj'
+          [xml]$project = Get-Content -LiteralPath $projectFile -Raw
+          $versionNode = $project.SelectSingleNode('/Project/PropertyGroup/Version')
+          if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+            throw "Version property not found or empty in $projectFile"
+          }
+
+          $version = $versionNode.InnerText.Trim()
+          $artifactsDir = 'artifacts'
+          $publishDir = Join-Path $artifactsDir "BootCampPerformanceControl-$version-win-x64"
+          $zipPath = Join-Path $artifactsDir "BootCampPerformanceControl-$version-win-x64.zip"
+          $sha256Path = "$zipPath.sha256"
+          $requiredPaths = @(
+            @{ Path = $publishDir; Type = 'Container' },
+            @{ Path = (Join-Path $publishDir 'BootCampPerformanceControl.exe'); Type = 'Leaf' },
+            @{ Path = (Join-Path $publishDir 'LICENSE'); Type = 'Leaf' },
+            @{ Path = (Join-Path $publishDir 'THIRD_PARTY.md'); Type = 'Leaf' },
+            @{ Path = $zipPath; Type = 'Leaf' },
+            @{ Path = $sha256Path; Type = 'Leaf' }
+          )
+
+          foreach ($requiredPath in $requiredPaths) {
+            if (-not (Test-Path -LiteralPath $requiredPath.Path -PathType $requiredPath.Type)) {
+              throw "Required release output is missing: $($requiredPath.Path)"
+            }
+          }
+
+          $zipItem = Get-Item -LiteralPath $zipPath
+          $expectedHashLine = "$(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $($zipItem.Name)"
+          $actualHashLines = @(Get-Content -LiteralPath $sha256Path)
+          if ($actualHashLines.Count -ne 1 -or
+              -not [string]::Equals($actualHashLines[0], $expectedHashLine, [StringComparison]::Ordinal)) {
+            throw "ZIP SHA-256 file content does not match the release ZIP."
+          }
+
+          $prohibitedExtensions = @('.sys', '.inf', '.cat')
+          $prohibitedNames = @('macsfancontrol_setup.exe', 'MacsFanControl.exe', 'applesmc.sys')
+          $prohibitedFiles = @(
+            Get-ChildItem -LiteralPath $publishDir -Recurse -File | Where-Object {
+              $file = $_
+              $extensionBlocked = @($prohibitedExtensions | Where-Object {
+                [string]::Equals($_, $file.Extension, [StringComparison]::OrdinalIgnoreCase)
+              }).Count -gt 0
+              $nameBlocked = @($prohibitedNames | Where-Object {
+                [string]::Equals($_, $file.Name, [StringComparison]::OrdinalIgnoreCase)
+              }).Count -gt 0
+              $extensionBlocked -or $nameBlocked
+            }
+          )
+
+          if ($prohibitedFiles.Count -gt 0) {
+            $blockedPaths = $prohibitedFiles.FullName -join [Environment]::NewLine
+            throw "Release package contains prohibited content:$([Environment]::NewLine)$blockedPaths"
+          }
+
+          Write-Host "Release packaging validation passed for version $version."
