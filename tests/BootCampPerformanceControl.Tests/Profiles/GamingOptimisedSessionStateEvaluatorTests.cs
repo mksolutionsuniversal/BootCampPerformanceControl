@@ -72,8 +72,10 @@ public sealed class GamingOptimisedSessionStateEvaluatorTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(1800f, 5321.25f, FanOperatingMode.AppleAuto),
-            new FanReading(1700f, 4789.5f, FanOperatingMode.AppleAuto),
+            [
+                new FanChannelReading(0, new FanReading(1800f, 5321.25f, FanOperatingMode.AppleAuto)),
+                new FanChannelReading(1, new FanReading(1700f, 4789.5f, FanOperatingMode.AppleAuto))
+            ],
             "Verified Apple Auto.",
             FanWriteControlState.Available);
     }
@@ -83,8 +85,10 @@ public sealed class GamingOptimisedSessionStateEvaluatorTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(5321.25f, 5321.25f, FanOperatingMode.Manual),
-            new FanReading(4789.5f, 4789.5f, FanOperatingMode.Manual),
+            [
+                new FanChannelReading(0, new FanReading(5321.25f, 5321.25f, FanOperatingMode.Manual)),
+                new FanChannelReading(1, new FanReading(4789.5f, 4789.5f, FanOperatingMode.Manual))
+            ],
             "Verified Maximum Safe RPM.",
             FanWriteControlState.MaximumSafeRpmDetected);
     }

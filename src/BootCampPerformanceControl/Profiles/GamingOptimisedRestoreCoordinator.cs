@@ -208,8 +208,8 @@ internal sealed class GamingOptimisedRestoreCoordinator
 
         try
         {
-            return capability.Snapshot.Fan0Mode.GetUInt8() == 0 &&
-                   capability.Snapshot.Fan1Mode.GetUInt8() == 0;
+            return capability.Snapshot.Fans.Count > 0 &&
+                   capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
         }
         catch (InvalidOperationException)
         {

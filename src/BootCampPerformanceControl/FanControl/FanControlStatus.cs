@@ -46,11 +46,14 @@ public sealed record FanReading(
     float MaximumRpm,
     FanOperatingMode Mode);
 
+public sealed record FanChannelReading(
+    int Index,
+    FanReading Reading);
+
 public sealed record FanControlStatus(
     FanBackendState BackendState,
     FanSafetyState SafetyState,
-    FanReading? Fan0,
-    FanReading? Fan1,
+    IReadOnlyList<FanChannelReading> Fans,
     string Details,
     FanWriteControlState WriteControlState = FanWriteControlState.NotAvailable)
 {
@@ -86,11 +89,13 @@ public sealed record FanControlStatus(
         _ => "Unknown"
     };
 
-    public string Fan0DisplayText => FormatReading(Fan0);
+    public string FansDisplayText => Fans.Count == 0
+        ? "None"
+        : string.Join(
+            "; ",
+            Fans.Select(fan => $"Fan {fan.Index}: {FormatReading(fan.Reading)}"));
 
-    public string Fan1DisplayText => FormatReading(Fan1);
-
-    public string ModeDisplayText => FormatModes(Fan0, Fan1);
+    public string ModeDisplayText => FormatModes(Fans);
 
     public string WriteControlDisplayText => WriteControlState switch
     {
@@ -101,15 +106,14 @@ public sealed record FanControlStatus(
     };
 
     public string DisplayText => IsAvailable
-        ? $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. Fan 0: {FormatReadingWithMode(Fan0)}; "
-            + $"Fan 1: {FormatReadingWithMode(Fan1)}. Write control: {WriteControlDisplayText}."
+        ? $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {FormatFansWithModes(Fans)} "
+            + $"Write control: {WriteControlDisplayText}."
         : $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {Details}";
 
     public static FanControlStatus NotChecked { get; } = new(
         FanBackendState.NotChecked,
         FanSafetyState.NotChecked,
-        Fan0: null,
-        Fan1: null,
+        Array.Empty<FanChannelReading>(),
         "Fan monitoring has not started.");
 
     public static FanControlStatus CreateUnavailable(
@@ -120,8 +124,7 @@ public sealed record FanControlStatus(
         return new FanControlStatus(
             backendState,
             safetyState,
-            Fan0: null,
-            Fan1: null,
+            Array.Empty<FanChannelReading>(),
             details);
     }
 
@@ -143,19 +146,32 @@ public sealed record FanControlStatus(
             : $"{FormatReading(reading)} ({FormatMode(reading.Mode)})";
     }
 
-    private static string FormatModes(FanReading? fan0, FanReading? fan1)
+    private static string FormatModes(IReadOnlyList<FanChannelReading> fans)
     {
-        if (fan0 is null || fan1 is null)
+        if (fans.Count == 0)
         {
             return "\u2014";
         }
 
-        var fan0Mode = FormatMode(fan0.Mode);
-        var fan1Mode = FormatMode(fan1.Mode);
+        var firstMode = fans[0].Reading.Mode;
+        if (fans.All(fan => fan.Reading.Mode == firstMode))
+        {
+            return FormatMode(firstMode);
+        }
 
-        return fan0.Mode == fan1.Mode
-            ? fan0Mode
-            : $"Fan 0: {fan0Mode}; Fan 1: {fan1Mode}";
+        return string.Join(
+            "; ",
+            fans.Select(fan => $"Fan {fan.Index}: {FormatMode(fan.Reading.Mode)}"));
+    }
+
+    private static string FormatFansWithModes(IReadOnlyList<FanChannelReading> fans)
+    {
+        return fans.Count == 0
+            ? "No fans reported (passive topology)."
+            : string.Join(
+                "; ",
+                fans.Select(fan =>
+                    $"Fan {fan.Index}: {FormatReadingWithMode(fan.Reading)}")) + ".";
     }
 
     private static string FormatMode(FanOperatingMode mode)

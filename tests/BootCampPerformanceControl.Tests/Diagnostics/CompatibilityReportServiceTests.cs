@@ -69,8 +69,7 @@ public sealed class CompatibilityReportServiceTests
 
         Assert.Contains("AppleSMC backend state: Not installed", result.Content);
         Assert.Contains("Fan safety state: Read-only unavailable", result.Content);
-        Assert.Contains("Fan 0 RPM: Unavailable", result.Content);
-        Assert.Contains("Fan 1 RPM: Unavailable", result.Content);
+        Assert.Contains("Fans: Unavailable", result.Content);
         Assert.Contains("Mode: Unavailable", result.Content);
         Assert.Contains("Write control state: Unavailable (AppleSMC unavailable)", result.Content);
     }
@@ -123,8 +122,7 @@ public sealed class CompatibilityReportServiceTests
         var fanStatus = new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(1800f, 5600f, FanOperatingMode.AppleAuto),
-            null,
+            [new FanChannelReading(0, new FanReading(1800f, 5600f, FanOperatingMode.AppleAuto))],
             @"Details sent by bob@example.com from 10.0.0.2 COMPUTERNAME=PRIVATE-PC USERPROFILE=C:\Users\Bob");
 
         var result = await service.GenerateAsync(fanStatus, CancellationToken.None);
@@ -253,8 +251,10 @@ public sealed class CompatibilityReportServiceTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto),
-            new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto),
+            [
+                new FanChannelReading(0, new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto)),
+                new FanChannelReading(1, new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto))
+            ],
             "Verified in test.",
             FanWriteControlState.Available);
     }

@@ -1,26 +1,33 @@
 namespace BootCampPerformanceControl.FanControl.Smc;
 
-internal sealed record FanSmcSnapshot(
-    SmcValue FanCount,
-    SmcValue Fan0Maximum,
-    SmcValue Fan1Maximum,
-    SmcValue Fan0Actual,
-    SmcValue Fan1Actual,
-    SmcValue Fan0Mode,
-    SmcValue Fan1Mode,
-    SmcValue Fan0Target,
-    SmcValue Fan1Target)
+internal sealed record FanSmcChannelSnapshot(
+    FanIndex Index,
+    SmcValue Maximum,
+    SmcValue Actual,
+    SmcValue Mode,
+    SmcValue Target);
+
+internal sealed record FanSmcSnapshot
 {
+    public FanSmcSnapshot(
+        SmcValue fanCount,
+        IEnumerable<FanSmcChannelSnapshot> fans)
+    {
+        FanCount = fanCount ?? throw new ArgumentNullException(nameof(fanCount));
+        ArgumentNullException.ThrowIfNull(fans);
+        Fans = fans.ToArray();
+    }
+
+    public SmcValue FanCount { get; }
+
+    public IReadOnlyList<FanSmcChannelSnapshot> Fans { get; }
+
     public IReadOnlyList<SmcValue> Values =>
-    [
-        FanCount,
-        Fan0Maximum,
-        Fan1Maximum,
-        Fan0Actual,
-        Fan1Actual,
-        Fan0Mode,
-        Fan1Mode,
-        Fan0Target,
-        Fan1Target
-    ];
+        [FanCount, .. Fans.SelectMany(fan => new[]
+        {
+            fan.Maximum,
+            fan.Actual,
+            fan.Mode,
+            fan.Target
+        })];
 }

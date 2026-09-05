@@ -20,8 +20,8 @@ public sealed class FanOverrideSafetyTests
         Assert.Null(result.FailureReason);
         Assert.NotNull(result.Plan);
         Assert.Equal(Model, result.Plan.Model);
-        Assert.Equal(5616f, result.Plan.Fan0TargetRpm);
-        Assert.Equal(5200f, result.Plan.Fan1TargetRpm);
+        Assert.Equal(5616f, result.Plan.Targets[0].TargetRpm);
+        Assert.Equal(5200f, result.Plan.Targets[1].TargetRpm);
     }
 
     [Fact]
@@ -58,14 +58,19 @@ public sealed class FanOverrideSafetyTests
     [Fact]
     public void OwnershipMarker_IsCreatedFromApprovedPlan()
     {
-        var plan = new FanMaximumSafeRpmPlan(Model, 5616f, 5200f);
+        var plan = new FanMaximumSafeRpmPlan(
+            Model,
+            [
+                new FanMaximumSafeRpmTarget(new FanIndex(0), 5616f),
+                new FanMaximumSafeRpmTarget(new FanIndex(1), 5200f)
+            ]);
         var timestamp = new DateTimeOffset(2026, 8, 18, 18, 0, 0, TimeSpan.Zero);
 
         var marker = FanOverrideOwnershipMarker.FromPlan(plan, timestamp);
 
         Assert.Equal(Model, marker.Model);
-        Assert.Equal(5616f, marker.Fan0ExpectedTargetRpm);
-        Assert.Equal(5200f, marker.Fan1ExpectedTargetRpm);
+        Assert.Equal(5616f, marker.Targets[0].ExpectedTargetRpm);
+        Assert.Equal(5200f, marker.Targets[1].ExpectedTargetRpm);
         Assert.Equal(timestamp, marker.CreatedAtUtc);
     }
 
@@ -185,6 +190,26 @@ public sealed class FanOverrideSafetyTests
         Assert.Contains("safety gate", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Recovery_BlocksWhenCurrentTopologyDoesNotMatchMarker()
+    {
+        var policy = new FanOverrideRecoveryPolicy();
+        var marker = new FanOverrideOwnershipMarker(
+            Model,
+            [new FanOverrideOwnershipTarget(new FanIndex(0), 5616f)],
+            DateTimeOffset.UtcNow);
+        var capability = CreateCapability(
+            fan0Mode: 1,
+            fan1Mode: 1,
+            fan0Target: 5616f,
+            fan1Target: 5200f);
+
+        var result = policy.Evaluate(Model, marker, capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.Blocked, result.Action);
+        Assert.Contains("topology", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static FanOverrideOwnershipMarker CreateMarker()
     {
         return new FanOverrideOwnershipMarker(
@@ -204,14 +229,14 @@ public sealed class FanOverrideSafetyTests
     {
         var snapshot = new FanSmcSnapshot(
             UInt8("FNum", 2, 0x80),
-            Float32("F0Mx", fan0Maximum, 0x85),
-            Float32("F1Mx", fan1Maximum, 0x85),
-            Float32("F0Ac", 1837f, 0x84),
-            Float32("F1Ac", 1701f, 0x84),
-            UInt8("F0Md", fan0Mode, 0xD0),
-            UInt8("F1Md", fan1Mode, 0xD0),
-            Float32("F0Tg", fan0Target, 0xD4),
-            Float32("F1Tg", fan1Target, 0xD4));
+            [
+                new FanSmcChannelSnapshot(new FanIndex(0),
+                    Float32("F0Mx", fan0Maximum, 0x85), Float32("F0Ac", 1837f, 0x84),
+                    UInt8("F0Md", fan0Mode, 0xD0), Float32("F0Tg", fan0Target, 0xD4)),
+                new FanSmcChannelSnapshot(new FanIndex(1),
+                    Float32("F1Mx", fan1Maximum, 0x85), Float32("F1Ac", 1701f, 0x84),
+                    UInt8("F1Md", fan1Mode, 0xD0), Float32("F1Tg", fan1Target, 0xD4))
+            ]);
 
         return new FanControlCapabilityResult(
             IsReadSupported: true,

@@ -30,14 +30,24 @@ internal static class CrystalIdeaAppleSmcCodec
         string key,
         ReadOnlySpan<byte> data)
     {
-        var expectedLength = key switch
+        var isIndexedFanKey = key is { Length: AppleSmcProtocol.KeyLength }
+            && key[0] == 'F'
+            && key[1] is >= '0' and <= '9';
+        var expectedLength = isIndexedFanKey
+            ? key[2..] switch
+            {
+                "Md" => 1,
+                "Tg" => 4,
+                _ => 0
+            }
+            : 0;
+
+        if (expectedLength == 0)
         {
-            "F0Md" or "F1Md" => 1,
-            "F0Tg" or "F1Tg" => 4,
-            _ => throw new ArgumentException(
-                "Only the verified F0Md, F1Md, F0Tg and F1Tg fan keys may be written.",
-                nameof(key))
-        };
+            throw new ArgumentException(
+                "Only single-digit indexed fan mode (F{i}Md) and target (F{i}Tg) keys may be written.",
+                nameof(key));
+        }
 
         if (data.Length != expectedLength)
         {

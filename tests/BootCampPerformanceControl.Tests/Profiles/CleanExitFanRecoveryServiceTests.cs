@@ -190,9 +190,9 @@ public sealed class CleanExitFanRecoveryServiceTests
     {
         return new FanOverrideOwnershipMarker(
             model,
-            Fan0ExpectedTargetRpm: 5321.25f,
-            Fan1ExpectedTargetRpm: 4789.5f,
-            CreatedAtUtc: DateTimeOffset.Parse("2026-09-05T09:37:15+00:00"));
+            fan0ExpectedTargetRpm: 5321.25f,
+            fan1ExpectedTargetRpm: 4789.5f,
+            createdAtUtc: DateTimeOffset.Parse("2026-09-05T09:37:15+00:00"));
     }
 
     private static ModelVerificationResult VerifiedMacBookPro16_1()

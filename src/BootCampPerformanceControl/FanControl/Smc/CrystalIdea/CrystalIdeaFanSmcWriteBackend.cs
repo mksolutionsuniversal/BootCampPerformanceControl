@@ -87,21 +87,11 @@ internal sealed class CrystalIdeaFanSmcWriteBackend :
 
     private static string GetModeKey(FanIndex fan)
     {
-        return fan switch
-        {
-            FanIndex.Fan0 => "F0Md",
-            FanIndex.Fan1 => "F1Md",
-            _ => throw new ArgumentOutOfRangeException(nameof(fan))
-        };
+        return fan.GetSmcKey("Md");
     }
 
     private static string GetTargetKey(FanIndex fan)
     {
-        return fan switch
-        {
-            FanIndex.Fan0 => "F0Tg",
-            FanIndex.Fan1 => "F1Tg",
-            _ => throw new ArgumentOutOfRangeException(nameof(fan))
-        };
+        return fan.GetSmcKey("Tg");
     }
 }

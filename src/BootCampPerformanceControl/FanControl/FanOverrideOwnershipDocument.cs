@@ -1,13 +1,16 @@
 namespace BootCampPerformanceControl.FanControl;
 
+internal sealed record FanOverrideOwnershipTargetDocument(
+    int Index,
+    float ExpectedTargetRpm);
+
 internal sealed record FanOverrideOwnershipDocument(
     int SchemaVersion,
     string Model,
-    float Fan0ExpectedTargetRpm,
-    float Fan1ExpectedTargetRpm,
+    IReadOnlyList<FanOverrideOwnershipTargetDocument> Targets,
     DateTimeOffset CreatedAtUtc)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static FanOverrideOwnershipDocument FromMarker(FanOverrideOwnershipMarker marker)
     {
@@ -16,8 +19,9 @@ internal sealed record FanOverrideOwnershipDocument(
         return new FanOverrideOwnershipDocument(
             CurrentSchemaVersion,
             marker.Model,
-            marker.Fan0ExpectedTargetRpm,
-            marker.Fan1ExpectedTargetRpm,
+            marker.Targets.Select(target => new FanOverrideOwnershipTargetDocument(
+                target.Index.Value,
+                target.ExpectedTargetRpm)).ToArray(),
             marker.CreatedAtUtc);
     }
 
@@ -25,8 +29,30 @@ internal sealed record FanOverrideOwnershipDocument(
     {
         return new FanOverrideOwnershipMarker(
             Model,
-            Fan0ExpectedTargetRpm,
-            Fan1ExpectedTargetRpm,
+            Targets.Select(target => new FanOverrideOwnershipTarget(
+                new FanIndex(target.Index),
+                target.ExpectedTargetRpm)),
+            CreatedAtUtc);
+    }
+}
+
+internal sealed record LegacyFanOverrideOwnershipDocument(
+    int SchemaVersion,
+    string Model,
+    float Fan0ExpectedTargetRpm,
+    float Fan1ExpectedTargetRpm,
+    DateTimeOffset CreatedAtUtc)
+{
+    public const int SchemaVersionValue = 1;
+
+    public FanOverrideOwnershipMarker ToMarker()
+    {
+        return new FanOverrideOwnershipMarker(
+            Model,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), Fan0ExpectedTargetRpm),
+                new FanOverrideOwnershipTarget(new FanIndex(1), Fan1ExpectedTargetRpm)
+            ],
             CreatedAtUtc);
     }
 }

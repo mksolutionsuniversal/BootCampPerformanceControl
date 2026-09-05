@@ -78,27 +78,29 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
         try
         {
-            // Confirmed MacBookPro16,1 sequence from the read/write research handoff.
-            // Do not insert reads between the initial mode writes and target writes.
+            // Confirmed sequence from the read/write research handoff. Do not insert
+            // reads between the initial mode writes and target writes.
             writeStarted = true;
-            await _writeBackend
-                .SetManualModeAsync(FanIndex.Fan0, cancellationToken)
-                .ConfigureAwait(false);
-            await _writeBackend
-                .SetManualModeAsync(FanIndex.Fan1, cancellationToken)
-                .ConfigureAwait(false);
-            await _writeBackend
-                .SetTargetRpmAsync(FanIndex.Fan0, plan.Fan0TargetRpm, cancellationToken)
-                .ConfigureAwait(false);
-            await _writeBackend
-                .SetTargetRpmAsync(FanIndex.Fan1, plan.Fan1TargetRpm, cancellationToken)
-                .ConfigureAwait(false);
-            await _writeBackend
-                .SetManualModeAsync(FanIndex.Fan0, cancellationToken)
-                .ConfigureAwait(false);
-            await _writeBackend
-                .SetManualModeAsync(FanIndex.Fan1, cancellationToken)
-                .ConfigureAwait(false);
+            foreach (var target in plan.Targets)
+            {
+                await _writeBackend
+                    .SetManualModeAsync(target.Index, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var target in plan.Targets)
+            {
+                await _writeBackend
+                    .SetTargetRpmAsync(target.Index, target.TargetRpm, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var target in plan.Targets)
+            {
+                await _writeBackend
+                    .SetManualModeAsync(target.Index, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             await VerifyManualMaximumAsync(plan, cancellationToken)
                 .ConfigureAwait(false);
@@ -115,6 +117,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
                 // the caller token and must itself finish with Apple Auto readback.
                 await RestoreAppleAutoCoreAsync(
                         plan.Model,
+                        plan.Targets.Select(target => target.Index).ToArray(),
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 _logger.Info(
@@ -153,7 +156,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         if (freshDecision.Action == FanOverrideRecoveryAction.None)
         {
             _logger.Info(
-                "Fan writer restore found both fans already in Apple Auto; no write was required.");
+                "Fan writer restore found every owned fan already in Apple Auto; no write was required.");
             return;
         }
 
@@ -165,6 +168,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
         await RestoreAppleAutoCoreAsync(
                 ownershipMarker.Model,
+                ownershipMarker.Targets.Select(target => target.Index).ToArray(),
                 CancellationToken.None)
             .ConfigureAwait(false);
 
@@ -174,37 +178,30 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
     private async Task RestoreAppleAutoCoreAsync(
         string model,
+        IReadOnlyList<FanIndex> fanIndexes,
         CancellationToken cancellationToken)
     {
         Exception? writeException = null;
 
-        try
+        foreach (var fanIndex in fanIndexes)
         {
-            await _writeBackend
-                .SetAppleAutoAsync(FanIndex.Fan0, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            writeException = exception;
-        }
-
-        try
-        {
-            await _writeBackend
-                .SetAppleAutoAsync(FanIndex.Fan1, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            writeException = writeException is null
-                ? exception
-                : new AggregateException(writeException, exception);
+            try
+            {
+                await _writeBackend
+                    .SetAppleAutoAsync(fanIndex, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                writeException = writeException is null
+                    ? exception
+                    : new AggregateException(writeException, exception);
+            }
         }
 
         try
         {
-            await VerifyAppleAutoAsync(model, cancellationToken)
+            await VerifyAppleAutoAsync(model, fanIndexes, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception verificationException)
@@ -225,7 +222,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
             // Readback is the final source of truth. A low-level write may report an
             // error after the firmware has already accepted the state transition.
             _logger.Error(
-                "An Apple Auto write reported an error, but readback verified both fans in Apple Auto.",
+                "An Apple Auto write reported an error, but readback verified every owned fan in Apple Auto.",
                 writeException);
         }
     }
@@ -255,6 +252,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
     private async Task VerifyAppleAutoAsync(
         string model,
+        IReadOnlyList<FanIndex> fanIndexes,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= _verificationAttempts; attempt++)
@@ -263,7 +261,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
                 .ProbeAsync(model, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (IsVerifiedAppleAuto(capability))
+            if (IsVerifiedAppleAuto(capability, fanIndexes))
             {
                 return;
             }
@@ -273,7 +271,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         }
 
         throw new InvalidOperationException(
-            "Apple Auto could not be verified by readback for both fans.");
+            "Apple Auto could not be verified by readback for every owned fan.");
     }
 
     private async Task DelayBeforeRetryAsync(
@@ -302,21 +300,33 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         }
 
         var snapshot = capability.Snapshot;
-        return snapshot.Fan0Mode.GetUInt8() == 1
-            && snapshot.Fan1Mode.GetUInt8() == 1
-            && ApproximatelyEqual(snapshot.Fan0Target.GetFloat32(), plan.Fan0TargetRpm)
-            && ApproximatelyEqual(snapshot.Fan1Target.GetFloat32(), plan.Fan1TargetRpm)
-            && ApproximatelyEqual(snapshot.Fan0Maximum.GetFloat32(), plan.Fan0TargetRpm)
-            && ApproximatelyEqual(snapshot.Fan1Maximum.GetFloat32(), plan.Fan1TargetRpm);
+        if (snapshot.Fans.Count != plan.Targets.Count ||
+            !snapshot.Fans.Select(fan => fan.Index)
+                .SequenceEqual(plan.Targets.Select(target => target.Index)))
+        {
+            return false;
+        }
+
+        return snapshot.Fans.Zip(plan.Targets).All(pair =>
+            pair.First.Mode.GetUInt8() == 1
+            && ApproximatelyEqual(pair.First.Target.GetFloat32(), pair.Second.TargetRpm)
+            && ApproximatelyEqual(pair.First.Maximum.GetFloat32(), pair.Second.TargetRpm));
     }
 
-    private static bool IsVerifiedAppleAuto(FanControlCapabilityResult capability)
+    private static bool IsVerifiedAppleAuto(
+        FanControlCapabilityResult capability,
+        IReadOnlyList<FanIndex> fanIndexes)
     {
-        return capability.IsReadSupported
-            && capability.IsHardwareSafetyGateSatisfied
-            && capability.Snapshot is not null
-            && capability.Snapshot.Fan0Mode.GetUInt8() == 0
-            && capability.Snapshot.Fan1Mode.GetUInt8() == 0;
+        if (!capability.IsReadSupported ||
+            !capability.IsHardwareSafetyGateSatisfied ||
+            capability.Snapshot is null ||
+            capability.Snapshot.Fans.Count != fanIndexes.Count ||
+            !capability.Snapshot.Fans.Select(fan => fan.Index).SequenceEqual(fanIndexes))
+        {
+            return false;
+        }
+
+        return capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
     }
 
     private static void EnsurePlanStillMatches(
@@ -324,8 +334,10 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         FanMaximumSafeRpmPlan freshPlan)
     {
         if (!string.Equals(requestedPlan.Model, freshPlan.Model, StringComparison.Ordinal) ||
-            !ApproximatelyEqual(requestedPlan.Fan0TargetRpm, freshPlan.Fan0TargetRpm) ||
-            !ApproximatelyEqual(requestedPlan.Fan1TargetRpm, freshPlan.Fan1TargetRpm))
+            requestedPlan.Targets.Count != freshPlan.Targets.Count ||
+            !requestedPlan.Targets.Zip(freshPlan.Targets).All(pair =>
+                pair.First.Index == pair.Second.Index &&
+                ApproximatelyEqual(pair.First.TargetRpm, pair.Second.TargetRpm)))
         {
             throw new InvalidOperationException(
                 "Fan maximum RPM values changed after the original preflight. No fan write was attempted.");
@@ -344,13 +356,17 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(plan.Model);
 
-        if (!float.IsFinite(plan.Fan0TargetRpm) || plan.Fan0TargetRpm <= 0 ||
-            !float.IsFinite(plan.Fan1TargetRpm) || plan.Fan1TargetRpm <= 0)
+        if (plan.Targets.Count == 0)
         {
             throw new ArgumentException(
-                "Fan override plan contains an invalid target RPM.",
+                "Fan override plan does not contain any targets.",
                 nameof(plan));
         }
+
+        ValidateIndexedTargets(
+            plan.Targets.Select(target => (target.Index, target.TargetRpm)),
+            "Fan override plan",
+            nameof(plan));
     }
 
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)
@@ -358,12 +374,38 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         ArgumentNullException.ThrowIfNull(marker);
         ArgumentException.ThrowIfNullOrWhiteSpace(marker.Model);
 
-        if (!float.IsFinite(marker.Fan0ExpectedTargetRpm) || marker.Fan0ExpectedTargetRpm <= 0 ||
-            !float.IsFinite(marker.Fan1ExpectedTargetRpm) || marker.Fan1ExpectedTargetRpm <= 0)
+        if (marker.Targets.Count == 0)
         {
             throw new ArgumentException(
-                "Fan ownership marker contains an invalid expected target RPM.",
+                "Fan ownership marker does not contain any targets.",
                 nameof(marker));
+        }
+
+
+        ValidateIndexedTargets(
+            marker.Targets.Select(target => (target.Index, target.ExpectedTargetRpm)),
+            "Fan ownership marker",
+            nameof(marker));
+    }
+
+    private static void ValidateIndexedTargets(
+        IEnumerable<(FanIndex Index, float Rpm)> targets,
+        string description,
+        string parameterName)
+    {
+        var position = 0;
+        foreach (var target in targets)
+        {
+            if (target.Index.Value != position ||
+                !float.IsFinite(target.Rpm) ||
+                target.Rpm <= 0)
+            {
+                throw new ArgumentException(
+                    $"{description} contains invalid or non-contiguous indexed targets.",
+                    parameterName);
+            }
+
+            position++;
         }
     }
 }

@@ -368,15 +368,19 @@ public sealed class MainViewModelThreadAffinityTests
                 ? new FanControlStatus(
                     FanBackendState.Running,
                     FanSafetyState.ReadOnlyVerified,
-                    new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto),
-                    new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto),
+                    [
+                        new FanChannelReading(0, new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto)),
+                        new FanChannelReading(1, new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto))
+                    ],
                     "Apple Auto before Gaming Optimised apply.",
                     FanWriteControlState.Available)
                 : new FanControlStatus(
                     FanBackendState.Running,
                     FanSafetyState.ReadOnlyVerified,
-                    new FanReading(5616f, 5616f, FanOperatingMode.Manual),
-                    new FanReading(5200f, 5200f, FanOperatingMode.Manual),
+                    [
+                        new FanChannelReading(0, new FanReading(5616f, 5616f, FanOperatingMode.Manual)),
+                        new FanChannelReading(1, new FanReading(5200f, 5200f, FanOperatingMode.Manual))
+                    ],
                     "Maximum Safe RPM after Gaming Optimised apply.",
                     FanWriteControlState.MaximumSafeRpmDetected));
         }

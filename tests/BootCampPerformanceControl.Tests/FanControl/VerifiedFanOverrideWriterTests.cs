@@ -9,7 +9,12 @@ public sealed class VerifiedFanOverrideWriterTests
 {
     private const string Model = VerifiedHardwareModels.MacBookPro16_1;
     private static readonly FanMaximumSafeRpmPlan Plan =
-        new(Model, 5616f, 5200f);
+        new(
+            Model,
+            [
+                new FanMaximumSafeRpmTarget(new FanIndex(0), 5616f),
+                new FanMaximumSafeRpmTarget(new FanIndex(1), 5200f)
+            ]);
     private static readonly FanOverrideOwnershipMarker Marker =
         new(Model, 5616f, 5200f, new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
 
@@ -46,13 +51,53 @@ public sealed class VerifiedFanOverrideWriterTests
     }
 
     [Fact]
+    public async Task ApplyMaximumSafeRpmAsync_DynamicPlanPreservesAllModesTargetsModesOrdering()
+    {
+        var events = new List<string>();
+        var maxima = new[] { 5616f, 5200f, 4800f };
+        var plan = new FanMaximumSafeRpmPlan(
+            Model,
+            maxima.Select((rpm, index) => new FanMaximumSafeRpmTarget(new FanIndex(index), rpm)));
+        var probe = new SequenceProbe(
+            events,
+            CreateDynamicCapability(maxima, manualMaximum: false),
+            CreateDynamicCapability(maxima, manualMaximum: true));
+        var backend = new RecordingWriteBackend(events);
+        var writer = CreateWriter(backend, probe);
+
+        await writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None);
+
+        Assert.Equal(
+            new[]
+            {
+                "probe",
+                "manual:Fan0",
+                "manual:Fan1",
+                "manual:Fan2",
+                "target:Fan0:5616",
+                "target:Fan1:5200",
+                "target:Fan2:4800",
+                "manual:Fan0",
+                "manual:Fan1",
+                "manual:Fan2",
+                "probe"
+            },
+            events);
+    }
+
+    [Fact]
     public async Task ApplyMaximumSafeRpmAsync_FreshPlanMismatchBlocksBeforeAnyWrite()
     {
         var events = new List<string>();
         var probe = new SequenceProbe(events, CreateCapability());
         var backend = new RecordingWriteBackend(events);
         var writer = CreateWriter(backend, probe);
-        var stalePlan = new FanMaximumSafeRpmPlan(Model, 5600f, 5200f);
+        var stalePlan = new FanMaximumSafeRpmPlan(
+            Model,
+            [
+                new FanMaximumSafeRpmTarget(new FanIndex(0), 5600f),
+                new FanMaximumSafeRpmTarget(new FanIndex(1), 5200f)
+            ]);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => writer.ApplyMaximumSafeRpmAsync(stalePlan, CancellationToken.None));
@@ -205,6 +250,63 @@ public sealed class VerifiedFanOverrideWriterTests
         Assert.Equal(new[] { "probe" }, events);
     }
 
+    [Fact]
+    public async Task RestoreAppleAutoAsync_DynamicMarkerRestoresEveryOwnedFan()
+    {
+        var events = new List<string>();
+        var maxima = new[] { 5616f, 5200f, 4800f };
+        var marker = new FanOverrideOwnershipMarker(
+            Model,
+            maxima.Select((rpm, index) => new FanOverrideOwnershipTarget(new FanIndex(index), rpm)),
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+        var probe = new SequenceProbe(
+            events,
+            CreateDynamicCapability(maxima, manualMaximum: true),
+            CreateDynamicCapability(maxima, manualMaximum: false));
+        var backend = new RecordingWriteBackend(events);
+        var writer = CreateWriter(backend, probe);
+
+        await writer.RestoreAppleAutoAsync(marker, CancellationToken.None);
+
+        Assert.Equal(
+            new[]
+            {
+                "probe",
+                "auto:Fan0",
+                "auto:Fan1",
+                "auto:Fan2",
+                "probe"
+            },
+            events);
+    }
+
+    [Fact]
+    public async Task RestoreAppleAutoAsync_WriteExceptionStillAttemptsEveryFanAndTrustsReadback()
+    {
+        var events = new List<string>();
+        var maxima = new[] { 5616f, 5200f, 4800f };
+        var marker = new FanOverrideOwnershipMarker(
+            Model,
+            maxima.Select((rpm, index) => new FanOverrideOwnershipTarget(new FanIndex(index), rpm)),
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+        var probe = new SequenceProbe(
+            events,
+            CreateDynamicCapability(maxima, manualMaximum: true),
+            CreateDynamicCapability(maxima, manualMaximum: false));
+        var backend = new RecordingWriteBackend(events)
+        {
+            ThrowOnEvent = "auto:Fan1"
+        };
+        var writer = CreateWriter(backend, probe);
+
+        await writer.RestoreAppleAutoAsync(marker, CancellationToken.None);
+
+        Assert.Contains("auto:Fan0", events);
+        Assert.Contains("auto:Fan1", events);
+        Assert.Contains("auto:Fan2", events);
+        Assert.Equal("probe", events[^1]);
+    }
+
     private static VerifiedFanOverrideWriter CreateWriter(
         IFanSmcWriteBackend backend,
         IFanCapabilityProbe probe)
@@ -227,14 +329,40 @@ public sealed class VerifiedFanOverrideWriterTests
     {
         var snapshot = new FanSmcSnapshot(
             UInt8("FNum", 2, 0x80),
-            Float32("F0Mx", 5616f, 0x85),
-            Float32("F1Mx", 5200f, 0x85),
-            Float32("F0Ac", 1837f, 0x84),
-            Float32("F1Ac", 1701f, 0x84),
-            UInt8("F0Md", fan0Mode, 0xD0),
-            UInt8("F1Md", fan1Mode, 0xD0),
-            Float32("F0Tg", fan0Target, 0xD4),
-            Float32("F1Tg", fan1Target, 0xD4));
+            [
+                new FanSmcChannelSnapshot(new FanIndex(0),
+                    Float32("F0Mx", 5616f, 0x85), Float32("F0Ac", 1837f, 0x84),
+                    UInt8("F0Md", fan0Mode, 0xD0), Float32("F0Tg", fan0Target, 0xD4)),
+                new FanSmcChannelSnapshot(new FanIndex(1),
+                    Float32("F1Mx", 5200f, 0x85), Float32("F1Ac", 1701f, 0x84),
+                    UInt8("F1Md", fan1Mode, 0xD0), Float32("F1Tg", fan1Target, 0xD4))
+            ]);
+
+        return new FanControlCapabilityResult(
+            IsReadSupported: true,
+            IsHardwareSafetyGateSatisfied: true,
+            Array.Empty<string>(),
+            SmcTransportProtocol.Mmio,
+            snapshot);
+    }
+
+    private static FanControlCapabilityResult CreateDynamicCapability(
+        IReadOnlyList<float> maxima,
+        bool manualMaximum)
+    {
+        var fans = maxima.Select((maximum, value) =>
+        {
+            var index = new FanIndex(value);
+            return new FanSmcChannelSnapshot(
+                index,
+                Float32(index.GetSmcKey("Mx"), maximum, 0x85),
+                Float32(index.GetSmcKey("Ac"), 1500f, 0x84),
+                UInt8(index.GetSmcKey("Md"), manualMaximum ? (byte)1 : (byte)0, 0xD0),
+                Float32(index.GetSmcKey("Tg"), manualMaximum ? maximum : 1500f, 0xD4));
+        });
+        var snapshot = new FanSmcSnapshot(
+            UInt8("FNum", checked((byte)maxima.Count), 0x80),
+            fans);
 
         return new FanControlCapabilityResult(
             IsReadSupported: true,

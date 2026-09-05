@@ -54,7 +54,7 @@ BCPC does not use CPU undervolting, CPU MSR writes, firmware modification or dis
 
 Restore must restore the actual saved pre-change state. Do not assume the original value was `100%` or a Windows default.
 
-The Gaming Optimised `95%` processor limit is an empirically validated value for `MacBookPro16,1`; it is not a universal Intel-Mac setting.
+Gaming Optimised globally uses Maximum Processor State `95% / 95%` and Turbo/Boost `Disabled / Disabled` for supported Intel Macs. Fan-write validation remains model-specific.
 
 ## Native BootCampSmc research driver
 

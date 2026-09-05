@@ -245,14 +245,14 @@ public sealed class FanOverrideCoordinatorTests
     {
         var snapshot = new FanSmcSnapshot(
             UInt8("FNum", 2, 0x80),
-            Float32("F0Mx", 5616f, 0x85),
-            Float32("F1Mx", 5200f, 0x85),
-            Float32("F0Ac", 1837f, 0x84),
-            Float32("F1Ac", 1701f, 0x84),
-            UInt8("F0Md", fan0Mode, 0xD0),
-            UInt8("F1Md", fan1Mode, 0xD0),
-            Float32("F0Tg", fan0Target, 0xD4),
-            Float32("F1Tg", fan1Target, 0xD4));
+            [
+                new FanSmcChannelSnapshot(new FanIndex(0),
+                    Float32("F0Mx", 5616f, 0x85), Float32("F0Ac", 1837f, 0x84),
+                    UInt8("F0Md", fan0Mode, 0xD0), Float32("F0Tg", fan0Target, 0xD4)),
+                new FanSmcChannelSnapshot(new FanIndex(1),
+                    Float32("F1Mx", 5200f, 0x85), Float32("F1Ac", 1701f, 0x84),
+                    UInt8("F1Md", fan1Mode, 0xD0), Float32("F1Tg", fan1Target, 0xD4))
+            ]);
 
         return new FanControlCapabilityResult(
             IsReadSupported: true,

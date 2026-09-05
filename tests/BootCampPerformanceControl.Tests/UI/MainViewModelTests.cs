@@ -244,8 +244,8 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(verifiedFanStatus, viewModel.FanStatus);
-        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1691f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(1840f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1691f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
         Assert.Equal([VerifiedHardwareModels.MacBookPro16_1], fanControlService.ReadModels);
         Assert.Equal(1, hardwareDetectionService.DetectCallCount);
         Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
@@ -422,7 +422,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task EnableFanMonitoringCommand_IsUnavailableForUnsupportedFanIdentity()
+    public async Task EnableFanMonitoringCommand_IsAvailableForSupportedIntelMacReadOnlyDiscovery()
     {
         var unsupportedIdentity = new ModelVerificationResult(
             "Apple Inc.",
@@ -441,10 +441,11 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
-        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
-        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.True(viewModel.EnableFanMonitoringCommand.CanExecute(null));
         viewModel.EnableFanMonitoringCommand.Execute(null);
-        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal(1, elevationLauncher.LaunchCallCount);
     }
 
     [Fact]
@@ -758,22 +759,22 @@ public sealed class MainViewModelTests
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
-        Assert.Equal(1800f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1800f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
 
         viewModel.StartFanMonitoring();
         pollingDelay.Advance();
         await WaitUntilAsync(
             () => fanControlService.ReadStatusCallCount == 2
                 && pollingDelay.RequestCount == 2);
-        Assert.Equal(1900f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1750f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(1900f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1750f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
 
         pollingDelay.Advance();
         await WaitUntilAsync(
             () => fanControlService.ReadStatusCallCount == 3
                 && pollingDelay.RequestCount == 3);
-        Assert.Equal(2000f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1850f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(2000f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1850f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
         Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
         Assert.Single(
             logger.InformationMessages,
@@ -1214,7 +1215,7 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
-        Assert.Equal(5616f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(5616f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
     }
 
     [Fact]
@@ -1250,7 +1251,7 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
-        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1840f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
     }
 
     [Fact]
@@ -3879,8 +3880,10 @@ public sealed class MainViewModelTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto),
-            new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto),
+            [
+                new FanChannelReading(0, new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto)),
+                new FanChannelReading(1, new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto))
+            ],
             "Verified in test.");
     }
 
@@ -3889,8 +3892,10 @@ public sealed class MainViewModelTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(5616f, 5616f, FanOperatingMode.Manual),
-            new FanReading(5200f, 5200f, FanOperatingMode.Manual),
+            [
+                new FanChannelReading(0, new FanReading(5616f, 5616f, FanOperatingMode.Manual)),
+                new FanChannelReading(1, new FanReading(5200f, 5200f, FanOperatingMode.Manual))
+            ],
             "Verified Maximum Safe RPM in test.",
             FanWriteControlState.MaximumSafeRpmDetected);
     }

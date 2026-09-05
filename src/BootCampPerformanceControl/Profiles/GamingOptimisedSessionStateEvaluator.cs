@@ -48,15 +48,15 @@ internal sealed class GamingOptimisedSessionStateEvaluator
         ArgumentNullException.ThrowIfNull(fanStatus);
 
         return fanStatus.IsAvailable
-            && fanStatus.Fan0?.Mode == FanOperatingMode.AppleAuto
-            && fanStatus.Fan1?.Mode == FanOperatingMode.AppleAuto;
+            && fanStatus.Fans.Count > 0
+            && fanStatus.Fans.All(fan => fan.Reading.Mode == FanOperatingMode.AppleAuto);
     }
 
     private static bool IsVerifiedMaximumSafeRpm(FanControlStatus fanStatus)
     {
         return fanStatus.IsAvailable
             && fanStatus.WriteControlState == FanWriteControlState.MaximumSafeRpmDetected
-            && fanStatus.Fan0?.Mode == FanOperatingMode.Manual
-            && fanStatus.Fan1?.Mode == FanOperatingMode.Manual;
+            && fanStatus.Fans.Count > 0
+            && fanStatus.Fans.All(fan => fan.Reading.Mode == FanOperatingMode.Manual);
     }
 }

@@ -19,7 +19,7 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 
 `0.4.0` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
 
-> **Important:** the `95%` Gaming Optimised processor limit is an empirically validated value for `MacBookPro16,1`. It is not a universal recommendation for every Intel Mac and must not be assumed optimal for other models.
+> **Important:** Gaming Optimised uses Maximum Processor State `95% / 95%` and disables Turbo/Boost on AC and DC for every supported Intel Mac. Fan writes remain separately hardware-gated.
 
 ## Quick start
 
@@ -36,14 +36,13 @@ For verified fan control, BCPC currently interoperates with a separately install
 
 ### Gaming Optimised
 
-On the fully validated `MacBookPro16,1` path:
+On every supported Intel Mac:
 
 - Maximum Processor State AC/DC: `95% / 95%`
 - Intel processor boost (`PERFBOOSTMODE`) AC/DC: `Disabled / Disabled`
-- Fans: `Maximum Safe RPM`, derived from the live verified SMC maximum values
 - Display settings: unchanged
 
-On other supported Intel Macs, Gaming Optimised remains processor-only unless that exact model is separately verified for fan writes.
+On the fully validated `MacBookPro16,1` path, Gaming Optimised also uses `Maximum Safe RPM`, derived from the live verified SMC maximum values. Other supported Intel Macs remain processor-only unless that exact model is separately verified for fan writes.
 
 ### Restore Original Settings
 

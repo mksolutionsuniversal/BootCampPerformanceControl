@@ -240,8 +240,7 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
         builder.AppendLine("-----------------");
         builder.AppendLine($"AppleSMC backend state: {fanStatus.BackendDisplayText}");
         builder.AppendLine($"Fan safety state: {fanStatus.SafetyDisplayText}");
-        builder.AppendLine($"Fan 0 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan0)}");
-        builder.AppendLine($"Fan 1 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan1)}");
+        AppendFanRpmLines(builder, fanStatus);
         builder.AppendLine($"Mode: {FormatFanMode(fanStatus)}");
         builder.AppendLine($"Write control state: {fanStatus.WriteControlDisplayText}");
         builder.AppendLine($"Fan status/details: {FormatValue(fanStatus.Details)}");
@@ -324,20 +323,31 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
                 processor.NumberOfLogicalProcessors);
     }
 
-    private static string FormatFanRpm(
-        FanControlStatus fanStatus,
-        FanReading? reading)
+    private static void AppendFanRpmLines(
+        StringBuilder builder,
+        FanControlStatus fanStatus)
     {
-        if (!fanStatus.IsAvailable || reading is null)
+        if (!fanStatus.IsAvailable)
         {
-            return Unavailable;
+            builder.AppendLine($"Fans: {Unavailable}");
+            return;
         }
 
-        return string.Format(
-            CultureInfo.InvariantCulture,
-            "{0:0} / {1:0} RPM",
-            reading.ActualRpm,
-            reading.MaximumRpm);
+        if (fanStatus.Fans.Count == 0)
+        {
+            builder.AppendLine("Fans: None reported (passive topology)");
+            return;
+        }
+
+        foreach (var fan in fanStatus.Fans)
+        {
+            builder.AppendLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "Fan {0} RPM: {1:0} / {2:0} RPM",
+                fan.Index,
+                fan.Reading.ActualRpm,
+                fan.Reading.MaximumRpm));
+        }
     }
 
     private static string FormatFanMode(FanControlStatus fanStatus)

@@ -77,14 +77,20 @@ internal sealed class TestFanCapabilityProbe : IFanCapabilityProbe
     {
         return new FanSmcSnapshot(
             new SmcValue(new SmcKeyInfo("FNum", 1, "ui8 ", 0x80), [2]),
-            CreateFloat32Value("F0Mx", 5321.25f),
-            CreateFloat32Value("F1Mx", 4789.5f),
-            CreateFloat32Value("F0Ac", 1800f),
-            CreateFloat32Value("F1Ac", 1700f),
-            new SmcValue(new SmcKeyInfo("F0Md", 1, "ui8 ", 0xD0), [0]),
-            new SmcValue(new SmcKeyInfo("F1Md", 1, "ui8 ", 0xD0), [0]),
-            CreateFloat32Value("F0Tg", 1800f),
-            CreateFloat32Value("F1Tg", 1700f));
+            [
+                new FanSmcChannelSnapshot(
+                    new FanIndex(0),
+                    CreateFloat32Value("F0Mx", 5321.25f),
+                    CreateFloat32Value("F0Ac", 1800f),
+                    new SmcValue(new SmcKeyInfo("F0Md", 1, "ui8 ", 0xD0), [0]),
+                    CreateFloat32Value("F0Tg", 1800f)),
+                new FanSmcChannelSnapshot(
+                    new FanIndex(1),
+                    CreateFloat32Value("F1Mx", 4789.5f),
+                    CreateFloat32Value("F1Ac", 1700f),
+                    new SmcValue(new SmcKeyInfo("F1Md", 1, "ui8 ", 0xD0), [0]),
+                    CreateFloat32Value("F1Tg", 1700f))
+            ]);
     }
 
     public static SmcValue CreateFloat32Value(string key, float value)
