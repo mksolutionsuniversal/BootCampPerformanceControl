@@ -9,6 +9,8 @@ namespace BootCampPerformanceControl;
 
 public partial class MainWindow : Window
 {
+    private const string GamingOptimisedProfileId = "gaming-optimised";
+    private const string RestoreProfileId = "restore";
     private static readonly TimeSpan FanMonitoringShutdownTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ActiveOperationShutdownTimeout = TimeSpan.FromSeconds(10);
 
@@ -54,6 +56,9 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         Closed += OnClosed;
         _systemTrayIcon.OpenRequested += OnTrayOpenRequested;
+        _systemTrayIcon.ProfileActionsStateRefreshRequested += OnTrayProfileActionsStateRefreshRequested;
+        _systemTrayIcon.GamingOptimisedRequested += OnTrayGamingOptimisedRequested;
+        _systemTrayIcon.RestoreOriginalSettingsRequested += OnTrayRestoreOriginalSettingsRequested;
         _systemTrayIcon.ExitRequested += OnTrayExitRequested;
 
         if (System.Windows.Application.Current is { } application)
@@ -289,6 +294,51 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(RestoreFromSystemTray);
     }
 
+    private void OnTrayProfileActionsStateRefreshRequested(object? sender, EventArgs e)
+    {
+        RunOnDispatcher(RefreshTrayProfileActionsState);
+    }
+
+    private void OnTrayGamingOptimisedRequested(object? sender, EventArgs e)
+    {
+        RunOnDispatcher(() => TryExecuteTrayProfileAction(GamingOptimisedProfileId));
+    }
+
+    private void OnTrayRestoreOriginalSettingsRequested(object? sender, EventArgs e)
+    {
+        RunOnDispatcher(() => TryExecuteTrayProfileAction(RestoreProfileId));
+    }
+
+    private void RefreshTrayProfileActionsState()
+    {
+        var profileButtons = DataContext is MainViewModel viewModel
+            ? viewModel.ProfileButtons
+            : [];
+
+        _systemTrayIcon.SetProfileActionsEnabled(
+            ProfileButtonCommandInvoker.CanExecute(profileButtons, GamingOptimisedProfileId),
+            ProfileButtonCommandInvoker.CanExecute(profileButtons, RestoreProfileId));
+    }
+
+    private void TryExecuteTrayProfileAction(string profileId)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            ProfileButtonCommandInvoker.TryExecute(viewModel.ProfileButtons, profileId);
+        }
+    }
+
+    private void RunOnDispatcher(Action action)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        Dispatcher.Invoke(action);
+    }
+
     private void OnTrayExitRequested(object? sender, EventArgs e)
     {
         Dispatcher.BeginInvoke(() =>
@@ -313,6 +363,9 @@ public partial class MainWindow : Window
         }
 
         _systemTrayIcon.OpenRequested -= OnTrayOpenRequested;
+        _systemTrayIcon.ProfileActionsStateRefreshRequested -= OnTrayProfileActionsStateRefreshRequested;
+        _systemTrayIcon.GamingOptimisedRequested -= OnTrayGamingOptimisedRequested;
+        _systemTrayIcon.RestoreOriginalSettingsRequested -= OnTrayRestoreOriginalSettingsRequested;
         _systemTrayIcon.ExitRequested -= OnTrayExitRequested;
         _systemTrayIcon.Dispose();
     }
