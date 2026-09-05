@@ -62,6 +62,54 @@ public partial class MainWindow : Window
         }
     }
 
+    internal void ShowForStartup(bool startMinimizedToTray)
+    {
+        if (!startMinimizedToTray)
+        {
+            Show();
+            return;
+        }
+
+        var originalOpacity = Opacity;
+        var originalShowActivated = ShowActivated;
+        var originalShowInTaskbar = ShowInTaskbar;
+
+        void RestorePresentation()
+        {
+            Opacity = originalOpacity;
+            ShowActivated = originalShowActivated;
+            ShowInTaskbar = originalShowInTaskbar;
+        }
+
+        void OnStartupLoaded(object sender, RoutedEventArgs e)
+        {
+            Loaded -= OnStartupLoaded;
+
+            // OnLoaded was registered by the constructor before this temporary
+            // handler, so normal monitoring, refresh, and startup recovery have
+            // already been initiated before the window is hidden.
+            HideToSystemTray();
+            RestorePresentation();
+            _logger.Info("Application started minimized to the system tray.");
+        }
+
+        Loaded += OnStartupLoaded;
+        Opacity = 0;
+        ShowActivated = false;
+        ShowInTaskbar = false;
+
+        try
+        {
+            Show();
+        }
+        catch
+        {
+            Loaded -= OnStartupLoaded;
+            RestorePresentation();
+            throw;
+        }
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (_isLoaded)

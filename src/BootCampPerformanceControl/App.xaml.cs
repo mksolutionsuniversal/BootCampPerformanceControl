@@ -58,7 +58,7 @@ public partial class App : System.Windows.Application
             var composition = AppCompositionRoot.CreateMainApplication(logger);
             var window = new MainWindow(composition);
             MainWindow = window;
-            window.Show();
+            window.ShowForStartup(composition.ViewModel.StartMinimizedToTray);
         }
         catch (Exception exception)
         {
