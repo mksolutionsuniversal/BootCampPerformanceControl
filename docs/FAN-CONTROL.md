@@ -162,6 +162,37 @@ POWER -> exact saved processor state
 
 BCPC never re-applies Maximum Safe RPM merely because processor Restore fails afterward.
 
+## Clean exit behaviour
+
+A clean application exit is intentionally different from **Restore Original Settings**.
+
+When BCPC owns an active fan override and the user exits the application cleanly:
+
+- BCPC restores the owned fans to verified Apple Auto,
+- the fan-ownership marker is cleared only after verified recovery,
+- the processor remains in its current Gaming state,
+- the original processor Restore snapshot remains available.
+
+This preserves fan safety without silently undoing the user's processor profile.
+
+## Partial Gaming and fan-only resume
+
+After a clean exit from an active Gaming session, a later BCPC start can observe this valid split state:
+
+```text
+Processor Maximum State: still Gaming
+Processor boost:         still Gaming
+Processor Restore snapshot: present
+Fans:                     Apple Auto
+Fan ownership marker:     absent
+```
+
+BCPC reports this truthfully as **Partial Gaming** rather than pretending the full Gaming transaction is active.
+
+On the verified `MacBookPro16,1` path, a fan-only resume can return the fans to Maximum Safe RPM without rewriting the processor settings and without recreating or replacing the original processor Restore snapshot.
+
+A later explicit **Restore Original Settings** still restores the exact processor state captured before the original Gaming transaction.
+
 ## Crash recovery
 
 The ownership marker is durable across process termination.
@@ -189,11 +220,22 @@ The complete production path was physically validated on a real `MacBookPro16,1`
 - both fans at Maximum Safe RPM in Manual mode,
 - CPU Maximum State `95% / 95%`,
 - processor boost disabled,
+- clean application exit returning BCPC-owned fans to Apple Auto while preserving the Gaming processor state and Restore snapshot,
+- truthful Partial Gaming detection after restart,
+- fan-only resume to Maximum Safe RPM without processor or snapshot rewrites,
 - normal Restore to Apple Auto + exact original processor state,
 - forced BCPC process termination while Gaming Optimised was active,
 - durable fan ownership and processor snapshot after the crash,
 - automatic startup fan-only recovery,
 - final explicit processor Restore.
+
+## Native BootCampSmc research path
+
+BCPC also contains an independently authored experimental KMDF research driver under `drivers/BootCampSmc/`.
+
+That driver is **not** the production fan-control dependency for stable `0.4.0` and is **not** included in release packages. Its physically completed research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
+
+See [../drivers/BootCampSmc/README.md](../drivers/BootCampSmc/README.md) for the research-driver safety boundary.
 
 ## Future models
 

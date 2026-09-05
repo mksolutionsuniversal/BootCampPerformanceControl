@@ -33,6 +33,8 @@ Empirical workload testing on the primary machine established the current Gaming
 
 On this machine, `95%` removed the tested Turbo Boost behaviour, reduced CPU/GPU temperatures by roughly 8–10 °C in comparable CS2 testing, and avoided observed thermal throttling while preserving essentially the same gameplay smoothness. Lower values around `90%` caused noticeable performance loss and are therefore not used as the verified Gaming Optimised default.
 
+The `95%` value is specific to this verified model and workload evidence. It must not be treated as a universal Intel-Mac preset.
+
 ### Fan behaviour
 
 Production fan control has been physically validated end-to-end:
@@ -45,6 +47,14 @@ Production fan control has been physically validated end-to-end:
 6. Read-back verifies Manual mode and Maximum Safe RPM.
 7. Processor settings are applied only after the fan phase succeeds.
 8. Restore returns fans to Apple Auto before restoring the exact saved processor state.
+
+### Clean exit and Partial Gaming lifecycle
+
+A clean BCPC exit while Gaming Optimised is active intentionally restores BCPC-owned fans to verified Apple Auto but leaves the processor Gaming state and original processor Restore snapshot intact.
+
+On a later start, BCPC truthfully reports this split state as **Partial Gaming**. On the verified `MacBookPro16,1` path, fan-only resume can return the fans to Maximum Safe RPM without rewriting the processor settings and without recreating or replacing the original processor Restore snapshot.
+
+A later explicit Restore still returns the exact processor state captured before the original Gaming transaction.
 
 ### Crash recovery
 
@@ -62,6 +72,21 @@ Observed and verified behaviour:
 - processor settings remained in the Gaming state,
 - explicit Restore then returned the exact original processor state and removed the processor snapshot.
 
+### Stable 0.4.0 qualification
+
+The stable `0.4.0` release qualification on this model included:
+
+- processor Apply / exact read-back / Restore,
+- production fan monitoring,
+- Maximum Safe RPM apply and verified read-back,
+- clean-exit Apple Auto fan recovery with processor state preserved,
+- truthful Partial Gaming detection,
+- fan-only resume without processor/snapshot rewrites,
+- forced-process-crash recovery,
+- final exact processor Restore,
+- `557/557` automated release tests,
+- hardened ZIP-only release packaging and final stable smoke validation.
+
 ## MacBookPro14,3 — T1 test machine
 
 `MacBookPro14,3` is intentionally not treated as equivalent to `MacBookPro16,1`.
@@ -76,7 +101,7 @@ Known project state:
 - `99%` Maximum Processor State improved behaviour in informal testing
 - a reliable `95%` benchmark remains deferred until cooling-system maintenance is completed
 
-BCPC production fan writes remain **disabled** on this model. Independent T1 read/write/read-back/restore validation is required before any whitelist expansion.
+BCPC production fan writes remain **disabled** on this model. Independent T1 fan read/write/read-back/restore validation is required before any whitelist expansion.
 
 ## What “T2 support” means in 0.4.0
 
@@ -112,3 +137,11 @@ The official upstream release page for the tested version is:
 https://github.com/crystalidea/macs-fan-control/releases/tag/v1.5.16
 
 See [Fan Control and AppleSMC Compatibility Backend](FAN-CONTROL.md) for installation and safety details.
+
+## Native BootCampSmc research driver
+
+The repository also contains an independently authored experimental KMDF research driver under `drivers/BootCampSmc/`.
+
+Its physically completed T2 research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
+
+This research driver is not the production fan-control dependency for stable `0.4.0`, is not included in stable release packages, and must not be interpreted as generic T1/T2 support.
