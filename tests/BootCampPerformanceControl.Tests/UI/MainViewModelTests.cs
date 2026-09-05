@@ -25,7 +25,8 @@ public sealed class MainViewModelTests
         {
             Options = new ApplicationOptionsSnapshot(
                 ApplicationCloseBehavior.ExitApplication,
-                StartWithWindows: true)
+                StartWithWindows: true,
+                StartMinimizedToTray: true)
         };
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
@@ -35,9 +36,11 @@ public sealed class MainViewModelTests
         Assert.False(viewModel.MinimizeToTrayOnClose);
         Assert.True(viewModel.ExitApplicationOnClose);
         Assert.True(viewModel.StartWithWindows);
+        Assert.True(viewModel.StartMinimizedToTray);
         Assert.Equal(1, optionsService.LoadCallCount);
         Assert.Equal(0, optionsService.SetCloseBehaviorCallCount);
         Assert.Equal(0, optionsService.SetStartWithWindowsCallCount);
+        Assert.Equal(0, optionsService.SetStartMinimizedToTrayCallCount);
     }
 
     [Fact]
@@ -52,17 +55,22 @@ public sealed class MainViewModelTests
         Assert.True(viewModel.MinimizeToTrayOnClose);
         Assert.False(viewModel.ExitApplicationOnClose);
         Assert.False(viewModel.StartWithWindows);
+        Assert.False(viewModel.StartMinimizedToTray);
 
         viewModel.ExitApplicationOnClose = true;
         viewModel.StartWithWindows = true;
+        viewModel.StartMinimizedToTray = true;
 
         Assert.False(viewModel.MinimizeToTrayOnClose);
         Assert.True(viewModel.ExitApplicationOnClose);
         Assert.True(viewModel.StartWithWindows);
+        Assert.True(viewModel.StartMinimizedToTray);
         Assert.Equal(ApplicationCloseBehavior.ExitApplication, optionsService.LastCloseBehavior);
         Assert.True(optionsService.LastStartWithWindows);
+        Assert.True(optionsService.LastStartMinimizedToTray);
         Assert.Equal(1, optionsService.SetCloseBehaviorCallCount);
         Assert.Equal(1, optionsService.SetStartWithWindowsCallCount);
+        Assert.Equal(1, optionsService.SetStartMinimizedToTrayCallCount);
     }
 
     [Fact]
@@ -84,14 +92,17 @@ public sealed class MainViewModelTests
 
         viewModel.ExitApplicationOnClose = true;
         viewModel.StartWithWindows = true;
+        viewModel.StartMinimizedToTray = true;
 
         Assert.True(viewModel.MinimizeToTrayOnClose);
         Assert.False(viewModel.ExitApplicationOnClose);
         Assert.False(viewModel.StartWithWindows);
+        Assert.False(viewModel.StartMinimizedToTray);
         Assert.Contains(nameof(MainViewModel.MinimizeToTrayOnClose), changedProperties);
         Assert.Contains(nameof(MainViewModel.ExitApplicationOnClose), changedProperties);
         Assert.Contains(nameof(MainViewModel.StartWithWindows), changedProperties);
-        Assert.Equal(2, logger.Errors.Count);
+        Assert.Contains(nameof(MainViewModel.StartMinimizedToTray), changedProperties);
+        Assert.Equal(3, logger.Errors.Count);
         Assert.All(logger.Errors, error => Assert.Same(expectedException, error.Exception));
     }
 
@@ -4555,9 +4566,13 @@ public sealed class MainViewModelTests
 
         public int SetStartWithWindowsCallCount { get; private set; }
 
+        public int SetStartMinimizedToTrayCallCount { get; private set; }
+
         public ApplicationCloseBehavior? LastCloseBehavior { get; private set; }
 
         public bool? LastStartWithWindows { get; private set; }
+
+        public bool? LastStartMinimizedToTray { get; private set; }
 
         public ApplicationOptionsSnapshot Load()
         {
@@ -4587,6 +4602,18 @@ public sealed class MainViewModelTests
             }
 
             LastStartWithWindows = enabled;
+        }
+
+        public void SetStartMinimizedToTray(bool enabled)
+        {
+            SetStartMinimizedToTrayCallCount++;
+
+            if (SetException is not null)
+            {
+                throw SetException;
+            }
+
+            LastStartMinimizedToTray = enabled;
         }
     }
 }

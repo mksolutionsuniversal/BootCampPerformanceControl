@@ -405,6 +405,11 @@ public sealed class MainViewModelThreadAffinityTests
         {
             throw new NotSupportedException();
         }
+
+        public void SetStartMinimizedToTray(bool enabled)
+        {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class StubDiagnosticReportService : IDiagnosticReportService

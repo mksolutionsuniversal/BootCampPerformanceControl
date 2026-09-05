@@ -74,6 +74,8 @@ public sealed class MainViewModel : ViewModelBase
     private ApplicationCloseBehavior _closeBehavior =
         ApplicationOptionsSnapshot.Default.CloseBehavior;
     private bool _startWithWindows;
+    private bool _startMinimizedToTray =
+        ApplicationOptionsSnapshot.Default.StartMinimizedToTray;
     private string? _fanMonitoringModel;
     private FanBackendState? _lastLoggedFanBackendState;
     private FanSafetyState? _lastLoggedFanSafetyState;
@@ -429,6 +431,35 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged();
                 StatusMessage = "Windows startup option could not be changed. Check the log for details.";
                 _logger.Error("Updating the Windows startup option failed.", exception);
+            }
+        }
+    }
+
+    public bool StartMinimizedToTray
+    {
+        get => _startMinimizedToTray;
+        set
+        {
+            if (value == _startMinimizedToTray)
+            {
+                return;
+            }
+
+            try
+            {
+                _applicationOptionsService.SetStartMinimizedToTray(value);
+                _startMinimizedToTray = value;
+                OnPropertyChanged();
+                StatusMessage = value
+                    ? "BootCamp Performance Control will start minimized to the system tray."
+                    : "BootCamp Performance Control will show its main window when started.";
+                _logger.Info($"Start-minimized-to-tray option changed. Enabled: {value}.");
+            }
+            catch (Exception exception)
+            {
+                OnPropertyChanged();
+                StatusMessage = "Start-minimized-to-tray option could not be changed. Check the log for details.";
+                _logger.Error("Updating the start-minimized-to-tray option failed.", exception);
             }
         }
     }
@@ -1448,11 +1479,13 @@ public sealed class MainViewModel : ViewModelBase
             var options = _applicationOptionsService.Load();
             _closeBehavior = options.CloseBehavior;
             _startWithWindows = options.StartWithWindows;
+            _startMinimizedToTray = options.StartMinimizedToTray;
         }
         catch (Exception exception)
         {
             _closeBehavior = ApplicationOptionsSnapshot.Default.CloseBehavior;
             _startWithWindows = ApplicationOptionsSnapshot.Default.StartWithWindows;
+            _startMinimizedToTray = ApplicationOptionsSnapshot.Default.StartMinimizedToTray;
             _logger.Error(
                 "Application options could not be loaded. Safe defaults will be used.",
                 exception);

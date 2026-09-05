@@ -19,6 +19,7 @@ public sealed class WindowsApplicationOptionsServiceTests
 
         Assert.Equal(ApplicationCloseBehavior.MinimizeToTray, options.CloseBehavior);
         Assert.False(options.StartWithWindows);
+        Assert.False(options.StartMinimizedToTray);
     }
 
     [Fact]
@@ -33,12 +34,17 @@ public sealed class WindowsApplicationOptionsServiceTests
             WindowsApplicationOptionsService.RunKeyPath,
             WindowsApplicationOptionsService.StartupValueName,
             $"\"{ExecutablePath}\"");
+        registry.SetString(
+            WindowsApplicationOptionsService.PreferencesKeyPath,
+            WindowsApplicationOptionsService.StartMinimizedToTrayValueName,
+            bool.TrueString);
         var service = CreateService(registry);
 
         var options = service.Load();
 
         Assert.Equal(ApplicationCloseBehavior.ExitApplication, options.CloseBehavior);
         Assert.True(options.StartWithWindows);
+        Assert.True(options.StartMinimizedToTray);
     }
 
     [Fact]
@@ -70,6 +76,7 @@ public sealed class WindowsApplicationOptionsServiceTests
 
         Assert.Equal(ApplicationCloseBehavior.MinimizeToTray, options.CloseBehavior);
         Assert.True(options.StartWithWindows);
+        Assert.False(options.StartMinimizedToTray);
     }
 
     [Fact]
@@ -86,6 +93,33 @@ public sealed class WindowsApplicationOptionsServiceTests
                 WindowsApplicationOptionsService.PreferencesKeyPath,
                 WindowsApplicationOptionsService.CloseBehaviorValueName));
         Assert.Single(registry.Values);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetStartMinimizedToTray_WritesOnlyIndependentApplicationPreference(bool enabled)
+    {
+        var registry = new FakeCurrentUserRegistry();
+        registry.SetString(
+            WindowsApplicationOptionsService.RunKeyPath,
+            WindowsApplicationOptionsService.StartupValueName,
+            $"\"{ExecutablePath}\"");
+        var service = CreateService(registry);
+
+        service.SetStartMinimizedToTray(enabled);
+
+        Assert.Equal(
+            enabled.ToString(),
+            registry.GetString(
+                WindowsApplicationOptionsService.PreferencesKeyPath,
+                WindowsApplicationOptionsService.StartMinimizedToTrayValueName));
+        Assert.Equal(
+            $"\"{ExecutablePath}\"",
+            registry.GetString(
+                WindowsApplicationOptionsService.RunKeyPath,
+                WindowsApplicationOptionsService.StartupValueName));
+        Assert.Equal(2, registry.Values.Count);
     }
 
     [Fact]

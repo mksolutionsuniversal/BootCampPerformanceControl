@@ -9,6 +9,7 @@ internal sealed class WindowsApplicationOptionsService : IApplicationOptionsServ
     internal const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     internal const string CloseBehaviorValueName = "CloseBehavior";
     internal const string StartupValueName = "BootCampPerformanceControl";
+    internal const string StartMinimizedToTrayValueName = "StartMinimizedToTray";
 
     private readonly ICurrentUserRegistry _registry;
     private readonly Func<string?> _getExecutablePath;
@@ -36,10 +37,15 @@ internal sealed class WindowsApplicationOptionsService : IApplicationOptionsServ
         var configuredStartupCommand = _registry.GetString(
             RunKeyPath,
             StartupValueName);
+        var startMinimizedToTray = ParseBooleanPreference(
+            _registry.GetString(
+                PreferencesKeyPath,
+                StartMinimizedToTrayValueName));
 
         return new ApplicationOptionsSnapshot(
             closeBehavior,
-            configuredStartupCommand is not null);
+            configuredStartupCommand is not null,
+            startMinimizedToTray);
     }
 
     public void SetCloseBehavior(ApplicationCloseBehavior closeBehavior)
@@ -76,6 +82,14 @@ internal sealed class WindowsApplicationOptionsService : IApplicationOptionsServ
             startupCommand);
     }
 
+    public void SetStartMinimizedToTray(bool enabled)
+    {
+        _registry.SetString(
+            PreferencesKeyPath,
+            StartMinimizedToTrayValueName,
+            enabled.ToString());
+    }
+
     private static ApplicationCloseBehavior ParseCloseBehavior(string? storedValue)
     {
         return storedValue switch
@@ -86,6 +100,11 @@ internal sealed class WindowsApplicationOptionsService : IApplicationOptionsServ
                 ApplicationCloseBehavior.MinimizeToTray,
             _ => ApplicationOptionsSnapshot.Default.CloseBehavior
         };
+    }
+
+    private static bool ParseBooleanPreference(string? storedValue)
+    {
+        return bool.TryParse(storedValue, out var value) && value;
     }
 
     private static string? TryCreateStartupCommand(string? executablePath)

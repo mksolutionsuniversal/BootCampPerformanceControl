@@ -278,6 +278,17 @@
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </GroupBox>
+
+                        <GroupBox Header="Startup appearance">
+                            <StackPanel Margin="4">
+                                <CheckBox Content="Start minimized to the system tray"
+                                          IsChecked="{Binding StartMinimizedToTray, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,8" />
+                                <TextBlock Text="This applies to normal application launches and is independent from Start With Windows."
+                                           Foreground="#666666"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </GroupBox>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
