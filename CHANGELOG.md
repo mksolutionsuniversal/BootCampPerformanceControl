@@ -4,6 +4,18 @@ All notable changes to BootCamp Performance Control are documented here.
 
 The project follows Semantic Versioning. Release candidates are pre-release builds and should not be treated as final stable releases.
 
+## [Unreleased]
+
+### Documentation
+
+- Polished the repository landing README after the stable `0.4.0` release.
+- Synchronized the public fan-control and hardware-compatibility documentation with the completed S0-S7 stabilisation record.
+- Documented clean-exit Apple Auto recovery and truthful Partial Gaming / fan-only resume behaviour.
+- Updated the experimental `BootCampSmc` research-driver README to reflect the physically completed Gate 5D-B checkpoint rather than the older Gate 4C phase.
+- Added contributor and support guidance for hardware-safe development and issue reporting.
+
+No runtime, hardware-control, release-package, or `v0.4.0` binary changes are included in these post-release documentation updates.
+
 ## [0.4.0] - 2026-09-05
 
 ### Stable release
