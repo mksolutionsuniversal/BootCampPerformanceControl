@@ -15,6 +15,8 @@ internal sealed class WindowsSystemTrayIcon : IDisposable
     private readonly DrawingIcon _icon;
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _openMenuItem;
+    private readonly ToolStripMenuItem _gamingOptimisedMenuItem;
+    private readonly ToolStripMenuItem _restoreOriginalSettingsMenuItem;
     private readonly ToolStripMenuItem _exitMenuItem;
     private readonly NotifyIcon _notifyIcon;
 
@@ -25,9 +27,20 @@ internal sealed class WindowsSystemTrayIcon : IDisposable
     {
         _icon = LoadApplicationIcon();
         _openMenuItem = new ToolStripMenuItem("Open BootCamp Performance Control");
+        _gamingOptimisedMenuItem = new ToolStripMenuItem("Gaming Optimised")
+        {
+            Enabled = false
+        };
+        _restoreOriginalSettingsMenuItem = new ToolStripMenuItem("Restore Original Settings")
+        {
+            Enabled = false
+        };
         _exitMenuItem = new ToolStripMenuItem("Exit");
         _contextMenu = new ContextMenuStrip();
         _contextMenu.Items.Add(_openMenuItem);
+        _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add(_gamingOptimisedMenuItem);
+        _contextMenu.Items.Add(_restoreOriginalSettingsMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(_exitMenuItem);
 
@@ -40,14 +53,32 @@ internal sealed class WindowsSystemTrayIcon : IDisposable
         };
 
         _openMenuItem.Click += OnOpenRequested;
+        _gamingOptimisedMenuItem.Click += OnGamingOptimisedRequested;
+        _restoreOriginalSettingsMenuItem.Click += OnRestoreOriginalSettingsRequested;
         _exitMenuItem.Click += OnExitRequested;
+        _contextMenu.Opening += OnContextMenuOpening;
         _notifyIcon.DoubleClick += OnOpenRequested;
         _notifyIcon.BalloonTipClicked += OnOpenRequested;
     }
 
     public event EventHandler? OpenRequested;
 
+    public event EventHandler? ProfileActionsStateRefreshRequested;
+
+    public event EventHandler? GamingOptimisedRequested;
+
+    public event EventHandler? RestoreOriginalSettingsRequested;
+
     public event EventHandler? ExitRequested;
+
+    public void SetProfileActionsEnabled(
+        bool gamingOptimisedEnabled,
+        bool restoreOriginalSettingsEnabled)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        _gamingOptimisedMenuItem.Enabled = gamingOptimisedEnabled;
+        _restoreOriginalSettingsMenuItem.Enabled = restoreOriginalSettingsEnabled;
+    }
 
     public void Show()
     {
@@ -87,7 +118,10 @@ internal sealed class WindowsSystemTrayIcon : IDisposable
         _isDisposed = true;
         _notifyIcon.Visible = false;
         _openMenuItem.Click -= OnOpenRequested;
+        _gamingOptimisedMenuItem.Click -= OnGamingOptimisedRequested;
+        _restoreOriginalSettingsMenuItem.Click -= OnRestoreOriginalSettingsRequested;
         _exitMenuItem.Click -= OnExitRequested;
+        _contextMenu.Opening -= OnContextMenuOpening;
         _notifyIcon.DoubleClick -= OnOpenRequested;
         _notifyIcon.BalloonTipClicked -= OnOpenRequested;
         _notifyIcon.Dispose();
@@ -122,6 +156,21 @@ internal sealed class WindowsSystemTrayIcon : IDisposable
     private void OnOpenRequested(object? sender, EventArgs e)
     {
         OpenRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        ProfileActionsStateRefreshRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnGamingOptimisedRequested(object? sender, EventArgs e)
+    {
+        GamingOptimisedRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnRestoreOriginalSettingsRequested(object? sender, EventArgs e)
+    {
+        RestoreOriginalSettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnExitRequested(object? sender, EventArgs e)
