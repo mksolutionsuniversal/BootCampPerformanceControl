@@ -1,6 +1,6 @@
 # BootCampSmc experimental research driver
 
-> **Status: experimental research only.** `BootCampSmc.sys` is not the production fan-control dependency for stable BCPC `0.4.0`, is not included in stable release packages, and must not be presented as a generally supported Apple SMC driver.
+> **Status: experimental research only.** `BootCampSmc.sys` is not the production fan-control dependency for stable BCPC `0.4.0` or release candidate `0.5.0-rc.1`, is not included in their release packages, and must not be presented as a generally supported Apple SMC driver.
 
 `BootCampSmc` is an independently authored KMDF function-driver research path for BootCamp Performance Control.
 
@@ -10,7 +10,7 @@ The current physically completed checkpoint is **Gate 5D-B** on the project's pr
 
 ## Product relationship
 
-Stable BCPC `0.4.0` currently uses a different production path:
+Current public BCPC production releases use a different fan-control path:
 
 ```text
 BootCamp Performance Control
@@ -26,9 +26,25 @@ BootCamp Performance Control
                     research / fallback / future option
 ```
 
+Stable `0.4.0` uses an exact `MacBookPro16,1` production fan-write gate.
+
+Release candidate `0.5.0-rc.1` uses a live guarded T2-style SMC capability-family gate in the application production backend. That broader runtime application policy **does not** change the native research driver's current Gate 5D-B boundary and does not make `BootCampSmc.sys` a production dependency.
+
 BCPC does not redistribute Macs Fan Control, `MacsFanControl.exe`, `macsfancontrol_setup.exe`, or `applesmc.sys`.
 
 The native research driver is paused as a product dependency because public kernel-driver distribution introduces signing/certification and support complexity. That decision is practical; Gate 5D-B itself physically passed.
+
+## Current release-candidate relationship
+
+Published `0.5.0-rc.1` identity:
+
+```text
+Tag:           v0.5.0-rc.1
+Source commit: 27511afee7e1ae092bb53e63d8c1c96b73004c81
+Tests:         589 / 589 PASS
+```
+
+The published RC ZIP intentionally excludes `.sys`, `.inf` and `.cat` driver-package files. The release-packaging safety scan enforces that boundary.
 
 ## Independently verified interoperability facts
 
@@ -69,7 +85,7 @@ The current implementation deliberately does **not** provide:
 - a production BCPC fan-control device interface,
 - a stable public kernel-driver API.
 
-The constrained command path requires a writable non-cached MMIO mapping because issuing an SMC read command itself requires bounded MMIO register writes. That does not make the current driver an arbitrary-write transport.
+The constrained command path requires a writable non-cached MMIO mapping because issuing an SMC read/metadata command itself requires bounded MMIO register writes. That does not make the current driver an arbitrary-write transport.
 
 ## Gate history
 
@@ -164,30 +180,33 @@ Gate 5D-B is therefore a **closed experimental fact** and should not be rerun me
 
 ## What remains future work
 
-The native driver should not be expanded casually just because Gate 5D-B passed.
+The native driver should not be expanded casually just because Gate 5D-B passed or because the application now recognizes a broader verified T2-style capability family.
 
 Any future native-driver work must continue as small, independently reviewable safety gates.
 
 Potential later research may include only the minimum additional operations required by a clearly defined product need.
 
-If constrained fan writes are ever added to this native path, they must preserve the same BCPC semantics already required by the production application:
+If constrained fan writes are ever added to this native path, they must preserve the same product semantics already required by the production application:
 
-- exact model whitelist,
-- fresh capability validation,
+- fresh runtime capability validation,
+- a model/capability policy appropriate to the new native path,
 - Apple Auto and Maximum Safe RPM only,
 - ownership persisted before the first write,
 - read-back verification,
 - rollback/failsafe behaviour,
-- no arbitrary SMC write API.
+- no arbitrary SMC write API,
+- no assumption that T1 and T2 use the same transport or encoding.
+
+Do **not** mechanically copy the application RC's capability-family gate into the native driver without a separate design and physical validation review. The two paths have different trust and deployment boundaries.
 
 ## Safety rules
 
 - Never hard-code a physical MMIO base address.
-- Never generalize the T2 `MacBookPro16,1` result to T1, classic Intel Macs, or other T2 models.
+- Never generalize the `MacBookPro16,1` physical Gate 5D-B result to T1, classic Intel Macs, or another T2 model.
 - Never expose arbitrary MMIO or arbitrary SMC access for convenience.
 - Never expose generic fan RPM writes when the product requirement is only Apple Auto / Maximum Safe RPM.
 - Never add CPU MSR, firmware, PCI config-space or arbitrary physical-memory operations to this driver as a shortcut.
-- Every hardware-affecting expansion must be static-reviewed first and physically validated on the exact target model.
+- Every hardware-affecting expansion must be static-reviewed first and physically validated on the intended target hardware.
 - A failed or ambiguous validation result means the capability remains disabled.
 
 ## Legal and clean-room boundary
@@ -206,6 +225,6 @@ See:
 
 ## Current conclusion
 
-The native T2 transport research is technically useful and has reached a working Gate 5D-B checkpoint, but stable BCPC `0.4.0` intentionally ships **without** this kernel driver.
+The native T2 transport research is technically useful and has reached a working Gate 5D-B checkpoint, but both stable BCPC `0.4.0` and release candidate `0.5.0-rc.1` intentionally ship **without** this kernel driver.
 
 The public application must remain usable and safe even if native-driver research is paused indefinitely.
