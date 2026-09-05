@@ -1,5 +1,6 @@
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
+using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
@@ -189,8 +190,8 @@ public sealed class CleanExitFanRecoveryServiceTests
     {
         return new FanOverrideOwnershipMarker(
             model,
-            Fan0MaximumRpm: 5321.25f,
-            Fan1MaximumRpm: 4789.5f,
+            Fan0ExpectedTargetRpm: 5321.25f,
+            Fan1ExpectedTargetRpm: 4789.5f,
             CreatedAtUtc: DateTimeOffset.Parse("2026-09-05T09:37:15+00:00"));
     }
 
