@@ -125,10 +125,14 @@ BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, o
 
 ### Release build
 
-1. Download the `win-x64` ZIP from the BCPC GitHub Releases page.
-2. Extract it to a normal user-writable folder.
-3. Run `BootCampPerformanceControl.exe`.
-4. For verified fan control, separately install the tested Macs Fan Control dependency described above.
+1. Download the `win-x64` ZIP and accompanying `.sha256` file from the BCPC GitHub Releases page.
+2. Optionally verify the ZIP's SHA-256 against the accompanying `.sha256` file.
+3. Extract the ZIP to a normal user-writable folder.
+4. Run `BootCampPerformanceControl.exe`.
+
+For verified fan control, separately install the tested Macs Fan Control
+dependency described above. BCPC does **not** bundle Macs Fan Control, AppleSMC,
+or any third-party driver.
 
 The published Windows x64 build is self-contained and includes the required .NET runtime files.
 
@@ -161,7 +165,8 @@ Create the self-contained Windows x64 release package:
 powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1
 ```
 
-The publish script creates a versioned directory and ZIP and prints the ZIP SHA-256 hash.
+The publish script creates a versioned self-contained `win-x64` directory, ZIP,
+and accompanying ZIP `.sha256` file in `artifacts`.
 
 ## Documentation
 
