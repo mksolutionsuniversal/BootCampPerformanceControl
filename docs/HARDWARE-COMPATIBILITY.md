@@ -2,17 +2,95 @@
 
 BootCamp Performance Control targets Intel Macs running Windows through Boot Camp.
 
-Processor-profile availability and fan-write availability are intentionally separate concepts. A machine may be eligible for Windows processor power-management changes while remaining completely blocked from Apple SMC fan writes.
+Processor-profile availability and fan-write availability are intentionally separate concepts. A machine may be eligible for the conservative Windows processor profile while fan writes are unavailable, declined or blocked by the runtime safety gate.
+
+## Release status
+
+- Stable `0.4.0`: exact `MacBookPro16,1` production fan-write gate.
+- Release candidate `0.5.0-rc.1`: dynamic fan topology plus verified T2-style SMC capability-family write gate.
+- End-to-end physical fan-write validation currently completed on `MacBookPro16,1` only.
+
+Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is **not** a statement that the detected Mac model has been physically tested by the BCPC project.
 
 ## Compatibility matrix
 
-| Model | Platform | Processor profile | Fan monitoring | Fan writes | Crash fan recovery | Validation status |
-|---|---|---:|---:|---:|---:|---|
-| `MacBookPro16,1` | MacBook Pro 16-inch (2019), Intel, Apple T2 | Yes | Yes | Yes | Yes | **Physically verified** |
-| `MacBookPro14,3` | MacBook Pro 15-inch (2017), Intel, Apple T1 | Observed / capability-gated | Not production-verified | **Disabled** | **Disabled** | Processor behaviour observed; fan validation pending |
-| Other Intel Macs | Intel Boot Camp | Capability-gated | Model-dependent / not claimed | **Disabled unless explicitly whitelisted** | Disabled unless fan writes are verified | Not individually fan-write validated |
+| Model / family | Processor profile | Fan monitoring | Fan writes in `0.5.0-rc.1` | Crash fan recovery | Validation status |
+|---|---:|---:|---:|---:|---|
+| `MacBookPro16,1` / T2 | Yes | Yes | Yes | Yes | **Physically verified end-to-end** |
+| `MacBookPro14,3` / T1-style `fpe2` | Yes | Not production-verified | **Disabled** | **Disabled** | Processor behaviour observed; T1 fan validation pending |
+| Other `SupportedIntelMac` | Yes | Capability-dependent | Only if the complete verified MMIO + FLT4/per-fan family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
 
-## MacBookPro16,1 — fully verified path
+## Global Gaming Optimised processor target
+
+For every `SupportedIntelMac`, the current product profile is:
+
+- Maximum Processor State AC/DC: `95% / 95%`
+- Processor boost AC/DC: disabled
+- Display refresh rate: unchanged
+
+The strongest empirical workload evidence for this target still comes from the primary `MacBookPro16,1` test machine. On that system, comparable CS2 testing showed roughly 8–10 °C lower CPU/GPU temperatures, no observed thermal throttling at `95%`, and essentially unchanged gameplay smoothness versus the hotter Turbo-enabled state. Values around `90%` produced noticeable performance loss.
+
+The product therefore uses `95% / 95%` globally for `SupportedIntelMac`, but those measured CS2 performance/temperature results must not be generalized as if every Intel Mac has been benchmarked identically.
+
+## `0.5.0-rc.1` verified fan capability family
+
+Fan-write permission is no longer granted by a giant Mac-model whitelist. BCPC re-reads the live AppleSMC capability immediately before a write and requires the complete guarded family fingerprint.
+
+### Transport and fan count
+
+Required for writes:
+
+- AppleSMC protocol/transport: MMIO (`protocol 1`)
+- `FNum`: `ui8`, length `1`, attributes `0x80`
+- discovered fan count: at least `1` and within the supported single-decimal `F0..F9` range
+
+`FNum = 0` is a valid passive/read-only topology but can never produce a fan write.
+
+### Required per-fan metadata
+
+For every discovered fan index `i`, the following schema must match:
+
+```text
+F{i}Mx  flt   4 bytes   attributes 0x85
+F{i}Ac  flt   4 bytes   attributes 0x84
+F{i}Md  ui8   1 byte    attributes 0xD0
+F{i}Tg  flt   4 bytes   attributes 0xD4
+```
+
+The mode values used by this family are:
+
+- `0` = Apple Auto
+- `1` = Manual
+
+A T1-style `fpe2` fan layout or global `FS!` mask does not match this family and remains write-disabled.
+
+### Runtime sanity requirements
+
+For every discovered fan:
+
+- reported maximum RPM must be finite,
+- maximum RPM must be greater than zero,
+- maximum RPM must be no greater than `10000 RPM`,
+- live actual/target values must be finite and within the existing bounded policy,
+- mode must decode to a supported Auto/Manual value.
+
+The `10000 RPM` value is deliberately broad anti-corruption protection. It is **not** an Apple specification, not a recommended fan speed and never a write target.
+
+Maximum Safe RPM always comes from the **fresh live `F{i}Mx`** value for that fan.
+
+### Ownership requirements
+
+A new BCPC fan takeover additionally requires:
+
+- current platform status `SupportedIntelMac`,
+- a fresh complete capability-family match,
+- every discovered fan in verified Apple Auto,
+- no conflicting BCPC ownership marker,
+- no external Manual state.
+
+If fans are already Manual without valid BCPC ownership, BCPC does not silently take control. The CPU Gaming profile remains available independently.
+
+## MacBookPro16,1 — physically verified reference path
 
 Primary physical validation machine:
 
@@ -21,75 +99,69 @@ Primary physical validation machine:
 - Apple T2
 - Intel Core i9-9980HK
 - AMD Radeon Pro 5500M
-- Windows 10 Boot Camp
+- Windows 10 Boot Camp, build 19045
 
-### Processor behaviour
+### Live Phase B observations on 2026-09-05
 
-Empirical workload testing on the primary machine established the current Gaming Optimised profile:
+Read-only baseline:
 
-- Maximum Processor State: `95%`
-- Processor boost: disabled
-- Display refresh rate: unchanged
+```text
+F0 actual/max: 5036 / 5616 RPM
+F1 actual/max: 4658 / 5200 RPM
+Mode:          Apple Auto
+Write state:   Available (verified T2 SMC family)
+CPU:           100 / 100
+Boost:         2 / 2 (Aggressive)
+```
 
-On this machine, `95%` removed the tested Turbo Boost behaviour, reduced CPU/GPU temperatures by roughly 8–10 °C in comparable CS2 testing, and avoided observed thermal throttling while preserving essentially the same gameplay smoothness. Lower values around `90%` caused noticeable performance loss and are therefore not used as the verified Gaming Optimised default.
+Gaming Optimised read-back:
 
-The `95%` value is specific to this verified model and workload evidence. It must not be treated as a universal Intel-Mac preset.
+```text
+F0 actual/max: 5587 / 5616 RPM
+F1 actual/max: 5208 / 5200 RPM
+Mode:          Manual
+Write state:   Maximum Safe RPM detected (Manual mode)
+CPU:           95 / 95
+Boost:         0 / 0 (Disabled)
+Restore:       original processor snapshot available
+```
 
-### Fan behaviour
+The `5208 RPM` instantaneous reading was eight RPM above the reported `5200 RPM` maximum while the commanded target remained the fresh live `5200 RPM` maximum. This small observed read-back variance is within the existing bounded runtime tolerance and is not evidence that BCPC commanded a value above `F1Mx`.
 
-Production fan control has been physically validated end-to-end:
+Normal Restore returned the fans to Apple Auto and restored the exact original processor state (`100 / 100`, boost `2 / 2`).
 
-1. BCPC reads a fresh SMC capability snapshot.
-2. The exact model, MMIO transport, fan count, key metadata and runtime ranges must pass the existing safety policy.
-3. The Maximum Safe RPM plan is derived from the live verified `F0Mx` / `F1Mx` values.
-4. BCPC persists its fan-override ownership marker before the first fan hardware write.
-5. Both fans are moved to Manual mode and their targets are set to the verified live maxima.
-6. Read-back verifies Manual mode and Maximum Safe RPM.
-7. Processor settings are applied only after the fan phase succeeds.
-8. Restore returns fans to Apple Auto before restoring the exact saved processor state.
+A forced-process termination was then physically tested while Gaming Optimised was active. On restart, BCPC returned the owned fans to Apple Auto while intentionally preserving `95 / 95`, boost `0 / 0` and the original processor Restore snapshot. Fan-only resume was then exercised without replacing that snapshot, followed by a successful final exact Restore.
 
-### Clean exit and Partial Gaming lifecycle
+See [0.5.0-rc.1 Hardware Validation Record](0.5.0-rc.1-HARDWARE-VALIDATION.md).
 
-A clean BCPC exit while Gaming Optimised is active intentionally restores BCPC-owned fans to verified Apple Auto but leaves the processor Gaming state and original processor Restore snapshot intact.
+## Restore, clean exit and crash recovery
 
-On a later start, BCPC truthfully reports this split state as **Partial Gaming**. On the verified `MacBookPro16,1` path, fan-only resume can return the fans to Maximum Safe RPM without rewriting the processor settings and without recreating or replacing the original processor Restore snapshot.
+When BCPC has valid fan ownership/recovery context, explicit Restore remains ordered:
 
-A later explicit Restore still returns the exact processor state captured before the original Gaming transaction.
+```text
+FANS -> verified Apple Auto
+then
+POWER -> exact saved processor state
+```
 
-### Crash recovery
+Clean exit and startup recovery are intentionally fan-safety operations rather than automatic processor Restore operations. They return BCPC-owned compatible-family fans to Apple Auto while preserving the user's processor Gaming state and saved processor snapshot.
 
-A forced-process termination was physically tested while Gaming Optimised was active.
+Startup recovery additionally requires the current model to match the persisted marker model, current platform status to remain `SupportedIntelMac`, the AppleSMC backend to be available, and a fresh capability/topology/target match. Any mismatch prevents speculative writes and retains recovery context.
 
-Observed and verified behaviour:
+## Ownership-marker compatibility
 
-- fans remained in Manual / Maximum Safe RPM after the process was killed,
-- the fan ownership marker remained on disk,
-- the processor restore snapshot remained on disk,
-- CPU Maximum State remained `95%`,
-- processor boost remained disabled,
-- a normal BCPC restart automatically restored **fans only** to Apple Auto,
-- the fan ownership marker was cleared only after verified recovery,
-- processor settings remained in the Gaming state,
-- explicit Restore then returned the exact original processor state and removed the processor snapshot.
+`0.5.0-rc.1` reads both marker schemas:
 
-### Stable 0.4.0 qualification
+- schema v1: legacy two-fan `MacBookPro16,1` ownership document,
+- schema v2: dynamic indexed fan targets.
 
-The stable `0.4.0` release qualification on this model included:
+For exact `MacBookPro16,1` with the legacy two-fan topology, new ownership documents continue to use schema v1 so a downgrade to stable `0.4.0` can still recover the owned fans safely. Other compatible topologies/models use schema v2.
 
-- processor Apply / exact read-back / Restore,
-- production fan monitoring,
-- Maximum Safe RPM apply and verified read-back,
-- clean-exit Apple Auto fan recovery with processor state preserved,
-- truthful Partial Gaming detection,
-- fan-only resume without processor/snapshot rewrites,
-- forced-process-crash recovery,
-- final exact processor Restore,
-- `557/557` automated release tests,
-- hardened ZIP-only release packaging and final stable smoke validation.
+Malformed or unknown marker schemas are preserved and fail closed rather than being deleted or guessed.
 
 ## MacBookPro14,3 — T1 test machine
 
-`MacBookPro14,3` is intentionally not treated as equivalent to `MacBookPro16,1`.
+`MacBookPro14,3` is intentionally not treated as equivalent to the verified T2-style family.
 
 Known project state:
 
@@ -99,15 +171,22 @@ Known project state:
 - Windows Boot Camp
 - thermal throttling observed
 - `99%` Maximum Processor State improved behaviour in informal testing
-- a reliable `95%` benchmark remains deferred until cooling-system maintenance is completed
+- reliable comparative `95%` benchmarking remains deferred until cooling-system maintenance is completed
 
-BCPC production fan writes remain **disabled** on this model. Independent T1 fan read/write/read-back/restore validation is required before any whitelist expansion.
+Its known fan encoding uses T1-style `fpe2` semantics and likely a global `FS!` manual-control mask. `0.5.0-rc.1` does not write that family.
 
-## What “T2 support” means in 0.4.0
+## What “T2 family support” means in `0.5.0-rc.1`
 
-The project has **initial verified Apple T2 fan-control support**, but that does **not** mean every T2 Mac is supported for fan writes.
+It means BCPC can enable the guarded fan-write path when the **live** AppleSMC interface matches the verified MMIO + `FNum` + per-fan FLT4/`Md`/`Tg` family described above.
 
-The current production fan-write whitelist is the exact `MacBookPro16,1` path. Other T2 models must be independently validated before fan writes are enabled.
+It does **not** mean:
+
+- every T2 Mac has been physically tested,
+- every machine containing a T2 chip is guaranteed to expose this exact schema,
+- model identity alone can enable writes,
+- BCPC will generate unknown SMC timings/keys or guess a fan-control protocol.
+
+The current end-to-end physical reference remains `MacBookPro16,1`. Additional T2-family machines should be validated with read-only capability capture first, then controlled write/read-back/Auto-restore testing.
 
 ## AppleSMC compatibility dependency
 
@@ -144,4 +223,4 @@ The repository also contains an independently authored experimental KMDF researc
 
 Its physically completed T2 research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
 
-This research driver is not the production fan-control dependency for stable `0.4.0`, is not included in stable release packages, and must not be interpreted as generic T1/T2 support.
+This research driver is not the production fan-control dependency for `0.5.0-rc.1`, is not included in release packages, and must not be interpreted as generic T1/T2 support.

@@ -7,73 +7,85 @@
 
 BootCamp Performance Control (BCPC) is an open-source Windows utility for Intel Macs running Windows through Boot Camp.
 
-Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and, on explicitly verified hardware, guarded Apple SMC fan control.
+Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and guarded Apple SMC fan control when a verified runtime capability family is present.
 
-**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
+**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases) · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
 
 ## Release status
 
 - **Current stable release:** `0.4.0`
-- **Release type:** stable
-- **Fan-control milestone:** physically validated on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2)
+- **Current release candidate:** `0.5.0-rc.1`
+- **Stable status:** `0.4.0` remains the recommended stable build.
+- **RC fan-control milestone:** dynamic topology plus capability-family T2-style fan-write eligibility.
+- **Physical fan-control validation:** end-to-end on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2).
 
-`0.4.0` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
+`0.5.0-rc.1` is a pre-release and is intentionally separate from stable `0.4.0`. It broadens runtime fan-write eligibility from an exact-model gate to a strict live SMC capability-family gate. That does **not** mean every T2 Mac has been physically validated.
 
-> **Important:** Gaming Optimised uses Maximum Processor State `95% / 95%` and disables Turbo/Boost on AC and DC for every supported Intel Mac. Fan writes remain separately hardware-gated.
+> **Important:** Gaming Optimised uses Maximum Processor State `95% / 95%` and disables Turbo/Boost on AC and DC for every `SupportedIntelMac`. Fan control is additive and remains independently capability-gated.
 
 ## Quick start
 
-1. Open the [latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest).
-2. Download the `win-x64` ZIP and its matching `.sha256` file.
-3. Optionally verify the ZIP SHA-256.
-4. Extract the ZIP to a normal user-writable folder.
-5. Run `BootCampPerformanceControl.exe`.
-6. Review the detected Mac model and current processor/fan state before applying any profile.
+For normal use, start with the latest stable release. For `0.5.0-rc.1` testing, select the pre-release from the [GitHub Releases page](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases).
 
-For verified fan control, BCPC currently interoperates with a separately installed Windows copy of Macs Fan Control 1.5.16. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
+1. Download the matching `win-x64` ZIP and `.sha256` file.
+2. Optionally verify the ZIP SHA-256.
+3. Extract the ZIP to a normal user-writable folder.
+4. Run `BootCampPerformanceControl.exe`.
+5. Review the detected Mac model and current processor/fan state before applying any profile.
+
+For the AppleSMC compatibility backend, BCPC currently interoperates with a separately installed Windows copy of Macs Fan Control 1.5.16. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
 
 ## What BCPC does
 
 ### Gaming Optimised
 
-On every supported Intel Mac:
+On every `SupportedIntelMac`:
 
 - Maximum Processor State AC/DC: `95% / 95%`
 - Intel processor boost (`PERFBOOSTMODE`) AC/DC: `Disabled / Disabled`
 - Display settings: unchanged
 
-On the fully validated `MacBookPro16,1` path, Gaming Optimised also uses `Maximum Safe RPM`, derived from the live verified SMC maximum values. Other supported Intel Macs remain processor-only unless that exact model is separately verified for fan writes.
+Fan control is additive:
+
+- if the live AppleSMC backend matches the verified MMIO + `FNum` + per-fan FLT4 capability family and all ownership/safety checks pass, Gaming Optimised also applies `Maximum Safe RPM` to every discovered fan using fresh live `F{i}Mx` values;
+- if AppleSMC is missing, stopped, unsupported, reports `FNum = 0`, or the fans are already Manual without BCPC ownership, Gaming Optimised remains available as a CPU-only profile;
+- if fan state becomes ambiguous after BCPC has started hardware writes, the recovery context is retained and the operation fails closed rather than guessing.
+
+Only `MacBookPro16,1` has completed BCPC end-to-end physical validation for this production fan path so far. Other machines are release-candidate compatibility targets only when their live capability fingerprint passes the same guarded policy.
 
 ### Restore Original Settings
 
-BCPC restores the actual state captured before the profile was applied. It does not assume that the previous values were `100%` or Windows defaults.
+BCPC restores the actual processor state captured before the profile was applied. It does not assume that the previous values were `100%` or Windows defaults.
 
-For the verified `MacBookPro16,1` fan-control path, Restore returns the fans to Apple Auto before restoring the saved Windows processor power state.
+If BCPC currently has fan ownership/recovery context, Restore returns the owned fans to verified Apple Auto **before** restoring the saved Windows processor state. Without BCPC fan ownership, Restore does not invent fan work and restores the processor snapshot only.
 
 ### Fan monitoring and recovery
 
-On verified hardware BCPC can:
+When the AppleSMC backend can be safely read, BCPC can:
 
-- read live fan RPM, maximum RPM and mode,
+- discover the live fan count dynamically,
+- read per-fan current RPM, maximum RPM, target and mode,
 - report Apple Auto / Manual state,
-- apply Maximum Safe RPM through a guarded transaction,
+- distinguish read capability from write eligibility,
+- apply Maximum Safe RPM only after the full family/safety gate succeeds,
 - persist fan-override ownership before the first hardware write,
-- recover the fans to Apple Auto after an unexpected BCPC process termination,
+- recover owned fans to Apple Auto after an unexpected BCPC process termination,
 - leave the saved processor profile untouched during startup fan recovery so the user can explicitly choose Restore.
 
 ## Hardware compatibility
 
-### Fully verified
+### Physically verified end-to-end
 
 **MacBookPro16,1 — MacBook Pro 16-inch (2019), Apple T2**
 
 Physical validation includes:
 
 - Windows processor Apply / exact read-back / Restore,
-- production fan monitoring,
-- Maximum Safe RPM apply,
+- production fan monitoring and dynamic topology discovery,
+- Maximum Safe RPM apply and read-back,
 - Apple Auto restore,
 - forced-process-crash recovery,
+- fan-only resume without replacing the original processor Restore snapshot,
 - exact processor-state restoration after recovery.
 
 Primary validation machine:
@@ -82,23 +94,25 @@ Primary validation machine:
 - Intel Core i9-9980HK
 - AMD Radeon Pro 5500M
 
-### Not yet fan-write verified
+See [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md).
+
+### T1 fan writes remain blocked
 
 **MacBookPro14,3 — MacBook Pro 15-inch (2017), Apple T1**
 
-Processor power-management behaviour has been observed, but the BCPC fan-write backend is not enabled for this model. Independent T1 fan write/read-back/restore validation is still required.
+Processor power-management behaviour has been observed, but its `fpe2` / global-mask fan family is not the verified T2-style family used by this RC. Production fan writes remain disabled pending independent T1 work.
 
 ### Other Intel Macs
 
-Processor profile availability is capability-based. Fan writes are **not** automatically enabled because a Mac has an Intel CPU, T1, or T2. Every fan-write model must be explicitly verified and whitelisted.
+The processor Gaming profile is available on `SupportedIntelMac` systems. Fan-write eligibility is not granted merely because a machine is an Intel Mac or is believed to contain T2.
 
-See [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) for the detailed matrix.
+`0.5.0-rc.1` requires the fresh runtime AppleSMC fingerprint documented in [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) and [Fan Control](docs/FAN-CONTROL.md). A machine that passes that family gate may be eligible for writes even if its model is not individually whitelisted, but that is not a claim of physical validation for that model.
 
 ## Fan-control dependency: Macs Fan Control 1.5.16
 
 BCPC does **not** include, redistribute, modify, mirror, or install Macs Fan Control or its AppleSMC driver.
 
-The currently verified AppleSMC compatibility backend interoperates with a **separately installed** Windows copy of:
+The physically validated AppleSMC compatibility environment uses a **separately installed** Windows copy of:
 
 - **Macs Fan Control 1.5.16 (Build 693)**
 - AppleSMC driver file version observed in the validated environment: `1.0.7.0`
@@ -113,10 +127,12 @@ After installation:
 
 1. Close the Macs Fan Control application if it is running. The AppleSMC device is exclusive and BCPC will not forcibly take ownership from another controller.
 2. Start BCPC normally.
-3. On a verified model, use **Enable Fan Monitoring** if the AppleSMC service is installed but stopped. This is the explicit action that may request elevation to start the service.
-4. Apply **Gaming Optimised** only after BCPC reports the verified fan capability as available.
+3. Use **Enable Fan Monitoring** if the AppleSMC service is installed but stopped and you explicitly want to activate monitoring. This is the user action that may request elevation to start the service.
+4. Review BCPC's reported monitoring state, family write state and fan mode before relying on fan control.
 
-Other versions of Macs Fan Control may work, but they are not part of the current verified compatibility matrix.
+Gaming Optimised does not silently start AppleSMC. If the fan backend is unavailable or not safely ownable, the conservative CPU profile can still apply.
+
+Other versions of Macs Fan Control may work, but they are not part of the currently physically validated interoperability environment.
 
 See [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md) and [Third-Party Software](THIRD_PARTY.md).
 
@@ -128,17 +144,21 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 - persist the original processor Restore snapshot before modification,
 - verify expected current state before processor writes,
 - re-read fan capability immediately before fan writes,
-- derive fan targets from live verified SMC maxima rather than hard-coded RPM values,
-- allow only whitelisted fan mode/target keys,
+- require the exact verified runtime fan-family metadata rather than trusting a model name,
+- derive fan targets from fresh live SMC maxima rather than hard-coded RPM values,
+- reject non-finite, non-positive or implausibly high maximum RPM data,
+- allow only whitelisted per-fan mode/target keys,
+- never use `FS!`, T1 `fpe2`, arbitrary SMC writes, minimum-RPM controls or a manual fan-speed slider in this RC,
 - verify hardware state after writes,
 - attempt Apple Auto compensation if the processor phase fails after fan takeover,
-- restore fans before processor settings,
+- restore owned fans before processor settings,
 - retain recovery context across crashes,
 - never infer BCPC fan ownership from Manual mode alone,
 - never auto-start AppleSMC merely because a stale recovery marker exists,
-- never write fans on an unverified model.
+- preserve CPU-only Gaming when fan control is unavailable or safely declined,
+- fail closed if fan state is ambiguous after writes begin.
 
-BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, or display-timing modification in this release.
+BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, or display-timing modification in this release candidate.
 
 ## Installation details
 
@@ -149,7 +169,7 @@ BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, o
 3. Extract the ZIP to a normal user-writable folder.
 4. Run `BootCampPerformanceControl.exe`.
 
-For verified fan control, separately install the tested Macs Fan Control dependency described above. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
+For fan control, separately install the tested Macs Fan Control dependency described above. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
 
 The published Windows x64 build is self-contained and includes the required .NET runtime files.
 
@@ -186,9 +206,11 @@ The publish script creates a versioned self-contained `win-x64` directory, ZIP, 
 
 ## Documentation
 
-- [Latest release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
+- [Latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
+- [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases)
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)
+- [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md)
 - [Third-Party Software](THIRD_PARTY.md)
 - [Security Policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
