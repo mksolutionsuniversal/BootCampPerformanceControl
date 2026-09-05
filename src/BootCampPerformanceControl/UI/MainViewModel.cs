@@ -977,8 +977,7 @@ public sealed class MainViewModel : ViewModelBase
                 try
                 {
                     var marker = await _ownershipReader
-                        .LoadAsync(CancellationToken.None)
-                        .ConfigureAwait(false);
+                        .LoadAsync(CancellationToken.None);
 
                     if (marker is null)
                     {
@@ -1090,8 +1089,7 @@ public sealed class MainViewModel : ViewModelBase
             try
             {
                 var markerAfterRestore = await _ownershipReader
-                    .LoadAsync(CancellationToken.None)
-                    .ConfigureAwait(false);
+                    .LoadAsync(CancellationToken.None);
 
                 if (markerAfterRestore is not null)
                 {
@@ -1184,8 +1182,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             var status = await _fanControlService
-                .ReadStatusAsync(model, cancellationToken)
-                .ConfigureAwait(false);
+                .ReadStatusAsync(model, cancellationToken);
             ApplyFanStatus(status);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1436,8 +1433,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             marker = await _ownershipReader
-                .LoadAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .LoadAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1486,8 +1482,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             var result = await _gamingOptimisedRestoreCoordinator
-                .RecoverFansOnlyAsync(verificationResult.Model, cancellationToken)
-                .ConfigureAwait(false);
+                .RecoverFansOnlyAsync(verificationResult.Model, cancellationToken);
 
             if (result.IsSuccessful)
             {
@@ -1534,8 +1529,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             var result = await _gamingOptimisedRestoreCoordinator
-                .RecoverFansOnlyAsync(verifiedModel, cancellationToken)
-                .ConfigureAwait(false);
+                .RecoverFansOnlyAsync(verifiedModel, cancellationToken);
 
             if (result.IsSuccessful)
             {
@@ -1545,8 +1539,7 @@ public sealed class MainViewModel : ViewModelBase
                     "No pending fan recovery.");
 
                 var refreshedStatus = await _fanControlService
-                    .ReadStatusAsync(verifiedModel, cancellationToken)
-                    .ConfigureAwait(false);
+                    .ReadStatusAsync(verifiedModel, cancellationToken);
                 ApplyFanStatus(refreshedStatus);
                 StatusMessage = "Fan monitoring enabled. Previous fan override was restored to Apple Auto.";
             }
