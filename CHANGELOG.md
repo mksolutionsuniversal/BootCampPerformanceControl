@@ -6,6 +6,12 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 ## [Unreleased]
 
+### Development
+
+- Advanced the `main` development identity to `0.5.0-rc.2` after publication of `v0.5.0-rc.1` so post-release source builds cannot be confused with the immutable published RC artifact.
+- `0.5.0-rc.2` is a development target only at this point. No tag or GitHub Release has been created for it.
+- Published stable `v0.4.0` and pre-release `v0.5.0-rc.1` remain unchanged.
+
 ### Documentation
 
 - Synchronized all repository Markdown documentation after publication of `0.5.0-rc.1`.
