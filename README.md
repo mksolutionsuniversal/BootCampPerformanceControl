@@ -1,8 +1,15 @@
 # BootCamp Performance Control
 
+[![Release](https://img.shields.io/github/v/release/mksolutionsuniversal/BootCampPerformanceControl?sort=semver)](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
+[![CI](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg)](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
+
 BootCamp Performance Control (BCPC) is an open-source Windows utility for Intel Macs running Windows through Boot Camp.
 
 Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and, on explicitly verified hardware, guarded Apple SMC fan control.
+
+**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
 
 ## Release status
 
@@ -11,6 +18,19 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 - **Fan-control milestone:** physically validated on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2)
 
 `0.4.0` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
+
+> **Important:** the `95%` Gaming Optimised processor limit is an empirically validated value for `MacBookPro16,1`. It is not a universal recommendation for every Intel Mac and must not be assumed optimal for other models.
+
+## Quick start
+
+1. Open the [latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest).
+2. Download the `win-x64` ZIP and its matching `.sha256` file.
+3. Optionally verify the ZIP SHA-256.
+4. Extract the ZIP to a normal user-writable folder.
+5. Run `BootCampPerformanceControl.exe`.
+6. Review the detected Mac model and current processor/fan state before applying any profile.
+
+For verified fan control, BCPC currently interoperates with a separately installed Windows copy of Macs Fan Control 1.5.16. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
 
 ## What BCPC does
 
@@ -121,7 +141,7 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 
 BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, or display-timing modification in this release.
 
-## Installation
+## Installation details
 
 ### Release build
 
@@ -130,9 +150,7 @@ BCPC does not perform CPU undervolting, CPU MSR writes, firmware modification, o
 3. Extract the ZIP to a normal user-writable folder.
 4. Run `BootCampPerformanceControl.exe`.
 
-For verified fan control, separately install the tested Macs Fan Control
-dependency described above. BCPC does **not** bundle Macs Fan Control, AppleSMC,
-or any third-party driver.
+For verified fan control, separately install the tested Macs Fan Control dependency described above. BCPC does **not** bundle Macs Fan Control, AppleSMC, or any third-party driver.
 
 The published Windows x64 build is self-contained and includes the required .NET runtime files.
 
@@ -165,11 +183,11 @@ Create the self-contained Windows x64 release package:
 powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1
 ```
 
-The publish script creates a versioned self-contained `win-x64` directory, ZIP,
-and accompanying ZIP `.sha256` file in `artifacts`.
+The publish script creates a versioned self-contained `win-x64` directory, ZIP, and accompanying ZIP `.sha256` file in `artifacts`.
 
 ## Documentation
 
+- [Latest release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)
 - [Third-Party Software](THIRD_PARTY.md)
