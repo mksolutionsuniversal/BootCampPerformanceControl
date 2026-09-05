@@ -2435,6 +2435,214 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task Startup_NoMarkerGamingCpuSnapshotAndAppleAuto_ShowsTruthfulPartialGamingState()
+    {
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        var originalSnapshot = InitialPowerState();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            new FakePowerManagementService(GamingOptimisedPowerState()),
+            restoreSnapshotStore: restoreStore,
+            fanControlService: new FakeFanControlService(VerifiedFanStatus()),
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(GamingOptimisedSessionState.PartialCpuOnly, viewModel.GamingOptimisedState);
+        Assert.Equal(
+            "Gaming CPU settings are active. Fans are currently using Apple Auto.",
+            viewModel.DetectedProfileState);
+        Assert.True(GetProfile(viewModel, "restore").IsEnabled);
+        Assert.Contains("Re-enable Maximum Safe RPM", GetProfile(viewModel, "gaming-optimised").ToolTip);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
+    }
+
+    [Fact]
+    public async Task PartialGaming_GamingButtonResumesVerifiedFansOnlyAndPreservesOriginalSnapshot()
+    {
+        var originalSnapshot = InitialPowerState();
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var power = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            GamingOptimisedPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var fanService = new FakeFanControlService(
+            VerifiedFanStatus(),
+            MaximumSafeRpmFanStatus());
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanControlService: fanService,
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(GamingOptimisedSessionState.Full, viewModel.GamingOptimisedState);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(
+            originalSnapshot,
+            await restoreStore.GetOriginalRestoreSnapshotAsync(CancellationToken.None));
+        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.Equal(0, power.UnguardedApplyCallCount);
+        Assert.Contains("without changing CPU settings", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task PartialGaming_AppleSmcStoppedDoesNotWriteAndRemainsTruthfulPartial()
+    {
+        var originalSnapshot = InitialPowerState();
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var power = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            GamingOptimisedPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore)
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(
+                AppleSmcServiceState.Stopped)
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanControlService: new FakeFanControlService(
+                InstalledStoppedFanStatus(),
+                InstalledStoppedFanStatus()),
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(GamingOptimisedSessionState.PartialCpuOnly, viewModel.GamingOptimisedState);
+        Assert.Null(ownershipStore.Marker);
+        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.Equal(0, power.UnguardedApplyCallCount);
+        Assert.Contains("Enable fan monitoring/control", viewModel.StatusMessage);
+        Assert.Contains("BCPC fan override is not active", viewModel.DetectedProfileState);
+    }
+
+    [Fact]
+    public async Task PartialGaming_MaxVerificationFailureRetainsOwnershipAndNeverReportsFull()
+    {
+        var originalSnapshot = InitialPowerState();
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var power = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            GamingOptimisedPowerState());
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore)
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(
+                new TestFanExecutionSession(
+                    overrideCoordinator: new TestFanOverrideCoordinator(ownershipStore)
+                    {
+                        ApplyHandler = async (model, capability, cancellationToken) =>
+                        {
+                            await ownershipStore.SaveNewAsync(
+                                new FanOverrideOwnershipMarker(
+                                    model,
+                                    5321.25f,
+                                    4789.5f,
+                                    DateTimeOffset.UtcNow),
+                                cancellationToken);
+                            throw new InvalidOperationException(
+                                "Maximum-safe fan override could not be verified by readback.");
+                        }
+                    }))
+        };
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanControlService: new FakeFanControlService(
+                VerifiedFanStatus(),
+                VerifiedFanStatus()),
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(
+            GamingOptimisedSessionState.FanRecoveryPendingOrUnsafe,
+            viewModel.GamingOptimisedState);
+        Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal(
+            originalSnapshot,
+            await restoreStore.GetOriginalRestoreSnapshotAsync(CancellationToken.None));
+        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.Equal(0, power.UnguardedApplyCallCount);
+        Assert.DoesNotContain("fully active", viewModel.DetectedProfileState, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Restore remains available", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Restore_FromPartialGaming_UsesExactOriginalSnapshotAndClearsItAfterSuccess()
+    {
+        var originalSnapshot = InitialPowerState();
+        var restoreStore = new InMemoryRestoreSnapshotStore();
+        await restoreStore.TrySaveOriginalRestoreSnapshotAsync(
+            originalSnapshot,
+            CancellationToken.None);
+        var power = new FakePowerManagementService(
+            GamingOptimisedPowerState(),
+            originalSnapshot)
+        {
+            RestoreResult = SuccessfulRestoreOperation(
+                GamingOptimisedPowerState(),
+                ProcessorPowerSettings.FromSnapshot(originalSnapshot))
+        };
+        var ownershipStore = new TestFanOverrideOwnershipStore();
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
+            power,
+            restoreSnapshotStore: restoreStore,
+            fanControlService: new FakeFanControlService(
+                VerifiedFanStatus(),
+                VerifiedFanStatus()),
+            ownershipStore: ownershipStore);
+
+        viewModel.RefreshCommand.Execute(null);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal(GamingOptimisedSessionState.PartialCpuOnly, viewModel.GamingOptimisedState);
+
+        GetProfile(viewModel, "restore").Command!.Execute(null);
+        await WaitForIdleAsync(viewModel);
+
+        Assert.Equal(originalSnapshot, power.SnapshotUsedForRestore);
+        Assert.False(restoreStore.HasOriginalRestoreSnapshot);
+        Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
+        Assert.Equal(GamingOptimisedSessionState.NoActiveSession, viewModel.GamingOptimisedState);
+    }
+
+    [Fact]
     public async Task StartupRecovery_NoMarker_DoesNotOpenFanExecutionSession()
     {
         var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
@@ -3525,6 +3733,7 @@ public sealed class MainViewModelTests
         IFanExecutionSessionFactory? fanExecutionSessionFactory = null,
         TestFanOverrideOwnershipStore? ownershipStore = null,
         GamingOptimisedRestoreCoordinator? gamingOptimisedRestoreCoordinator = null,
+        GamingOptimisedFanResumeService? gamingOptimisedFanResumeService = null,
         ProfileRestoreService? profileRestoreService = null)
     {
         var profileCatalog = new ProfileCatalog();
@@ -3542,6 +3751,14 @@ public sealed class MainViewModelTests
             fanExecutionSessionFactory);
         gamingOptimisedRestoreCoordinator ??= new GamingOptimisedRestoreCoordinator(
             powerManagementService,
+            fanExecutionSessionFactory);
+        gamingOptimisedFanResumeService ??= new GamingOptimisedFanResumeService(
+            hardwareDetectionService,
+            profileCatalog,
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            restoreSnapshotStore,
             fanExecutionSessionFactory);
 
         var profileApplyService = new ProfileApplyService(
@@ -3580,7 +3797,8 @@ public sealed class MainViewModelTests
             fanPollingDelayAsync: fanPollingDelayAsync,
             profileRestoreService: profileRestoreService,
             ownershipReader: ownershipStore,
-            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator);
+            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator,
+            gamingOptimisedFanResumeService: gamingOptimisedFanResumeService);
     }
 
     private static ProfileButtonViewModel GetProfile(MainViewModel viewModel, string profileId)
@@ -3653,6 +3871,17 @@ public sealed class MainViewModelTests
             new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto),
             new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto),
             "Verified in test.");
+    }
+
+    private static FanControlStatus MaximumSafeRpmFanStatus()
+    {
+        return new FanControlStatus(
+            FanBackendState.Running,
+            FanSafetyState.ReadOnlyVerified,
+            new FanReading(5616f, 5616f, FanOperatingMode.Manual),
+            new FanReading(5200f, 5200f, FanOperatingMode.Manual),
+            "Verified Maximum Safe RPM in test.",
+            FanWriteControlState.MaximumSafeRpmDetected);
     }
 
     private static FanControlStatus InstalledStoppedFanStatus(
@@ -4126,6 +4355,8 @@ public sealed class MainViewModelTests
 
         public int RestoreOriginalSettingsCallCount { get; private set; }
 
+        public PowerStateSnapshot? SnapshotUsedForRestore { get; private set; }
+
         public ProcessorPowerSettings? LastGuardedSettings { get; private set; }
 
         public PowerStateSnapshot? LastExpectedStateBefore { get; private set; }
@@ -4212,6 +4443,8 @@ public sealed class MainViewModelTests
 
             if (RestoreResult.IsSuccessful && RestoreSnapshotStore is not null)
             {
+                SnapshotUsedForRestore = await RestoreSnapshotStore
+                    .GetOriginalRestoreSnapshotAsync(cancellationToken);
                 await RestoreSnapshotStore.ClearOriginalRestoreSnapshotAsync(cancellationToken);
             }
 
