@@ -6,11 +6,11 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 
 ## Release status
 
-- **Current release train:** `0.4.0-rc.1`
-- **Release type:** pre-release / release candidate
+- **Current stable release:** `0.4.0`
+- **Release type:** stable
 - **Fan-control milestone:** physically validated on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2)
 
-`0.4.0-rc.1` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
+`0.4.0` is intentionally not called `1.0`. Fan writes remain model-gated and are enabled only where the hardware path has been independently validated.
 
 ## What BCPC does
 

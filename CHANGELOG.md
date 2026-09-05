@@ -4,6 +4,22 @@ All notable changes to BootCamp Performance Control are documented here.
 
 The project follows Semantic Versioning. Release candidates are pre-release builds and should not be treated as final stable releases.
 
+## [0.4.0] - 2026-09-05
+
+### Stable release
+
+- Promoted the qualified `0.4.0-rc.1` candidate to stable `0.4.0`.
+- No hardware-control logic or safety-boundary changes were introduced by the stable release preparation.
+- The Windows x64 release remains ZIP-only; the installer is deferred to a later release.
+
+### Final qualification
+
+- Release tests: `557/557` passed.
+- Release build and hardened package creation: PASS.
+- Full physical Gaming / clean-exit / Partial Gaming fan-only resume / exact Restore lifecycle on `MacBookPro16,1`: PASS.
+- Forced-process termination with durable recovery context, automatic startup fan-only Apple Auto recovery, and final exact processor Restore: PASS.
+- Final package forensic validation confirmed `LICENSE` and `THIRD_PARTY.md`, prohibited driver / Macs Fan Control content absent, valid ZIP SHA-256 sidecar, and successful published-app launch / clean exit smoke test.
+
 ## [0.4.0-rc.1] - 2026-09-04
 
 ### Added
