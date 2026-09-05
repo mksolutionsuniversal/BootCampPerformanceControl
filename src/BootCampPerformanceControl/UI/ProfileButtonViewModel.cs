@@ -14,7 +14,8 @@ public sealed class ProfileButtonViewModel
         bool isRestoreSnapshotAvailable = false,
         bool isPowerStateReadable = false,
         bool hasFanRecoveryContext = false,
-        bool isExactVerifiedMacBookPro16_1 = false)
+        bool isExactVerifiedMacBookPro16_1 = false,
+        bool isPartialGamingState = false)
     {
         ProfileId = profile.Id;
         DisplayName = profile.DisplayName;
@@ -31,7 +32,8 @@ public sealed class ProfileButtonViewModel
             isRestoreSnapshotAvailable,
             isPowerStateReadable,
             hasFanRecoveryContext,
-            isExactVerifiedMacBookPro16_1);
+            isExactVerifiedMacBookPro16_1,
+            isPartialGamingState);
     }
 
     public string ProfileId { get; }
@@ -81,10 +83,20 @@ public sealed class ProfileButtonViewModel
         bool isRestoreSnapshotAvailable,
         bool isPowerStateReadable,
         bool hasFanRecoveryContext,
-        bool isExactVerifiedMacBookPro16_1)
+        bool isExactVerifiedMacBookPro16_1,
+        bool isPartialGamingState)
     {
         if (isEnabled)
         {
+            if (string.Equals(
+                    profile.Id,
+                    GamingOptimisedProfileId,
+                    StringComparison.OrdinalIgnoreCase)
+                && isPartialGamingState)
+            {
+                return "Re-enable Maximum Safe RPM fans without changing the active Gaming CPU settings or original restore snapshot.";
+            }
+
             if (string.Equals(
                     profile.Id,
                     RestoreProfileId,

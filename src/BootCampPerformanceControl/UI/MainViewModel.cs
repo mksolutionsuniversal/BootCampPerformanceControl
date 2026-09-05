@@ -31,7 +31,9 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IRestoreSnapshotStore _restoreSnapshotStore;
     private readonly IFanOverrideOwnershipReader _ownershipReader;
     private readonly GamingOptimisedRestoreCoordinator? _gamingOptimisedRestoreCoordinator;
+    private readonly GamingOptimisedFanResumeService? _gamingOptimisedFanResumeService;
     private readonly ProcessorProfileStateEvaluator _processorProfileStateEvaluator;
+    private readonly GamingOptimisedSessionStateEvaluator _gamingOptimisedSessionStateEvaluator = new();
     private readonly IDiagnosticReportService _diagnosticReportService;
     private readonly IDiagnosticReportFileSaveService _diagnosticReportFileSaveService;
     private readonly ICompatibilityReportService _compatibilityReportService;
@@ -60,6 +62,8 @@ public sealed class MainViewModel : ViewModelBase
     private string _boostModeAc = "Not read";
     private string _boostModeDc = "Not read";
     private string _detectedProfileState = "Unknown - power state has not been read.";
+    private ProcessorProfileState _processorProfileState = ProcessorProfileState.Unknown;
+    private GamingOptimisedSessionState _gamingOptimisedSessionState = GamingOptimisedSessionState.Unknown;
     private string _restoreSnapshotStatus = "Not available.";
     private FanRecoveryState _fanRecoveryState = FanRecoveryState.None;
     private string _fanRecoveryStatus = "No pending fan recovery.";
@@ -116,7 +120,8 @@ public sealed class MainViewModel : ViewModelBase
             fanPollingDelayAsync,
             profileRestoreService,
             ownershipReader: null,
-            gamingOptimisedRestoreCoordinator: null)
+            gamingOptimisedRestoreCoordinator: null,
+            gamingOptimisedFanResumeService: null)
     {
     }
 
@@ -140,7 +145,8 @@ public sealed class MainViewModel : ViewModelBase
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
         ProfileRestoreService? profileRestoreService = null,
         IFanOverrideOwnershipReader? ownershipReader = null,
-        GamingOptimisedRestoreCoordinator? gamingOptimisedRestoreCoordinator = null)
+        GamingOptimisedRestoreCoordinator? gamingOptimisedRestoreCoordinator = null,
+        GamingOptimisedFanResumeService? gamingOptimisedFanResumeService = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareDetectionService);
         ArgumentNullException.ThrowIfNull(powerManagementService);
@@ -167,6 +173,7 @@ public sealed class MainViewModel : ViewModelBase
         _restoreSnapshotStore = restoreSnapshotStore;
         _ownershipReader = ownershipReader ?? new JsonFanOverrideOwnershipStore(logger);
         _gamingOptimisedRestoreCoordinator = gamingOptimisedRestoreCoordinator;
+        _gamingOptimisedFanResumeService = gamingOptimisedFanResumeService;
         _profileRestoreService = profileRestoreService
             ?? new ProfileRestoreService(
                 hardwareDetectionService,
@@ -326,11 +333,14 @@ public sealed class MainViewModel : ViewModelBase
 
     internal FanRecoveryState RecoveryState => _fanRecoveryState;
 
+    internal GamingOptimisedSessionState GamingOptimisedState => _gamingOptimisedSessionState;
+
     private void SetFanRecoveryState(FanRecoveryState state, string statusMessage)
     {
         _fanRecoveryState = state;
         FanRecoveryStatus = statusMessage;
         OnPropertyChanged(nameof(RecoveryState));
+        RefreshGamingOptimisedSessionState();
     }
 
     public StructuredFanControlStatus FanStatus
@@ -812,6 +822,7 @@ public sealed class MainViewModel : ViewModelBase
             || _lastLoggedFanSafetyState != status.SafetyState;
 
         FanStatus = status;
+        RefreshGamingOptimisedSessionState();
 
         if (stateChanged)
         {
@@ -929,6 +940,13 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task ApplyProfileAsync(string profileId, CancellationToken cancellationToken)
     {
+        var isPartialGamingFanResume = string.Equals(
+                profileId,
+                "gaming-optimised",
+                StringComparison.OrdinalIgnoreCase)
+            && _gamingOptimisedSessionState == GamingOptimisedSessionState.PartialCpuOnly
+            && IsExactVerifiedMacBookPro16_1(_lastVerificationResult);
+
         if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
             && _lastVerificationResult.ValidationLevel == ModelValidationLevel.NotIndividuallyTested)
         {
@@ -947,13 +965,21 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         IsBusy = true;
-        StatusMessage = $"Applying profile '{profileId}'...";
+        StatusMessage = isPartialGamingFanResume
+            ? "Re-enabling Maximum Safe RPM fans..."
+            : $"Applying profile '{profileId}'...";
         var fanGateAcquired = false;
 
         try
         {
             await _fanOperationGate.WaitAsync(cancellationToken);
             fanGateAcquired = true;
+
+            if (isPartialGamingFanResume)
+            {
+                await ResumeGamingOptimisedFansUnderGateAsync(cancellationToken);
+                return;
+            }
 
             _logger.Info($"Profile application started: {profileId}.");
             var result = await _profileApplyService.ApplyProfileAsync(profileId, cancellationToken);
@@ -1055,6 +1081,137 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             IsBusy = false;
+        }
+    }
+
+    private async Task ResumeGamingOptimisedFansUnderGateAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_gamingOptimisedFanResumeService is null)
+        {
+            StatusMessage = "Maximum Safe RPM resume is unavailable because the fan-only coordinator is not configured.";
+            return;
+        }
+
+        _logger.Info("Gaming Optimised fan-only Maximum Safe RPM resume started.");
+
+        GamingOptimisedFanResumeResult result;
+        try
+        {
+            result = await _gamingOptimisedFanResumeService.ResumeAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            await InspectFanOwnershipAfterResumeFailureAsync();
+            await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
+            throw;
+        }
+        catch (AppleSmcServiceStateException exception)
+        {
+            _logger.Info($"Gaming Optimised fan-only resume stopped because AppleSMC is unavailable: {exception.Message}");
+            await InspectFanOwnershipAfterResumeFailureAsync();
+            await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
+            UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+            StatusMessage = "Maximum Safe RPM was not re-enabled. Enable fan monitoring/control, then try again.";
+            return;
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Gaming Optimised fan-only Maximum Safe RPM resume failed unexpectedly.", exception);
+            await InspectFanOwnershipAfterResumeFailureAsync();
+            await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
+            UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+            StatusMessage = "Maximum Safe RPM could not be re-enabled safely. Restore remains available; check the log for details.";
+            return;
+        }
+
+        SetLastVerificationResult(result.ModelVerificationResult);
+
+        if (!result.IsSuccessful)
+        {
+            await InspectFanOwnershipAfterResumeFailureAsync();
+            await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
+            UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+            StatusMessage = $"Maximum Safe RPM was not re-enabled: {result.FailureReason}";
+            _logger.Info($"Gaming Optimised fan-only resume was not completed: {result.FailureReason}");
+            return;
+        }
+
+        try
+        {
+            var marker = await _ownershipReader.LoadAsync(CancellationToken.None);
+            if (marker is null)
+            {
+                SetFanRecoveryState(
+                    FanRecoveryState.RecoveryBlocked,
+                    "Fan recovery is blocked because the ownership marker could not be verified on disk.");
+            }
+            else if (!string.Equals(
+                         marker.Model,
+                         result.ModelVerificationResult.Model,
+                         StringComparison.Ordinal))
+            {
+                SetFanRecoveryState(
+                    FanRecoveryState.RecoveryBlocked,
+                    "Fan recovery is blocked because current hardware state does not match the ownership marker.");
+            }
+            else
+            {
+                SetFanRecoveryState(
+                    FanRecoveryState.CurrentSessionOverrideActive,
+                    "Gaming Optimised fan override is active. Restore returns fans to Apple Auto.");
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Reloading ownership marker after fan-only resume failed.", exception);
+            SetFanRecoveryState(
+                FanRecoveryState.InspectionFailed,
+                "Inspection failed. Could not verify fan ownership marker.");
+        }
+
+        await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
+
+        if (_gamingOptimisedSessionState != GamingOptimisedSessionState.Full)
+        {
+            SetFanRecoveryState(
+                FanRecoveryState.RecoveryBlocked,
+                "Maximum Safe RPM ownership exists, but the live fan state could not be verified.");
+            StatusMessage = "Maximum Safe RPM was written, but the live fan state could not be verified. Restore remains available.";
+        }
+        else
+        {
+            StatusMessage = "Gaming Optimised is fully active. Maximum Safe RPM was re-enabled and verified without changing CPU settings.";
+            _logger.Info("Gaming Optimised fan-only Maximum Safe RPM resume completed and live readback was verified.");
+        }
+
+        UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
+    }
+
+    private async Task InspectFanOwnershipAfterResumeFailureAsync()
+    {
+        try
+        {
+            var marker = await _ownershipReader.LoadAsync(CancellationToken.None);
+            if (marker is not null)
+            {
+                SetFanRecoveryState(
+                    FanRecoveryState.RecoveryBlocked,
+                    "A fan ownership marker remains after the failed resume. Restore fan control before continuing.");
+            }
+            else
+            {
+                SetFanRecoveryState(
+                    FanRecoveryState.None,
+                    "No pending fan recovery.");
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Inspecting fan ownership after failed fan-only resume failed.", exception);
+            SetFanRecoveryState(
+                FanRecoveryState.InspectionFailed,
+                "Inspection failed. Could not verify fan ownership marker.");
         }
     }
 
@@ -1353,10 +1510,38 @@ public sealed class MainViewModel : ViewModelBase
 
     private void ApplyDetectedProfileState(ProcessorProfileState state)
     {
-        DetectedProfileState = state switch
+        _processorProfileState = state;
+        RefreshGamingOptimisedSessionState();
+    }
+
+    private void RefreshGamingOptimisedSessionState()
+    {
+        _gamingOptimisedSessionState = _gamingOptimisedSessionStateEvaluator.Evaluate(
+            _processorProfileState,
+            _restoreSnapshotStore.HasOriginalRestoreSnapshot,
+            _fanRecoveryState,
+            FanStatus);
+        OnPropertyChanged(nameof(GamingOptimisedState));
+
+        DetectedProfileState = _gamingOptimisedSessionState switch
         {
-            ProcessorProfileState.GamingOptimisedDetected => "Gaming Optimised settings detected.",
-            ProcessorProfileState.Other => "Windows / custom processor settings.",
+            GamingOptimisedSessionState.Full =>
+                "Gaming Optimised is fully active: CPU settings and Maximum Safe RPM fans are verified.",
+            GamingOptimisedSessionState.PartialCpuOnly when
+                GamingOptimisedSessionStateEvaluator.IsVerifiedAppleAuto(FanStatus) =>
+                "Gaming CPU settings are active. Fans are currently using Apple Auto.",
+            GamingOptimisedSessionState.PartialCpuOnly when
+                FanStatus.BackendState == FanBackendState.InstalledStopped =>
+                "Gaming CPU settings are active. BCPC fan override is not active. Enable fan monitoring/control to re-enable Maximum Safe RPM.",
+            GamingOptimisedSessionState.PartialCpuOnly =>
+                "Gaming CPU settings are active. BCPC does not own a verified fan override.",
+            GamingOptimisedSessionState.FanRecoveryPendingOrUnsafe =>
+                "Gaming state is not fully verified. Fan recovery or ownership inspection is required.",
+            GamingOptimisedSessionState.NoActiveSession when
+                _processorProfileState == ProcessorProfileState.GamingOptimisedDetected =>
+                "Gaming Optimised settings detected.",
+            GamingOptimisedSessionState.NoActiveSession or GamingOptimisedSessionState.Other =>
+                "Windows / custom processor settings.",
             _ => "Unknown - power state has not been read."
         };
     }
@@ -1412,6 +1597,8 @@ public sealed class MainViewModel : ViewModelBase
 
         var hasFanRecoveryContext = _fanRecoveryState != FanRecoveryState.None;
         var isExactMbp161 = IsExactVerifiedMacBookPro16_1(verificationResult);
+        var isPartialGamingState =
+            _gamingOptimisedSessionState == GamingOptimisedSessionState.PartialCpuOnly;
 
         foreach (var profile in _profileCatalog.GetProfiles(verificationResult))
         {
@@ -1421,7 +1608,8 @@ public sealed class MainViewModel : ViewModelBase
                 isRestoreSnapshotAvailable: _restoreSnapshotStore.HasOriginalRestoreSnapshot,
                 isPowerStateReadable: isPowerStateReadable,
                 hasFanRecoveryContext: hasFanRecoveryContext,
-                isExactVerifiedMacBookPro16_1: isExactMbp161));
+                isExactVerifiedMacBookPro16_1: isExactMbp161,
+                isPartialGamingState: isPartialGamingState));
         }
     }
 

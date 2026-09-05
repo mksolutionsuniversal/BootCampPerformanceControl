@@ -51,6 +51,14 @@ public static class AppCompositionRoot
         var gamingOptimisedRestoreCoordinator = new GamingOptimisedRestoreCoordinator(
             powerManagementService,
             fanExecutionSessionFactory);
+        var gamingOptimisedFanResumeService = new GamingOptimisedFanResumeService(
+            hardwareDetectionService,
+            profileCatalog,
+            profileExecutionResolver,
+            fanProfileExecutionResolver,
+            powerManagementService,
+            restoreSnapshotStore,
+            fanExecutionSessionFactory);
         var cleanExitFanRecoveryService = new CleanExitFanRecoveryService(
             hardwareDetectionService,
             ownershipStore,
@@ -102,7 +110,8 @@ public static class AppCompositionRoot
             new WpfUserConfirmationService(),
             profileRestoreService: profileRestoreService,
             ownershipReader: ownershipStore,
-            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator);
+            gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator,
+            gamingOptimisedFanResumeService: gamingOptimisedFanResumeService);
 
         return new MainApplicationComposition(
             viewModel,
