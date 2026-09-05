@@ -11,10 +11,22 @@ using BootCampPerformanceControl.SettingsBackup;
 
 namespace BootCampPerformanceControl.UI;
 
+internal sealed record MainApplicationComposition(
+    MainViewModel ViewModel,
+    CleanExitFanRecoveryService CleanExitFanRecoveryService,
+    IApplicationLogger Logger);
+
 public static class AppCompositionRoot
 {
     public static MainViewModel CreateMainViewModel(IApplicationLogger logger)
     {
+        return CreateMainApplication(logger).ViewModel;
+    }
+
+    internal static MainApplicationComposition CreateMainApplication(IApplicationLogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
         var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
         var ownershipStore = new JsonFanOverrideOwnershipStore(logger);
         var modelSupportRegistry = new ModelSupportRegistry();
@@ -39,6 +51,11 @@ public static class AppCompositionRoot
         var gamingOptimisedRestoreCoordinator = new GamingOptimisedRestoreCoordinator(
             powerManagementService,
             fanExecutionSessionFactory);
+        var cleanExitFanRecoveryService = new CleanExitFanRecoveryService(
+            hardwareDetectionService,
+            ownershipStore,
+            gamingOptimisedRestoreCoordinator,
+            logger);
         var profileApplyService = new ProfileApplyService(
             hardwareDetectionService,
             profileCatalog,
@@ -67,7 +84,7 @@ public static class AppCompositionRoot
             profileExecutionResolver,
             logger);
 
-        return new MainViewModel(
+        var viewModel = new MainViewModel(
             hardwareDetectionService,
             powerManagementService,
             new AppleSmcReadOnlyFanControlService(),
@@ -86,5 +103,10 @@ public static class AppCompositionRoot
             profileRestoreService: profileRestoreService,
             ownershipReader: ownershipStore,
             gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator);
+
+        return new MainApplicationComposition(
+            viewModel,
+            cleanExitFanRecoveryService,
+            logger);
     }
 }
