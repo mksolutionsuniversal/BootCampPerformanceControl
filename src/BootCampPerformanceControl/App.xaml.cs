@@ -55,7 +55,8 @@ public partial class App : System.Windows.Application
             }
 
             logger.Info("Application start.");
-            var window = new MainWindow(AppCompositionRoot.CreateMainViewModel(logger));
+            var composition = AppCompositionRoot.CreateMainApplication(logger);
+            var window = new MainWindow(composition);
             MainWindow = window;
             window.Show();
         }
