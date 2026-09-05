@@ -9,23 +9,37 @@ BootCamp Performance Control (BCPC) is an open-source Windows utility for Intel 
 
 Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and guarded Apple SMC fan control when a verified runtime capability family is present.
 
-**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases) · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
+**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · **[Download 0.5.0-rc.1](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1)** · [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases) · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
 
 ## Release status
 
 - **Current stable release:** `0.4.0`
 - **Current release candidate:** `0.5.0-rc.1`
-- **Stable status:** `0.4.0` remains the recommended stable build.
+- **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
+- **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
 - **RC fan-control milestone:** dynamic topology plus capability-family T2-style fan-write eligibility.
 - **Physical fan-control validation:** end-to-end on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2).
 
-`0.5.0-rc.1` is a pre-release and is intentionally separate from stable `0.4.0`. It broadens runtime fan-write eligibility from an exact-model gate to a strict live SMC capability-family gate. That does **not** mean every T2 Mac has been physically validated.
+Published `0.5.0-rc.1` identity:
+
+```text
+Tag:           v0.5.0-rc.1
+Source commit: 27511afee7e1ae092bb53e63d8c1c96b73004c81
+ZIP:           BootCampPerformanceControl-0.5.0-rc.1-win-x64.zip
+ZIP size:      70320423 bytes
+ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
+Tests:         589 / 589 PASS
+```
+
+The annotated release tag is immutable project evidence for this candidate. Documentation commits made after publication do not move or rewrite `v0.5.0-rc.1`.
+
+`0.5.0-rc.1` broadens runtime fan-write eligibility from the stable line's exact-model gate to a strict live SMC capability-family gate. That does **not** mean every T2 Mac has been physically validated.
 
 > **Important:** Gaming Optimised uses Maximum Processor State `95% / 95%` and disables Turbo/Boost on AC and DC for every `SupportedIntelMac`. Fan control is additive and remains independently capability-gated.
 
 ## Quick start
 
-For normal use, start with the latest stable release. For `0.5.0-rc.1` testing, select the pre-release from the [GitHub Releases page](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases).
+For normal use, start with the latest stable release. For `0.5.0-rc.1` testing, use the dedicated [0.5.0-rc.1 GitHub pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1).
 
 1. Download the matching `win-x64` ZIP and `.sha256` file.
 2. Optionally verify the ZIP SHA-256.
@@ -207,6 +221,7 @@ The publish script creates a versioned self-contained `win-x64` directory, ZIP, 
 ## Documentation
 
 - [Latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
+- [0.5.0-rc.1 pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1)
 - [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases)
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)

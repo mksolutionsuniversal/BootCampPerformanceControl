@@ -6,7 +6,13 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 ## [Unreleased]
 
-No unreleased changes are currently recorded after the `0.5.0-rc.1` release-candidate preparation.
+### Documentation
+
+- Synchronized all repository Markdown documentation after publication of `0.5.0-rc.1`.
+- Recorded the immutable `v0.5.0-rc.1` tag, qualified source commit and published ZIP digest.
+- Updated contributor, support and security guidance from the stable `0.4.0` exact-model fan gate to the `0.5.0-rc.1` live capability-family policy.
+- Clarified that stable `0.4.0` remains the latest stable release while `0.5.0-rc.1` is a separate GitHub pre-release.
+- No hardware-control code is changed by this post-release documentation synchronization.
 
 ## [0.5.0-rc.1] - 2026-09-05
 
@@ -53,6 +59,13 @@ For the Phase B candidate before release preparation:
 - Pull-request Windows CI (`Build and test`): PASS.
 - Post-merge Windows CI on `main`: PASS.
 
+Release-preparation qualification also passed after the version bump to `0.5.0-rc.1`:
+
+- Release build: PASS.
+- Release tests: `589/589` passed.
+- release packaging validation: PASS.
+- post-merge `main` CI: PASS.
+
 ### Physical validation
 
 The Phase B runtime was physically validated end-to-end on the reference `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2) running Windows 10 Boot Camp at pre-release `main` commit `5a041303c67175491a9f36ff1927db8c5484ec30`.
@@ -86,9 +99,15 @@ See `docs/0.5.0-rc.1-HARDWARE-VALIDATION.md` for the preserved test record.
 
 ### Distribution
 
+- Published as GitHub pre-release `v0.5.0-rc.1`.
+- Qualified source commit: `27511afee7e1ae092bb53e63d8c1c96b73004c81`.
+- Published ZIP: `BootCampPerformanceControl-0.5.0-rc.1-win-x64.zip`.
+- Published ZIP size: `70320423 bytes`.
+- Published ZIP SHA-256: `B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5`.
 - The release remains Windows x64 ZIP-only.
 - BCPC does not bundle Macs Fan Control, `applesmc.sys`, the native experimental `BootCampSmc` driver, or any other third-party/kernel driver.
 - The physically validated compatibility environment still uses a separately installed copy of Macs Fan Control `1.5.16 (Build 693)` with AppleSMC driver file version `1.0.7.0`.
+- Stable `v0.4.0` remains unchanged and remains the latest stable release.
 
 ## [0.4.0] - 2026-09-05
 

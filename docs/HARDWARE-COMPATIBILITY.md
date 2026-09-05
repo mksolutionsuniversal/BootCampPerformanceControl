@@ -4,11 +4,24 @@ BootCamp Performance Control targets Intel Macs running Windows through Boot Cam
 
 Processor-profile availability and fan-write availability are intentionally separate concepts. A machine may be eligible for the conservative Windows processor profile while fan writes are unavailable, declined or blocked by the runtime safety gate.
 
-## Release status
+## Current release status
 
 - Stable `0.4.0`: exact `MacBookPro16,1` production fan-write gate.
 - Release candidate `0.5.0-rc.1`: dynamic fan topology plus verified T2-style SMC capability-family write gate.
-- End-to-end physical fan-write validation currently completed on `MacBookPro16,1` only.
+- `0.5.0-rc.1` is published as a GitHub pre-release.
+- End-to-end physical fan-write validation is currently completed on `MacBookPro16,1` only.
+
+Published RC identity:
+
+```text
+Tag:           v0.5.0-rc.1
+Source commit: 27511afee7e1ae092bb53e63d8c1c96b73004c81
+ZIP:           BootCampPerformanceControl-0.5.0-rc.1-win-x64.zip
+ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
+Tests:         589 / 589 PASS
+```
+
+Stable `0.4.0` remains unchanged and remains the latest stable release.
 
 Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is **not** a statement that the detected Mac model has been physically tested by the BCPC project.
 
@@ -28,13 +41,13 @@ For every `SupportedIntelMac`, the current product profile is:
 - Processor boost AC/DC: disabled
 - Display refresh rate: unchanged
 
-The strongest empirical workload evidence for this target still comes from the primary `MacBookPro16,1` test machine. On that system, comparable CS2 testing showed roughly 8–10 °C lower CPU/GPU temperatures, no observed thermal throttling at `95%`, and essentially unchanged gameplay smoothness versus the hotter Turbo-enabled state. Values around `90%` produced noticeable performance loss.
+The strongest empirical workload evidence for this target comes from the primary `MacBookPro16,1` test machine. On that system, comparable CS2 testing showed roughly 8–10 °C lower CPU/GPU temperatures, no observed thermal throttling at `95%`, and essentially unchanged gameplay smoothness versus the hotter Turbo-enabled state. Values around `90%` produced noticeable performance loss.
 
 The product therefore uses `95% / 95%` globally for `SupportedIntelMac`, but those measured CS2 performance/temperature results must not be generalized as if every Intel Mac has been benchmarked identically.
 
 ## `0.5.0-rc.1` verified fan capability family
 
-Fan-write permission is no longer granted by a giant Mac-model whitelist. BCPC re-reads the live AppleSMC capability immediately before a write and requires the complete guarded family fingerprint.
+Fan-write permission is no longer granted by a Mac-model whitelist in this release candidate. BCPC re-reads the live AppleSMC capability immediately before a write and requires the complete guarded family fingerprint.
 
 ### Transport and fan count
 
@@ -71,7 +84,7 @@ For every discovered fan:
 - reported maximum RPM must be finite,
 - maximum RPM must be greater than zero,
 - maximum RPM must be no greater than `10000 RPM`,
-- live actual/target values must be finite and within the existing bounded policy,
+- live actual/target values must be finite and within the bounded policy,
 - mode must decode to a supported Auto/Manual value.
 
 The `10000 RPM` value is deliberately broad anti-corruption protection. It is **not** an Apple specification, not a recommended fan speed and never a write target.
@@ -224,3 +237,18 @@ The repository also contains an independently authored experimental KMDF researc
 Its physically completed T2 research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
 
 This research driver is not the production fan-control dependency for `0.5.0-rc.1`, is not included in release packages, and must not be interpreted as generic T1/T2 support.
+
+## Safe validation order for another Mac
+
+For a new Intel Mac, especially an untested T2-era model, use this order:
+
+1. capture model/CPU/GPU/Windows information,
+2. perform read-only AppleSMC protocol and `FNum` discovery,
+3. inspect per-fan metadata and live values,
+4. stop if the capability family does not match exactly,
+5. only then perform controlled Maximum Safe RPM write/read-back testing,
+6. verify Apple Auto Restore,
+7. verify processor snapshot/Restore,
+8. test crash/startup recovery only after the earlier stages pass.
+
+Do not use another model merely as evidence that T1/T2 behaviour is interchangeable.
