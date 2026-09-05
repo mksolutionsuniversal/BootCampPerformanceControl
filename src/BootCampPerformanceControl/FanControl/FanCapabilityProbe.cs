@@ -19,12 +19,6 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
         string model,
         CancellationToken cancellationToken)
     {
-        var modelGate = _safetyPolicy.EvaluateIdentity(model);
-        if (modelGate.Failures.Count > 0)
-        {
-            return modelGate;
-        }
-
         var transportProtocol = await _protocol
             .GetProtocolAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -35,16 +29,33 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
             return protocolGate;
         }
 
-        var snapshot = new FanSmcSnapshot(
-            await _protocol.ReadKeyAsync("FNum", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F0Mx", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F1Mx", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F0Ac", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F1Ac", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F0Md", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F1Md", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F0Tg", cancellationToken).ConfigureAwait(false),
-            await _protocol.ReadKeyAsync("F1Tg", cancellationToken).ConfigureAwait(false));
+        var fanCountValue = await _protocol
+            .ReadKeyAsync("FNum", cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!_safetyPolicy.TryDecodeFanCount(fanCountValue, out var fanCount, out var failure))
+        {
+            return new FanControlCapabilityResult(
+                IsReadSupported: false,
+                IsHardwareSafetyGateSatisfied: false,
+                [failure],
+                transportProtocol,
+                new FanSmcSnapshot(fanCountValue, Array.Empty<FanSmcChannelSnapshot>()));
+        }
+
+        var fans = new List<FanSmcChannelSnapshot>(fanCount);
+        for (var value = 0; value < fanCount; value++)
+        {
+            var index = new FanIndex(value);
+            fans.Add(new FanSmcChannelSnapshot(
+                index,
+                await _protocol.ReadKeyAsync(index.GetSmcKey("Mx"), cancellationToken).ConfigureAwait(false),
+                await _protocol.ReadKeyAsync(index.GetSmcKey("Ac"), cancellationToken).ConfigureAwait(false),
+                await _protocol.ReadKeyAsync(index.GetSmcKey("Md"), cancellationToken).ConfigureAwait(false),
+                await _protocol.ReadKeyAsync(index.GetSmcKey("Tg"), cancellationToken).ConfigureAwait(false)));
+        }
+
+        var snapshot = new FanSmcSnapshot(fanCountValue, fans);
 
         return _safetyPolicy.Evaluate(model, transportProtocol, snapshot);
     }

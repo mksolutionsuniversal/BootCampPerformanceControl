@@ -1,3 +1,5 @@
+using BootCampPerformanceControl.FanControl.Smc;
+
 namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanController
@@ -19,9 +21,7 @@ internal sealed class FanController
             .ProbeAsync(model, cancellationToken)
             .ConfigureAwait(false);
 
-        if (!capability.IsReadSupported ||
-            !capability.IsHardwareSafetyGateSatisfied ||
-            capability.Snapshot is null)
+        if (!capability.IsReadSupported || capability.Snapshot is null)
         {
             return new FanControllerReadResult(
                 CreateUnavailableStatus(capability),
@@ -29,22 +29,25 @@ internal sealed class FanController
         }
 
         var snapshot = capability.Snapshot;
-        var fan0Actual = snapshot.Fan0Actual.GetFloat32();
-        var fan1Actual = snapshot.Fan1Actual.GetFloat32();
-        var fan0Maximum = snapshot.Fan0Maximum.GetFloat32();
-        var fan1Maximum = snapshot.Fan1Maximum.GetFloat32();
-        var fan0Mode = GetMode(snapshot.Fan0Mode.GetUInt8());
-        var fan1Mode = GetMode(snapshot.Fan1Mode.GetUInt8());
         var writeControlState = GetObservedWriteControlState(capability);
 
         return new FanControllerReadResult(
             new FanControlStatus(
                 FanBackendState.Running,
                 FanSafetyState.ReadOnlyVerified,
-                new FanReading(fan0Actual, fan0Maximum, fan0Mode),
-                new FanReading(fan1Actual, fan1Maximum, fan1Mode),
+                snapshot.Fans.Select(fan => new FanChannelReading(
+                    fan.Index.Value,
+                    new FanReading(
+                        fan.Actual.GetFloat32(),
+                        fan.Maximum.GetFloat32(),
+                        GetMode(fan.Mode.GetUInt8())))).ToArray(),
                 "The AppleSMC read-only protocol and fan metadata were verified.",
-                writeControlState),
+                writeControlState)
+            {
+                TransportDisplayText = FormatTransport(capability.Protocol),
+                ReportedFanCount = TryGetReportedFanCount(snapshot),
+                DiscoveredFanCount = snapshot.Fans.Count
+            },
             capability);
     }
 
@@ -60,7 +63,39 @@ internal sealed class FanController
         return FanControlStatus.CreateUnavailable(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyUnavailable,
-            reason);
+            reason) with
+        {
+            TransportDisplayText = FormatTransport(capability.Protocol),
+            ReportedFanCount = TryGetReportedFanCount(capability.Snapshot),
+            DiscoveredFanCount = capability.Snapshot?.Fans.Count
+        };
+    }
+
+    private static int? TryGetReportedFanCount(FanSmcSnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return snapshot.FanCount.GetUInt8();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string FormatTransport(SmcTransportProtocol? protocol)
+    {
+        return protocol switch
+        {
+            SmcTransportProtocol.Mmio => "MMIO (protocol 1)",
+            SmcTransportProtocol.Unknown => "Unknown (protocol 0)",
+            _ => "Unavailable"
+        };
     }
 
     private static FanOperatingMode GetMode(byte mode)
@@ -80,21 +115,18 @@ internal sealed class FanController
             ?? throw new InvalidOperationException(
                 "A verified fan capability must include an SMC snapshot.");
 
-        var fan0Mode = snapshot.Fan0Mode.GetUInt8();
-        var fan1Mode = snapshot.Fan1Mode.GetUInt8();
+        if (!capability.IsHardwareSafetyGateSatisfied)
+        {
+            return FanWriteControlState.NotAvailable;
+        }
 
-        if (fan0Mode == 1 && fan1Mode == 1
-            && ApproximatelyEqual(
-                snapshot.Fan0Target.GetFloat32(),
-                snapshot.Fan0Maximum.GetFloat32())
-            && ApproximatelyEqual(
-                snapshot.Fan1Target.GetFloat32(),
-                snapshot.Fan1Maximum.GetFloat32()))
+        if (snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 1
+            && ApproximatelyEqual(fan.Target.GetFloat32(), fan.Maximum.GetFloat32())))
         {
             return FanWriteControlState.MaximumSafeRpmDetected;
         }
 
-        return fan0Mode == 1 || fan1Mode == 1
+        return snapshot.Fans.Any(fan => fan.Mode.GetUInt8() == 1)
             ? FanWriteControlState.ManualModeDetected
             : FanWriteControlState.Available;
     }

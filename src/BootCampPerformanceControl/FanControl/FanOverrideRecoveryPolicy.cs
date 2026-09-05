@@ -26,39 +26,43 @@ internal sealed class FanOverrideRecoveryPolicy
         }
 
         var snapshot = capability.Snapshot;
-        var fan0Mode = snapshot.Fan0Mode.GetUInt8();
-        var fan1Mode = snapshot.Fan1Mode.GetUInt8();
+        if (snapshot.Fans.Count != marker.Targets.Count ||
+            !snapshot.Fans.Select(fan => fan.Index)
+                .SequenceEqual(marker.Targets.Select(target => target.Index)))
+        {
+            return Blocked(
+                "Recovery is blocked because the current fan topology does not match the application ownership marker.");
+        }
 
-        if (fan0Mode == 0 && fan1Mode == 0)
+        if (snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0))
         {
             return new FanOverrideRecoveryDecision(
                 FanOverrideRecoveryAction.None,
-                "Both fans are already in Apple Auto. The stale ownership marker can be cleared.");
+                "Every owned fan is already in Apple Auto. The stale ownership marker can be cleared.");
         }
 
-        if (fan0Mode != 1 || fan1Mode != 1)
+        if (!snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 1))
         {
             return Blocked(
                 "Recovery is blocked because the current fan modes no longer match the application-owned manual state.");
         }
 
-        var fan0Target = snapshot.Fan0Target.GetFloat32();
-        var fan1Target = snapshot.Fan1Target.GetFloat32();
-        var fan0Maximum = snapshot.Fan0Maximum.GetFloat32();
-        var fan1Maximum = snapshot.Fan1Maximum.GetFloat32();
-
-        if (!ApproximatelyEqual(fan0Target, marker.Fan0ExpectedTargetRpm) ||
-            !ApproximatelyEqual(fan1Target, marker.Fan1ExpectedTargetRpm))
+        for (var position = 0; position < snapshot.Fans.Count; position++)
         {
-            return Blocked(
-                "Recovery is blocked because the current fan targets do not match the application ownership marker.");
-        }
+            var fan = snapshot.Fans[position];
+            var expected = marker.Targets[position];
 
-        if (!ApproximatelyEqual(fan0Maximum, marker.Fan0ExpectedTargetRpm) ||
-            !ApproximatelyEqual(fan1Maximum, marker.Fan1ExpectedTargetRpm))
-        {
-            return Blocked(
-                "Recovery is blocked because the current maximum RPM values do not match the application ownership marker.");
+            if (!ApproximatelyEqual(fan.Target.GetFloat32(), expected.ExpectedTargetRpm))
+            {
+                return Blocked(
+                    "Recovery is blocked because the current fan targets do not match the application ownership marker.");
+            }
+
+            if (!ApproximatelyEqual(fan.Maximum.GetFloat32(), expected.ExpectedTargetRpm))
+            {
+                return Blocked(
+                    "Recovery is blocked because the current maximum RPM values do not match the application ownership marker.");
+            }
         }
 
         return new FanOverrideRecoveryDecision(

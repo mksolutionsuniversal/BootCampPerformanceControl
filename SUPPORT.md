@@ -37,9 +37,7 @@ Do not test speculative SMC writes merely to produce a bug report.
 
 ## Processor profile guidance
 
-The Gaming Optimised `95%` processor limit is an empirically validated result for `MacBookPro16,1`.
-
-It is not a universal recommendation for every Intel Mac. Reports from other models are useful evidence, but new defaults require separate validation.
+Gaming Optimised globally uses Maximum Processor State `95% / 95%` and Turbo/Boost `Disabled / Disabled` for supported Intel Macs. This processor target is independent of the model-specific fan-write gate.
 
 ## Fan-control dependency
 

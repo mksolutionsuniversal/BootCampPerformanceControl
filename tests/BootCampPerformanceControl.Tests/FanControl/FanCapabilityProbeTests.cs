@@ -27,19 +27,19 @@ public sealed class FanCapabilityProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_RejectsUnverifiedModelBeforeDeviceAccess()
+    public async Task ProbeAsync_ValidUnknownModelIsReadAndWriteFamilySupported()
     {
         await using var transport = new FakeSmcTransport();
         var probe = CreateProbe(transport);
 
         var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
 
-        Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareSafetyGateSatisfied);
-        Assert.Contains(result.Failures, failure => failure.Contains("not verified", StringComparison.Ordinal));
-        Assert.Equal(0, transport.ProtocolCalls);
-        Assert.Equal(0, transport.KeyInfoCalls);
-        Assert.Equal(0, transport.ReadCalls);
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Empty(result.Failures);
+        Assert.Equal(1, transport.ProtocolCalls);
+        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(9, transport.ReadCalls);
     }
 
     [Fact]
@@ -65,19 +65,21 @@ public sealed class FanCapabilityProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_RejectsUnexpectedFanCount()
+    public async Task ProbeAsync_ThreeFanTopologyIsReadAndWriteFamilySupported()
     {
         await using var transport = new FakeSmcTransport();
         transport.SetUInt8("FNum", 3, 0x80);
+        transport.SetFan(2, 4800f, 1500f, 0, 1500f);
         var probe = CreateProbe(transport);
 
         var result = await probe.ProbeAsync(
             VerifiedHardwareModels.MacBookPro16_1,
             CancellationToken.None);
 
-        Assert.False(result.IsReadSupported);
-        Assert.False(result.IsHardwareSafetyGateSatisfied);
-        Assert.Contains(result.Failures, failure => failure.Contains("exactly 2 fans", StringComparison.Ordinal));
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(3, result.Snapshot?.Fans.Count);
+        Assert.Empty(result.Failures);
     }
 
     [Fact]
@@ -98,7 +100,23 @@ public sealed class FanCapabilityProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_RejectsMaximumRpmOutsideVerifiedEnvelope()
+    public async Task ProbeAsync_T1LikeFpe2RpmSchemaCannotEnterT2WriteFamily()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetFpe2("F0Mx", 5616, 0x85);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
+        Assert.False(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("F0Mx", StringComparison.Ordinal)
+            && failure.Contains("type='fpe2'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_DifferentValidMaximumDoesNotDependOnLegacyModelEnvelope()
     {
         await using var transport = new FakeSmcTransport();
         transport.SetFloat32("F0Mx", 9000f, 0x85);
@@ -108,9 +126,101 @@ public sealed class FanCapabilityProbeTests
             VerifiedHardwareModels.MacBookPro16_1,
             CancellationToken.None);
 
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Empty(result.Failures);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_OneFanReadsOnlyDiscoveredFanKeys()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetUInt8("FNum", 1, 0x80);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Single(result.Snapshot!.Fans);
+        Assert.Equal(
+            new[] { "FNum", "F0Mx", "F0Ac", "F0Md", "F0Tg" },
+            transport.RequestedKeys);
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(-1f)]
+    [InlineData(10000.01f)]
+    public async Task ProbeAsync_InvalidMaximumFailsFamilyValidation(float maximum)
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetFloat32("F0Mx", maximum, 0x85);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
         Assert.False(result.IsReadSupported);
         Assert.False(result.IsHardwareSafetyGateSatisfied);
-        Assert.Contains(result.Failures, failure => failure.Contains("verified compatibility range", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("invalid maximum RPM", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_MaximumAtCorruptionCeilingIsAccepted()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetFloat32("F0Mx", 10000f, 0x85);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ZeroFansIsValidPassiveTopologyAndReadsNoFanKeys()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetUInt8("FNum", 0, 0x80);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Empty(result.Snapshot!.Fans);
+        Assert.Equal(new[] { "FNum" }, transport.RequestedKeys);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UnrepresentableFanCountFailsClosedBeforeFanKeyReads()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetUInt8("FNum", 11, 0x80);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro14,3", CancellationToken.None);
+
+        Assert.False(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Contains(result.Failures, failure => failure.Contains("at most 10", StringComparison.Ordinal));
+        Assert.Equal(new[] { "FNum" }, transport.RequestedKeys);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_InvalidFanCountMetadataFailsClosedBeforeFanKeyReads()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetUInt8("FNum", 2, 0x81);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro16,1", CancellationToken.None);
+
+        Assert.False(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Contains(result.Failures, failure => failure.Contains("FNum", StringComparison.Ordinal));
+        Assert.Equal(new[] { "FNum" }, transport.RequestedKeys);
     }
 
     [Fact]
@@ -161,6 +271,8 @@ public sealed class FanCapabilityProbeTests
 
         public int ReadCalls { get; private set; }
 
+        public List<string> RequestedKeys { get; } = new();
+
         public Task<SmcTransportProtocol> GetProtocolAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -174,6 +286,7 @@ public sealed class FanCapabilityProbeTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             KeyInfoCalls++;
+            RequestedKeys.Add(key);
             var entry = _entries[key];
             return Task.FromResult(new SmcKeyInfo(
                 key,
@@ -202,6 +315,22 @@ public sealed class FanCapabilityProbeTests
         public void SetFloat32(string key, float value, byte attributes)
         {
             _entries[key] = new Entry("flt ", attributes, BitConverter.GetBytes(value));
+        }
+
+        public void SetFpe2(string key, ushort value, byte attributes)
+        {
+            _entries[key] = new Entry(
+                "fpe2",
+                attributes,
+                [checked((byte)(value >> 8)), checked((byte)(value & 0xFF))]);
+        }
+
+        public void SetFan(int index, float maximum, float actual, byte mode, float target)
+        {
+            SetFloat32($"F{index}Mx", maximum, 0x85);
+            SetFloat32($"F{index}Ac", actual, 0x84);
+            SetUInt8($"F{index}Md", mode, 0xD0);
+            SetFloat32($"F{index}Tg", target, 0xD4);
         }
 
         public ValueTask DisposeAsync()

@@ -36,6 +36,28 @@ internal sealed record GamingOptimisedApplyResult(
             FanCompensation: null);
     }
 
+    public static GamingOptimisedApplyResult SuccessfulProcessorOnly(
+        string profileId,
+        ProfileExecutionResolution processorResolution,
+        PowerOperationResult powerOperation,
+        FanProfileExecutionResolution? fanResolution = null,
+        FanOverrideExecutionResult? fanExecution = null,
+        FanOverrideRecoveryDecision? fanCompensation = null)
+    {
+        ArgumentNullException.ThrowIfNull(processorResolution);
+        ArgumentNullException.ThrowIfNull(powerOperation);
+
+        return new GamingOptimisedApplyResult(
+            profileId,
+            IsSuccessful: true,
+            FailureReason: string.Empty,
+            processorResolution,
+            fanResolution,
+            fanExecution,
+            powerOperation,
+            fanCompensation);
+    }
+
     public static GamingOptimisedApplyResult Failed(
         string profileId,
         string failureReason,

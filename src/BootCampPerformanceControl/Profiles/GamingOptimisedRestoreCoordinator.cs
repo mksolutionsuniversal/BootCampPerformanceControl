@@ -21,15 +21,7 @@ internal sealed class GamingOptimisedRestoreCoordinator
         string model,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(
-                model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal))
-        {
-            return GamingOptimisedRestoreResult.Failed(
-                model ?? string.Empty,
-                $"Gaming Optimised restore requires the verified {VerifiedHardwareModels.MacBookPro16_1} model.");
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
 
         FanControlCapabilityResult freshFanCapability;
         FanOverrideRecoveryDecision fanRecovery;
@@ -208,8 +200,8 @@ internal sealed class GamingOptimisedRestoreCoordinator
 
         try
         {
-            return capability.Snapshot.Fan0Mode.GetUInt8() == 0 &&
-                   capability.Snapshot.Fan1Mode.GetUInt8() == 0;
+            return capability.Snapshot.Fans.Count > 0 &&
+                   capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
         }
         catch (InvalidOperationException)
         {

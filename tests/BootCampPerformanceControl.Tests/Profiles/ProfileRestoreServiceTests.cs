@@ -19,7 +19,12 @@ public sealed class ProfileRestoreServiceTests
         var power = new FakePowerManagementService();
         var sessionFactory = new TestFanExecutionSessionFactory();
         var coordinator = new GamingOptimisedRestoreCoordinator(power, sessionFactory);
-        var service = CreateService(hardware, power, coordinator);
+        var service = CreateService(
+            hardware,
+            power,
+            coordinator,
+            new FakeRestoreSnapshotStore { HasOriginalRestoreSnapshot = true },
+            OwnershipMarker());
 
         var result = await service.RestoreAsync(CancellationToken.None);
 
@@ -35,7 +40,11 @@ public sealed class ProfileRestoreServiceTests
     {
         var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
         var power = new FakePowerManagementService();
-        var service = CreateService(hardware, power, coordinator: null);
+        var service = CreateService(
+            hardware,
+            power,
+            coordinator: null,
+            ownershipReader: OwnershipMarker());
 
         var result = await service.RestoreAsync(CancellationToken.None);
 
@@ -54,7 +63,11 @@ public sealed class ProfileRestoreServiceTests
             OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
         };
         var coordinator = new GamingOptimisedRestoreCoordinator(power, sessionFactory);
-        var service = CreateService(hardware, power, coordinator);
+        var service = CreateService(
+            hardware,
+            power,
+            coordinator,
+            ownershipReader: OwnershipMarker());
 
         var result = await service.RestoreAsync(CancellationToken.None);
 
@@ -121,7 +134,11 @@ public sealed class ProfileRestoreServiceTests
             })
         };
         var coordinator = new GamingOptimisedRestoreCoordinator(power, sessionFactory);
-        var service = CreateService(hardware, power, coordinator);
+        var service = CreateService(
+            hardware,
+            power,
+            coordinator,
+            ownershipReader: OwnershipMarker());
 
         var thrown = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
             () => service.RestoreAsync(CancellationToken.None));
@@ -278,6 +295,18 @@ public sealed class ProfileRestoreServiceTests
             PlatformSupportStatus.SupportedIntelMac,
             ModelValidationLevel.PerformanceValidated,
             "Verified.");
+    }
+
+    private static TestFanOverrideOwnershipStore OwnershipMarker()
+    {
+        return new TestFanOverrideOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                VerifiedHardwareModels.MacBookPro16_1,
+                5321.25f,
+                4789.5f,
+                DateTimeOffset.UtcNow)
+        };
     }
 
     private sealed class FakeHardwareDetectionService : IHardwareDetectionService

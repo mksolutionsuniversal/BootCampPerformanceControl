@@ -11,6 +11,8 @@ public sealed record ProfileApplyResult(
     ProfileExecutionResolution? ProfileExecutionResolution,
     PowerOperationResult? PowerOperation)
 {
+    internal bool IsFanOverrideActive { get; init; }
+
     public static ProfileApplyResult Failed(
         string profileId,
         string failureReason,
@@ -65,6 +67,10 @@ public sealed record ProfileApplyResult(
                 : gamingResult.FailureReason,
             modelVerificationResult,
             gamingResult.ProcessorResolution,
-            gamingResult.PowerOperation);
+            gamingResult.PowerOperation)
+        {
+            IsFanOverrideActive = gamingResult.IsSuccessful
+                && gamingResult.FanExecution?.IsApplied == true
+        };
     }
 }

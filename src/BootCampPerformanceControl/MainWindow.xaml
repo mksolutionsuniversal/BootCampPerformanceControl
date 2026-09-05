@@ -216,22 +216,19 @@
                         <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Safety status" />
                         <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.SafetyDisplayText}" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Fan 0" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Fan0DisplayText}" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Fans" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.FansDisplayText}" />
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Fan 1" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Fan1DisplayText}" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Mode" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.ModeDisplayText}" />
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Mode" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.ModeDisplayText}" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Write control" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.WriteControlDisplayText}" />
 
-                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Write control" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.WriteControlDisplayText}" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Details}" />
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding FanStatus.Details}" />
-
-                        <Button Grid.Row="7"
+                        <Button Grid.Row="6"
                                 Grid.Column="1"
                                 Content="Enable Fan Monitoring"
                                 Command="{Binding EnableFanMonitoringCommand}"

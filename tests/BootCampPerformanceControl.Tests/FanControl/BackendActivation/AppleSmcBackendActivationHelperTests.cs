@@ -26,17 +26,22 @@ public sealed class AppleSmcBackendActivationHelperTests
     }
 
     [Fact]
-    public async Task RunAsync_SupportedIntelMacOutsideExactFanPolicy_DoesNotCallActivator()
+    public async Task RunAsync_SupportedIntelMacOutsideExactWritePolicy_CanActivateReadOnlyBackend()
     {
-        var activator = new FakeBackendActivator();
+        var activator = new FakeBackendActivator
+        {
+            Result = new AppleSmcBackendActivationResult(
+                AppleSmcBackendActivationOutcome.Running,
+                "Running.")
+        };
         var helper = CreateHelper(
             SupportedIntelMac(VerifiedHardwareModels.MacBookPro14_3),
             activator);
 
         var result = await helper.RunAsync(CancellationToken.None);
 
-        Assert.Equal(AppleSmcBackendActivationOutcome.UnsupportedModel, result.Outcome);
-        Assert.Equal(0, activator.StartCallCount);
+        Assert.Same(activator.Result, result);
+        Assert.Equal(1, activator.StartCallCount);
     }
 
     [Fact]

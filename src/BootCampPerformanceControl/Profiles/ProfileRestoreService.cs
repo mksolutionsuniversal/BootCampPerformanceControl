@@ -103,7 +103,7 @@ public sealed class ProfileRestoreService
         {
             _logger.Info($"Fan override ownership marker detected during restore. Model={marker.Model}.");
 
-            if (!IsExactVerifiedMacBookPro16_1(verificationResult)
+            if (verificationResult.PlatformSupport != PlatformSupportStatus.SupportedIntelMac
                 || !string.Equals(marker.Model, verificationResult.Model, StringComparison.Ordinal))
             {
                 _logger.Info(
@@ -112,16 +112,11 @@ public sealed class ProfileRestoreService
                     "Fan recovery is blocked because current hardware state does not match the ownership marker.",
                     verificationResult);
             }
-        }
 
-        if (IsExactVerifiedMacBookPro16_1(verificationResult))
-        {
             if (_gamingOptimisedRestoreCoordinator is null)
             {
-                // CRITICAL: MacBookPro16,1 must NEVER fall back to CPU-only.
-                // If coordinator is missing, fail closed without touching power.
                 return ProfileRestoreResult.Failed(
-                    $"Transactional fan restore coordinator is required for verified {VerifiedHardwareModels.MacBookPro16_1}.",
+                    "Transactional fan restore coordinator is required while BCPC fan ownership exists.",
                     verificationResult);
             }
 
@@ -186,21 +181,11 @@ public sealed class ProfileRestoreService
             }
         }
 
-        // Other models retain existing power-only Restore
+        // Without BCPC fan ownership, Restore remains a processor-only operation.
         var powerOperation = await _powerManagementService
             .RestoreOriginalSettingsAsync(cancellationToken)
             .ConfigureAwait(false);
 
         return ProfileRestoreResult.FromPowerOperation(powerOperation, verificationResult);
-    }
-
-    private static bool IsExactVerifiedMacBookPro16_1(ModelVerificationResult verificationResult)
-    {
-        return string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal)
-            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
-            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
     }
 }

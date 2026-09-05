@@ -1,6 +1,21 @@
 namespace BootCampPerformanceControl.FanControl;
 
-internal sealed record FanMaximumSafeRpmPlan(
-    string Model,
-    float Fan0TargetRpm,
-    float Fan1TargetRpm);
+internal sealed record FanMaximumSafeRpmTarget(
+    FanIndex Index,
+    float TargetRpm);
+
+internal sealed record FanMaximumSafeRpmPlan
+{
+    public FanMaximumSafeRpmPlan(
+        string model,
+        IEnumerable<FanMaximumSafeRpmTarget> targets)
+    {
+        Model = model;
+        ArgumentNullException.ThrowIfNull(targets);
+        Targets = targets.ToArray();
+    }
+
+    public string Model { get; init; }
+
+    public IReadOnlyList<FanMaximumSafeRpmTarget> Targets { get; }
+}

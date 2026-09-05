@@ -14,8 +14,7 @@ public sealed class FanControllerTests
             FanSafetyState.MonitoringUnavailable,
             "Unavailable in test.");
 
-        Assert.Equal("\u2014", status.Fan0DisplayText);
-        Assert.Equal("\u2014", status.Fan1DisplayText);
+        Assert.Equal("None", status.FansDisplayText);
         Assert.Equal("\u2014", status.ModeDisplayText);
     }
 
@@ -33,21 +32,24 @@ public sealed class FanControllerTests
         Assert.Equal(FanBackendState.Running, result.Status.BackendState);
         Assert.Equal(FanSafetyState.ReadOnlyVerified, result.Status.SafetyState);
         Assert.Equal(FanWriteControlState.Available, result.Status.WriteControlState);
-        Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), result.Status.Fan0);
-        Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), result.Status.Fan1);
+        Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), result.Status.Fans[0].Reading);
+        Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), result.Status.Fans[1].Reading);
         Assert.True(result.Status.IsWriteControlEnabled);
         Assert.Equal("Read-only monitoring verified", result.Status.SafetyDisplayText);
-        Assert.Equal("Available (verified MacBookPro16,1)", result.Status.WriteControlDisplayText);
+        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
+        Assert.Equal("MMIO (protocol 1)", result.Status.TransportDisplayText);
+        Assert.Equal(2, result.Status.ReportedFanCount);
+        Assert.Equal(2, result.Status.DiscoveredFanCount);
         Assert.True(result.Capability.IsReadSupported);
         Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Write control: Available (verified MacBookPro16,1)", result.Status.DisplayText, StringComparison.Ordinal);
+        Assert.Contains("Write control: Available (verified T2 SMC family)", result.Status.DisplayText, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ReadStatusAsync_ReportsUnverifiedModelWithoutReadingKeys()
+    public async Task ReadStatusAsync_ReportsUnknownCompatibleModelWriteFamilyAvailable()
     {
         await using var transport = new FakeSmcTransport();
         var controller = CreateController(transport);
@@ -56,14 +58,13 @@ public sealed class FanControllerTests
             VerifiedHardwareModels.MacBookPro14_3,
             CancellationToken.None);
 
-        Assert.False(result.Status.IsAvailable);
-        Assert.Equal("Disabled (write capability not verified)", result.Status.WriteControlDisplayText);
-        Assert.False(result.Capability.IsReadSupported);
-        Assert.False(result.Capability.IsHardwareSafetyGateSatisfied);
-        Assert.Contains("read-only unavailable", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("not verified", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Equal(0, transport.KeyInfoCalls);
-        Assert.Equal(0, transport.ReadCalls);
+        Assert.True(result.Status.IsAvailable);
+        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
+        Assert.True(result.Capability.IsReadSupported);
+        Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
+        Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
+        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(9, transport.ReadCalls);
     }
 
     [Fact]
@@ -82,8 +83,8 @@ public sealed class FanControllerTests
         Assert.Equal(FanWriteControlState.ManualModeDetected, result.Status.WriteControlState);
         Assert.False(result.Status.IsWriteControlEnabled);
         Assert.Equal("Manual mode detected", result.Status.WriteControlDisplayText);
-        Assert.Equal(FanOperatingMode.Manual, result.Status.Fan0?.Mode);
-        Assert.Equal(FanOperatingMode.Manual, result.Status.Fan1?.Mode);
+        Assert.Equal(FanOperatingMode.Manual, result.Status.Fans[0].Reading.Mode);
+        Assert.Equal(FanOperatingMode.Manual, result.Status.Fans[1].Reading.Mode);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Equal(9, transport.KeyInfoCalls);

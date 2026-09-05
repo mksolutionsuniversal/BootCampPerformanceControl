@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl;
@@ -54,19 +55,32 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                 bufferSize: 4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-            var document = await JsonSerializer.DeserializeAsync<FanOverrideOwnershipDocument>(
+            var root = await JsonSerializer.DeserializeAsync<JsonElement>(
                 stream,
                 JsonOptions,
-                cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidDataException("The fan ownership marker JSON document is empty.");
+                cancellationToken).ConfigureAwait(false);
 
-            if (document.SchemaVersion != FanOverrideOwnershipDocument.CurrentSchemaVersion)
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
+                !schemaVersionElement.TryGetInt32(out var schemaVersion))
             {
                 throw new InvalidDataException(
-                    $"Unsupported fan ownership marker schema version {document.SchemaVersion}.");
+                    "The fan ownership marker does not contain a valid schema version.");
             }
 
-            var marker = document.ToMarker();
+            var marker = schemaVersion switch
+            {
+                LegacyFanOverrideOwnershipDocument.SchemaVersionValue =>
+                    (root.Deserialize<LegacyFanOverrideOwnershipDocument>(JsonOptions)
+                        ?? throw new InvalidDataException("The legacy fan ownership marker JSON document is empty."))
+                    .ToMarker(),
+                FanOverrideOwnershipDocument.CurrentSchemaVersion =>
+                    (root.Deserialize<FanOverrideOwnershipDocument>(JsonOptions)
+                        ?? throw new InvalidDataException("The fan ownership marker JSON document is empty."))
+                    .ToMarker(),
+                _ => throw new InvalidDataException(
+                    $"Unsupported fan ownership marker schema version {schemaVersion}.")
+            };
             ValidateMarker(marker);
             _logger.Info(
                 $"Fan override ownership marker loaded. Model={marker.Model}; CreatedAtUtc={marker.CreatedAtUtc:O}.");
@@ -118,12 +132,22 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     bufferSize: 4096,
                     FileOptions.Asynchronous | FileOptions.WriteThrough))
                 {
-                    var document = FanOverrideOwnershipDocument.FromMarker(marker);
-                    await JsonSerializer.SerializeAsync(
-                        stream,
-                        document,
-                        JsonOptions,
-                        cancellationToken).ConfigureAwait(false);
+                    if (ShouldWriteLegacySchema(marker))
+                    {
+                        await JsonSerializer.SerializeAsync(
+                            stream,
+                            LegacyFanOverrideOwnershipDocument.FromMarker(marker),
+                            JsonOptions,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await JsonSerializer.SerializeAsync(
+                            stream,
+                            FanOverrideOwnershipDocument.FromMarker(marker),
+                            JsonOptions,
+                            cancellationToken).ConfigureAwait(false);
+                    }
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     stream.Flush(flushToDisk: true);
                 }
@@ -199,19 +223,43 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         return Path.Combine(localAppData, "BootCampPerformanceControl", "Backups");
     }
 
+    private static bool ShouldWriteLegacySchema(FanOverrideOwnershipMarker marker)
+    {
+        return string.Equals(
+                marker.Model,
+                VerifiedHardwareModels.MacBookPro16_1,
+                StringComparison.Ordinal)
+            && marker.Targets.Count == 2
+            && marker.Targets[0].Index == new FanIndex(0)
+            && marker.Targets[1].Index == new FanIndex(1);
+    }
+
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)
     {
         ArgumentNullException.ThrowIfNull(marker);
         ArgumentException.ThrowIfNullOrWhiteSpace(marker.Model);
 
-        if (!float.IsFinite(marker.Fan0ExpectedTargetRpm) || marker.Fan0ExpectedTargetRpm <= 0f)
+        if (marker.Targets.Count == 0)
         {
-            throw new ArgumentException("Fan 0 ownership target RPM must be finite and positive.", nameof(marker));
+            throw new ArgumentException("A fan ownership marker must contain at least one target.", nameof(marker));
         }
 
-        if (!float.IsFinite(marker.Fan1ExpectedTargetRpm) || marker.Fan1ExpectedTargetRpm <= 0f)
+        for (var position = 0; position < marker.Targets.Count; position++)
         {
-            throw new ArgumentException("Fan 1 ownership target RPM must be finite and positive.", nameof(marker));
+            var target = marker.Targets[position];
+            if (target.Index.Value != position)
+            {
+                throw new ArgumentException(
+                    "Fan ownership target indexes must be unique, contiguous, and ordered from zero.",
+                    nameof(marker));
+            }
+
+            if (!float.IsFinite(target.ExpectedTargetRpm) || target.ExpectedTargetRpm <= 0f)
+            {
+                throw new ArgumentException(
+                    $"Fan {target.Index.Value} ownership target RPM must be finite and positive.",
+                    nameof(marker));
+            }
         }
 
         if (marker.CreatedAtUtc == default || marker.CreatedAtUtc.Offset != TimeSpan.Zero)

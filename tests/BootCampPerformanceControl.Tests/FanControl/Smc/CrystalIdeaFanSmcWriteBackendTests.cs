@@ -19,7 +19,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
             new byte[] { 0x46, 0x30, 0x4D, 0x64, 0x01, 0x01 });
         await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
-        await backend.SetManualModeAsync(FanIndex.Fan0, CancellationToken.None);
+        await backend.SetManualModeAsync(new FanIndex(0), CancellationToken.None);
 
         Assert.Equal(1, device.InvocationCount);
     }
@@ -31,7 +31,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
             new byte[] { 0x46, 0x31, 0x4D, 0x64, 0x01, 0x01 });
         await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
-        await backend.SetManualModeAsync(FanIndex.Fan1, CancellationToken.None);
+        await backend.SetManualModeAsync(new FanIndex(1), CancellationToken.None);
 
         Assert.Equal(1, device.InvocationCount);
     }
@@ -39,6 +39,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
     [Theory]
     [InlineData(0, 0x30, 4321.25f, 0x00, 0x0A, 0x87, 0x45)]
     [InlineData(1, 0x31, 4789.5f, 0x00, 0xAC, 0x95, 0x45)]
+    [InlineData(9, 0x39, 4800f, 0x00, 0x00, 0x96, 0x45)]
     public async Task SetTargetRpmAsync_EncodesSuppliedRpmAsLittleEndianFloat32(
         int fanValue,
         byte fanAscii,
@@ -88,7 +89,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => backend.SetTargetRpmAsync(
-                FanIndex.Fan0,
+                new FanIndex(0),
                 targetRpm,
                 CancellationToken.None));
 
@@ -105,7 +106,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => backend.SetManualModeAsync(
-                FanIndex.Fan0,
+                new FanIndex(0),
                 cancellationSource.Token));
 
         Assert.Equal(0, device.InvocationCount);
@@ -134,6 +135,36 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
                 new byte[] { 0, 0, 0, 0 }));
     }
 
+    [Theory]
+    [InlineData("FS! ")]
+    [InlineData("F0Mx")]
+    [InlineData("F0Ac")]
+    [InlineData("F0Mn")]
+    [InlineData("F10Md")]
+    [InlineData("FAMd")]
+    [InlineData("F0md")]
+    public void Codec_RejectsKeysOutsideF0ThroughF9ModeAndTargetWhitelist(string key)
+    {
+        Assert.Throws<ArgumentException>(
+            () => CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+                key,
+                new byte[] { 0 }));
+    }
+
+    [Fact]
+    public void Codec_AcceptsHighestRepresentableFanModeAndTargetKeys()
+    {
+        var modeRequest = CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+            "F9Md",
+            new byte[] { 1 });
+        var targetRequest = CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+            "F9Tg",
+            new byte[] { 0, 0, 0, 0 });
+
+        Assert.Equal(new byte[] { 0x46, 0x39, 0x4D, 0x64, 0x01, 0x01 }, modeRequest);
+        Assert.Equal(new byte[] { 0x46, 0x39, 0x54, 0x67, 0x04, 0, 0, 0, 0 }, targetRequest);
+    }
+
     [Fact]
     public void Codec_RejectsWrongLengthForWhitelistedKey()
     {
@@ -160,7 +191,7 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
         };
         await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
 
-        await backend.SetAppleAutoAsync(FanIndex.Fan0, CancellationToken.None);
+        await backend.SetAppleAutoAsync(new FanIndex(0), CancellationToken.None);
 
         Assert.Equal(1, device.InvocationCount);
     }

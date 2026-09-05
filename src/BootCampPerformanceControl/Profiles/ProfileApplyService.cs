@@ -74,18 +74,9 @@ public sealed class ProfileApplyService
 
         var profile = matches[0];
 
-        if (IsExactVerifiedMacBookPro16_1GamingOptimised(profile, verificationResult))
+        if (IsSupportedIntelMacGamingOptimised(profile, verificationResult)
+            && _gamingOptimisedApplyCoordinator is not null)
         {
-            if (_gamingOptimisedApplyCoordinator is null)
-            {
-                // CRITICAL: MacBookPro16,1 must NEVER fall back to CPU-only.
-                // Fail closed; CPU Apply must not run.
-                return ProfileApplyResult.Failed(
-                    profileId,
-                    $"Transactional fan coordinator is required for verified {VerifiedHardwareModels.MacBookPro16_1} Gaming Optimised apply.",
-                    verificationResult);
-            }
-
             try
             {
                 var gamingResult = await _gamingOptimisedApplyCoordinator
@@ -96,11 +87,8 @@ public sealed class ProfileApplyService
             }
             catch (AppleSmcServiceStateException)
             {
-                return ProfileApplyResult.Failed(
-                    profileId,
-                    "Fan control is not available because the AppleSMC service is not running. Enable fan monitoring before applying Gaming Optimised.",
-                    verificationResult,
-                    _profileExecutionResolver.ResolveProcessorSettings(profile, verificationResult));
+                // Fan control is additive. A stopped/unavailable backend must not
+                // prevent the global processor target from being applied below.
             }
         }
 
@@ -134,13 +122,11 @@ public sealed class ProfileApplyService
             powerOperation);
     }
 
-    private static bool IsExactVerifiedMacBookPro16_1GamingOptimised(
+    private static bool IsSupportedIntelMacGamingOptimised(
         PerformanceProfile profile,
         ModelVerificationResult verificationResult)
     {
         return string.Equals(profile.Id, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(verificationResult.Model, VerifiedHardwareModels.MacBookPro16_1, StringComparison.Ordinal)
-            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
-            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
+            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac;
     }
 }

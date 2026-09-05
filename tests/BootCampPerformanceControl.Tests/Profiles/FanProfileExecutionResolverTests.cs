@@ -24,8 +24,8 @@ public sealed class FanProfileExecutionResolverTests
         Assert.True(result.IsExecutable);
         Assert.NotNull(result.Plan);
         Assert.Equal(VerifiedHardwareModels.MacBookPro16_1, result.Plan!.Model);
-        Assert.Equal(fan0Maximum, result.Plan.Fan0TargetRpm);
-        Assert.Equal(fan1Maximum, result.Plan.Fan1TargetRpm);
+        Assert.Equal(fan0Maximum, result.Plan.Targets[0].TargetRpm);
+        Assert.Equal(fan1Maximum, result.Plan.Targets[1].TargetRpm);
         Assert.Equal(string.Empty, result.FailureReason);
     }
 
@@ -52,7 +52,7 @@ public sealed class FanProfileExecutionResolverTests
     }
 
     [Fact]
-    public void ResolveMaximumSafeRpmPlan_WrongMacModel_IsNotExecutable()
+    public void ResolveMaximumSafeRpmPlan_DifferentSupportedMacModel_IsExecutable()
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
@@ -64,7 +64,8 @@ public sealed class FanProfileExecutionResolverTests
                 "Supported Intel Mac."),
             SafetyGatedCapability());
 
-        AssertBlocked(result);
+        Assert.True(result.IsExecutable);
+        Assert.Equal(2, result.Plan?.Targets.Count);
     }
 
     [Fact]
@@ -79,7 +80,7 @@ public sealed class FanProfileExecutionResolverTests
     }
 
     [Fact]
-    public void ResolveMaximumSafeRpmPlan_NotIndividuallyTestedModel_IsNotExecutable()
+    public void ResolveMaximumSafeRpmPlan_NotIndividuallyTestedSupportedModel_IsExecutable()
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
@@ -91,7 +92,43 @@ public sealed class FanProfileExecutionResolverTests
                 "Supported Intel Mac."),
             SafetyGatedCapability());
 
-        AssertBlocked(result);
+        Assert.True(result.IsExecutable);
+        Assert.Equal(2, result.Plan?.Targets.Count);
+    }
+
+    [Fact]
+    public void ResolveMaximumSafeRpmPlan_OneFanUsesFreshLiveMaximum()
+    {
+        const float maximum = 2900f;
+        var snapshot = new FanSmcSnapshot(
+            UInt8("FNum", 1, 0x80),
+            [
+                new FanSmcChannelSnapshot(
+                    new FanIndex(0),
+                    Float32("F0Mx", maximum, 0x85),
+                    Float32("F0Ac", 1200f, 0x84),
+                    UInt8("F0Md", 0, 0xD0),
+                    Float32("F0Tg", 1200f, 0xD4))
+            ]);
+        var capability = new FanSafetyPolicy().Evaluate(
+            "Macmini8,1",
+            SmcTransportProtocol.Mmio,
+            snapshot);
+
+        var result = _resolver.ResolveMaximumSafeRpmPlan(
+            GamingOptimisedProfile(),
+            new ModelVerificationResult(
+                "Apple Inc.",
+                "Macmini8,1",
+                PlatformSupportStatus.SupportedIntelMac,
+                ModelValidationLevel.NotIndividuallyTested,
+                "Supported Intel Mac."),
+            capability);
+
+        Assert.True(result.IsExecutable);
+        var target = Assert.Single(result.Plan!.Targets);
+        Assert.Equal(0, target.Index.Value);
+        Assert.Equal(maximum, target.TargetRpm);
     }
 
     [Fact]
@@ -234,14 +271,20 @@ public sealed class FanProfileExecutionResolverTests
     {
         return new FanSmcSnapshot(
             UInt8("FNum", 2, 0x80),
-            Float32("F0Mx", fan0Maximum, 0x85),
-            Float32("F1Mx", fan1Maximum, 0x85),
-            Float32("F0Ac", 1800f, 0x84),
-            Float32("F1Ac", 1700f, 0x84),
-            UInt8("F0Md", fan0Mode, 0xD0),
-            UInt8("F1Md", fan1Mode, 0xD0),
-            Float32("F0Tg", 1800f, 0xD4),
-            Float32("F1Tg", 1700f, 0xD4));
+            [
+                new FanSmcChannelSnapshot(
+                    new FanIndex(0),
+                    Float32("F0Mx", fan0Maximum, 0x85),
+                    Float32("F0Ac", 1800f, 0x84),
+                    UInt8("F0Md", fan0Mode, 0xD0),
+                    Float32("F0Tg", 1800f, 0xD4)),
+                new FanSmcChannelSnapshot(
+                    new FanIndex(1),
+                    Float32("F1Mx", fan1Maximum, 0x85),
+                    Float32("F1Ac", 1700f, 0x84),
+                    UInt8("F1Md", fan1Mode, 0xD0),
+                    Float32("F1Tg", 1700f, 0xD4))
+            ]);
     }
 
     private static SmcValue Float32(

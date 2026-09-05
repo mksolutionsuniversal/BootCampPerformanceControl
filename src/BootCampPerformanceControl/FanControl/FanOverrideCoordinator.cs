@@ -113,7 +113,7 @@ internal sealed class FanOverrideCoordinator : IFanOverrideCoordinator
                 await _ownershipStore
                     .ClearAsync(cancellationToken)
                     .ConfigureAwait(false);
-                _logger.Info("Stale fan override ownership marker cleared because both fans are already in Apple Auto.");
+                _logger.Info("Stale fan override ownership marker cleared because every owned fan is already in Apple Auto.");
                 break;
 
             case FanOverrideRecoveryAction.RestoreAppleAuto:

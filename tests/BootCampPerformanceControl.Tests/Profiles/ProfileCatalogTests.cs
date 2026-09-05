@@ -93,7 +93,9 @@ public sealed class ProfileCatalogTests
         var gaming = Assert.Single(profiles, profile => profile.Id == "gaming-optimised");
 
         var fanSetting = Assert.Single(gaming.Settings, s => s.Name == "Fans");
-        Assert.Equal("Maximum Safe RPM", fanSetting.Value);
+        Assert.Equal(
+            "Maximum Safe RPM when verified T2 SMC family is available; otherwise unchanged",
+            fanSetting.Value);
         Assert.DoesNotContain("5616", fanSetting.Value);
         Assert.DoesNotContain("5200", fanSetting.Value);
 
@@ -115,14 +117,14 @@ public sealed class ProfileCatalogTests
         var restore = Assert.Single(profiles, profile => profile.Id == "restore");
 
         var fanSetting = Assert.Single(restore.Settings, s => s.Name == "Fans");
-        Assert.Equal("Apple Auto fans", fanSetting.Value);
+        Assert.Equal("Apple Auto when BCPC fan ownership exists", fanSetting.Value);
 
         var powerSetting = Assert.Single(restore.Settings, s => s.Name == "Power settings");
         Assert.Equal("Exact original processor power snapshot", powerSetting.Value);
     }
 
     [Fact]
-    public void GetProfiles_OtherSupportedModel_DoesNotReportFanMaximumSafeRpm()
+    public void GetProfiles_OtherSupportedModel_ReportsGlobalCpuTargetsAndOptionalFanCapability()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
@@ -134,10 +136,18 @@ public sealed class ProfileCatalogTests
         var profiles = new ProfileCatalog().GetProfiles(verification);
         var gaming = Assert.Single(profiles, profile => profile.Id == "gaming-optimised");
 
-        Assert.DoesNotContain(gaming.Settings, s => s.Name == "Fans");
-        Assert.DoesNotContain(gaming.Settings, s => s.Value.Contains("Maximum Safe RPM"));
+        Assert.Equal("95%", Assert.Single(gaming.Settings, s => s.Name == "CPU Maximum AC").Value);
+        Assert.Equal("95%", Assert.Single(gaming.Settings, s => s.Name == "CPU Maximum DC").Value);
+        Assert.Equal("Disabled", Assert.Single(gaming.Settings, s => s.Name == "Turbo/Boost AC").Value);
+        Assert.Equal("Disabled", Assert.Single(gaming.Settings, s => s.Name == "Turbo/Boost DC").Value);
+        Assert.Contains(gaming.Settings, s =>
+            s.Name == "Fans"
+            && s.Value.Contains("when verified T2 SMC family is available", StringComparison.Ordinal));
+        Assert.Equal("Unchanged", Assert.Single(gaming.Settings, s => s.Name == "Display").Value);
 
         var restore = Assert.Single(profiles, profile => profile.Id == "restore");
-        Assert.DoesNotContain(restore.Settings, s => s.Name == "Fans");
+        Assert.Contains(restore.Settings, s =>
+            s.Name == "Fans"
+            && s.Value == "Apple Auto when BCPC fan ownership exists");
     }
 }

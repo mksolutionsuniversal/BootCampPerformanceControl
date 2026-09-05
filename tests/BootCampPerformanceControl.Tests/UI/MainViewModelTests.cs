@@ -244,8 +244,8 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(verifiedFanStatus, viewModel.FanStatus);
-        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1691f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(1840f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1691f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
         Assert.Equal([VerifiedHardwareModels.MacBookPro16_1], fanControlService.ReadModels);
         Assert.Equal(1, hardwareDetectionService.DetectCallCount);
         Assert.Equal(1, powerManagementService.ReadCurrentStateCallCount);
@@ -422,7 +422,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task EnableFanMonitoringCommand_IsUnavailableForUnsupportedFanIdentity()
+    public async Task EnableFanMonitoringCommand_IsAvailableForSupportedIntelMacReadOnlyDiscovery()
     {
         var unsupportedIdentity = new ModelVerificationResult(
             "Apple Inc.",
@@ -441,10 +441,11 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(FanBackendState.InstalledStopped, viewModel.FanStatus.BackendState);
-        Assert.False(viewModel.IsFanMonitoringActivationAvailable);
-        Assert.False(viewModel.EnableFanMonitoringCommand.CanExecute(null));
+        Assert.True(viewModel.IsFanMonitoringActivationAvailable);
+        Assert.True(viewModel.EnableFanMonitoringCommand.CanExecute(null));
         viewModel.EnableFanMonitoringCommand.Execute(null);
-        Assert.Equal(0, elevationLauncher.LaunchCallCount);
+        await WaitForIdleAsync(viewModel);
+        Assert.Equal(1, elevationLauncher.LaunchCallCount);
     }
 
     [Fact]
@@ -758,22 +759,22 @@ public sealed class MainViewModelTests
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
-        Assert.Equal(1800f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1800f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
 
         viewModel.StartFanMonitoring();
         pollingDelay.Advance();
         await WaitUntilAsync(
             () => fanControlService.ReadStatusCallCount == 2
                 && pollingDelay.RequestCount == 2);
-        Assert.Equal(1900f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1750f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(1900f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1750f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
 
         pollingDelay.Advance();
         await WaitUntilAsync(
             () => fanControlService.ReadStatusCallCount == 3
                 && pollingDelay.RequestCount == 3);
-        Assert.Equal(2000f, viewModel.FanStatus.Fan0?.ActualRpm);
-        Assert.Equal(1850f, viewModel.FanStatus.Fan1?.ActualRpm);
+        Assert.Equal(2000f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
+        Assert.Equal(1850f, viewModel.FanStatus.Fans[1].Reading.ActualRpm);
         Assert.Equal(1, fanControlService.MaximumConcurrentReadCount);
         Assert.Single(
             logger.InformationMessages,
@@ -1041,16 +1042,23 @@ public sealed class MainViewModelTests
             VerifiedFanStatus(),
             VerifiedFanStatus());
         var sessionFactory = new TestFanExecutionSessionFactory();
+        var ownershipStore = new TestFanOverrideOwnershipStore();
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
             powerManagementService,
             restoreSnapshotStore,
             fanControlService: fanControlService,
             fanPollingDelayAsync: pollingDelay.DelayAsync,
-            fanExecutionSessionFactory: sessionFactory);
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
+        ownershipStore.Marker = new FanOverrideOwnershipMarker(
+            VerifiedHardwareModels.MacBookPro16_1,
+            5321.25f,
+            4789.5f,
+            DateTimeOffset.UtcNow);
 
         var liveReadGate = new AsyncGate();
         fanControlService.QueueReadGate(liveReadGate);
@@ -1146,6 +1154,7 @@ public sealed class MainViewModelTests
             VerifiedFanStatus(),
             VerifiedFanStatus());
         var restoreGate = new AsyncGate();
+        var ownershipStore = new TestFanOverrideOwnershipStore();
         var sessionFactory = new TestFanExecutionSessionFactory
         {
             OpenSessionHandler = async () =>
@@ -1161,10 +1170,16 @@ public sealed class MainViewModelTests
             restoreSnapshotStore,
             fanControlService: fanControlService,
             fanPollingDelayAsync: pollingDelay.DelayAsync,
-            fanExecutionSessionFactory: sessionFactory);
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
+        ownershipStore.Marker = new FanOverrideOwnershipMarker(
+            VerifiedHardwareModels.MacBookPro16_1,
+            5321.25f,
+            4789.5f,
+            DateTimeOffset.UtcNow);
 
         var readCountBefore = fanControlService.ReadStatusCallCount;
 
@@ -1214,7 +1229,7 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
-        Assert.Equal(5616f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(5616f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
     }
 
     [Fact]
@@ -1250,7 +1265,7 @@ public sealed class MainViewModelTests
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(readCountBefore + 1, fanControlService.ReadStatusCallCount);
-        Assert.Equal(1840f, viewModel.FanStatus.Fan0?.ActualRpm);
+        Assert.Equal(1840f, viewModel.FanStatus.Fans[0].Reading.ActualRpm);
     }
 
     [Fact]
@@ -1853,10 +1868,15 @@ public sealed class MainViewModelTests
             InitialPowerState(),
             expectedStateBefore,
             refreshedState);
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(verification),
             powerManagementService,
-            userConfirmationService: confirmationService);
+            userConfirmationService: confirmationService,
+            fanExecutionSessionFactory: sessionFactory);
 
         viewModel.RefreshCommand.Execute(null);
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
@@ -1866,12 +1886,13 @@ public sealed class MainViewModelTests
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
         Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
 
-        // Second apply in same session should NOT prompt again
+        // Second activation in the same partial CPU-only session is fan-only:
+        // it must not prompt again or rewrite the processor snapshot/settings.
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(1, confirmationService.CallCount);
-        Assert.Equal(2, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
     }
 
     [Fact]
@@ -2675,14 +2696,20 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task StartupRecovery_MatchingMarkerAndManualFans_RecoversAppleAutoAndClearsMarker()
+    public async Task StartupRecovery_MatchingNonLegacySupportedModel_RecoversAppleAutoAndClearsMarker()
     {
-        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac.");
+        var hardware = new FakeHardwareDetectionService(verification);
         var power = new FakePowerManagementService(InitialPowerState());
         var ownershipStore = new TestFanOverrideOwnershipStore
         {
             Marker = new FanOverrideOwnershipMarker(
-                VerifiedHardwareModels.MacBookPro16_1,
+                VerifiedHardwareModels.MacBookPro14_3,
                 5321.25f,
                 4789.5f,
                 DateTimeOffset.UtcNow)
@@ -3367,7 +3394,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task Restore_WithoutFanMarkerAndWithPowerSnapshot_VerifiesFanBaselineThenPower()
+    public async Task Restore_WithoutFanMarkerAndWithPowerSnapshot_RestoresPowerWithoutFanSession()
     {
         var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
         var initialPower = InitialPowerState();
@@ -3393,7 +3420,7 @@ public sealed class MainViewModelTests
         restoreProfile.Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
         Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
     }
 
@@ -3553,8 +3580,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: false,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: true,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: true);
         Assert.True(fanOnlyVm.IsEnabled);
         Assert.Equal("Restore fan control to Apple Auto.", fanOnlyVm.ToolTip);
 
@@ -3564,8 +3590,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: true,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: true,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: true);
         Assert.True(fanAndCpuVm.IsEnabled);
         Assert.Equal("Restore fan control to Apple Auto and restore the exact original saved power state.", fanAndCpuVm.ToolTip);
 
@@ -3575,8 +3600,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: true,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: false,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: false);
         Assert.True(cpuOnlyVm.IsEnabled);
         Assert.Equal("Restore the exact original saved power state.", cpuOnlyVm.ToolTip);
     }
@@ -3858,7 +3882,7 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            PlatformSupportStatus.SupportedIntelMac,
+            PlatformSupportStatus.DetectionIncomplete,
             ModelValidationLevel.NotIndividuallyTested,
             "Matching model string without verification.");
     }
@@ -3879,8 +3903,10 @@ public sealed class MainViewModelTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto),
-            new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto),
+            [
+                new FanChannelReading(0, new FanReading(fan0ActualRpm, 5616f, FanOperatingMode.AppleAuto)),
+                new FanChannelReading(1, new FanReading(fan1ActualRpm, 5200f, FanOperatingMode.AppleAuto))
+            ],
             "Verified in test.");
     }
 
@@ -3889,8 +3915,10 @@ public sealed class MainViewModelTests
         return new FanControlStatus(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
-            new FanReading(5616f, 5616f, FanOperatingMode.Manual),
-            new FanReading(5200f, 5200f, FanOperatingMode.Manual),
+            [
+                new FanChannelReading(0, new FanReading(5616f, 5616f, FanOperatingMode.Manual)),
+                new FanChannelReading(1, new FanReading(5200f, 5200f, FanOperatingMode.Manual))
+            ],
             "Verified Maximum Safe RPM in test.",
             FanWriteControlState.MaximumSafeRpmDetected);
     }

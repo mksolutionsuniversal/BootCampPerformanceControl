@@ -252,8 +252,8 @@ static bool TryGetExpectedMaximumTargets(
 
     var snapshot = capability.Snapshot;
     expectedTargets = new ExpectedMaximumTargets(
-        snapshot.Fan0Maximum.GetFloat32(),
-        snapshot.Fan1Maximum.GetFloat32());
+        snapshot.Fans[0].Maximum.GetFloat32(),
+        snapshot.Fans[1].Maximum.GetFloat32());
     return true;
 }
 
@@ -267,20 +267,19 @@ static bool IsVerifiedMaximumState(
     }
 
     var snapshot = capability.Snapshot;
-    return snapshot.Fan0Mode.GetUInt8() == 1 &&
-           snapshot.Fan1Mode.GetUInt8() == 1 &&
-           Math.Abs(snapshot.Fan0Maximum.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
-           Math.Abs(snapshot.Fan1Maximum.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f &&
-           Math.Abs(snapshot.Fan0Target.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
-           Math.Abs(snapshot.Fan1Target.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f;
+    return snapshot.Fans[0].Mode.GetUInt8() == 1 &&
+           snapshot.Fans[1].Mode.GetUInt8() == 1 &&
+           Math.Abs(snapshot.Fans[0].Maximum.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fans[1].Maximum.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fans[0].Target.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
+           Math.Abs(snapshot.Fans[1].Target.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f;
 }
 
 static bool IsVerifiedAppleAutoState(FanControlCapabilityResult capability)
 {
     return capability.IsHardwareSafetyGateSatisfied &&
            capability.Snapshot is not null &&
-           capability.Snapshot.Fan0Mode.GetUInt8() == 0 &&
-           capability.Snapshot.Fan1Mode.GetUInt8() == 0;
+           capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
 }
 
 static void PrintCapability(string label, FanControlCapabilityResult capability)
@@ -302,20 +301,17 @@ static void PrintCapability(string label, FanControlCapabilityResult capability)
     }
 
     var snapshot = capability.Snapshot;
-    Console.WriteLine(string.Format(
-        CultureInfo.InvariantCulture,
-        "Fan 0: actual={0:0.###} max={1:0.###} mode={2} target={3:0.###}",
-        snapshot.Fan0Actual.GetFloat32(),
-        snapshot.Fan0Maximum.GetFloat32(),
-        snapshot.Fan0Mode.GetUInt8(),
-        snapshot.Fan0Target.GetFloat32()));
-    Console.WriteLine(string.Format(
-        CultureInfo.InvariantCulture,
-        "Fan 1: actual={0:0.###} max={1:0.###} mode={2} target={3:0.###}",
-        snapshot.Fan1Actual.GetFloat32(),
-        snapshot.Fan1Maximum.GetFloat32(),
-        snapshot.Fan1Mode.GetUInt8(),
-        snapshot.Fan1Target.GetFloat32()));
+    foreach (var fan in snapshot.Fans)
+    {
+        Console.WriteLine(string.Format(
+            CultureInfo.InvariantCulture,
+            "Fan {0}: actual={1:0.###} max={2:0.###} mode={3} target={4:0.###}",
+            fan.Index.Value,
+            fan.Actual.GetFloat32(),
+            fan.Maximum.GetFloat32(),
+            fan.Mode.GetUInt8(),
+            fan.Target.GetFloat32()));
+    }
 }
 
 file readonly record struct ExpectedMaximumTargets(

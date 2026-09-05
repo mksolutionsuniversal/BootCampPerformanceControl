@@ -52,7 +52,7 @@
 
             <TextBlock Text="Fan control:"
                        Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="Fan monitoring and production fan write control are verified only for MacBookPro16,1; other Mac models are not verified."
+            <TextBlock Text="Fan write control is available only when the live AppleSMC interface matches the verified T2/MMIO/FLT4 capability family. This does not claim physical validation of every T2 model."
                        Style="{StaticResource BodyTextStyle}"
                        Margin="0,0,0,16" />
         </StackPanel>

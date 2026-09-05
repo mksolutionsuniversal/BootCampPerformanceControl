@@ -239,9 +239,10 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
         builder.AppendLine("Fan compatibility");
         builder.AppendLine("-----------------");
         builder.AppendLine($"AppleSMC backend state: {fanStatus.BackendDisplayText}");
+        builder.AppendLine($"Transport: {fanStatus.TransportDisplayText}");
+        builder.AppendLine($"FNum / discovered fan count: {FormatFanCount(fanStatus.ReportedFanCount)} / {FormatFanCount(fanStatus.DiscoveredFanCount)}");
         builder.AppendLine($"Fan safety state: {fanStatus.SafetyDisplayText}");
-        builder.AppendLine($"Fan 0 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan0)}");
-        builder.AppendLine($"Fan 1 RPM: {FormatFanRpm(fanStatus, fanStatus.Fan1)}");
+        AppendFanRpmLines(builder, fanStatus);
         builder.AppendLine($"Mode: {FormatFanMode(fanStatus)}");
         builder.AppendLine($"Write control state: {fanStatus.WriteControlDisplayText}");
         builder.AppendLine($"Fan status/details: {FormatValue(fanStatus.Details)}");
@@ -324,25 +325,41 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
                 processor.NumberOfLogicalProcessors);
     }
 
-    private static string FormatFanRpm(
-        FanControlStatus fanStatus,
-        FanReading? reading)
+    private static void AppendFanRpmLines(
+        StringBuilder builder,
+        FanControlStatus fanStatus)
     {
-        if (!fanStatus.IsAvailable || reading is null)
+        if (!fanStatus.IsAvailable)
         {
-            return Unavailable;
+            builder.AppendLine($"Fans: {Unavailable}");
+            return;
         }
 
-        return string.Format(
-            CultureInfo.InvariantCulture,
-            "{0:0} / {1:0} RPM",
-            reading.ActualRpm,
-            reading.MaximumRpm);
+        if (fanStatus.Fans.Count == 0)
+        {
+            builder.AppendLine("Fans: None reported (passive topology)");
+            return;
+        }
+
+        foreach (var fan in fanStatus.Fans)
+        {
+            builder.AppendLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "Fan {0} RPM: {1:0} / {2:0} RPM",
+                fan.Index,
+                fan.Reading.ActualRpm,
+                fan.Reading.MaximumRpm));
+        }
     }
 
     private static string FormatFanMode(FanControlStatus fanStatus)
     {
         return fanStatus.IsAvailable ? fanStatus.ModeDisplayText : Unavailable;
+    }
+
+    private static string FormatFanCount(int? fanCount)
+    {
+        return fanCount?.ToString(CultureInfo.InvariantCulture) ?? Unavailable;
     }
 
     private static string FormatPowerScheme(PowerStateSnapshot? powerState)
