@@ -1,17 +1,21 @@
 # Fan Control and AppleSMC Compatibility Backend
 
-BootCamp Performance Control uses a conservative, model-gated fan-control design.
+BootCamp Performance Control uses a conservative capability-family-gated fan-control design.
 
-The first production fan-control goal is deliberately narrow:
+The production feature remains deliberately narrow:
 
 - **Apple Auto**
 - **Maximum Safe RPM**
 
-BCPC does not expose an arbitrary fan-speed slider in `0.4.0`.
+BCPC does not expose an arbitrary fan-speed slider in `0.5.0-rc.1`.
 
-## Current production support
+## Current release-candidate support
 
-Production fan writes are currently enabled only for the exact verified model:
+`0.5.0-rc.1` does not grant fan-write permission from a Mac model name alone.
+
+A fan write is eligible only when the live AppleSMC interface matches the complete verified MMIO + `FNum` + per-fan FLT4 family and the current ownership/runtime safety conditions also pass.
+
+The complete production path has been physically validated end-to-end on:
 
 ```text
 MacBookPro16,1
@@ -19,13 +23,15 @@ MacBook Pro 16-inch (2019)
 Apple T2
 ```
 
-Other Intel, T1 or T2 Macs are not assumed compatible simply because they use Apple SMC hardware.
+Other machines that match the family fingerprint are release-candidate compatibility targets, not automatically physically validated models.
+
+T1-style `fpe2` / `FS!` fan control remains outside the production write backend.
 
 ## Third-party compatibility dependency
 
-BCPC does not ship its own production AppleSMC Windows driver in this release.
+BCPC does not ship its own production AppleSMC Windows driver in this release candidate.
 
-The verified production backend interoperates with the AppleSMC compatibility driver installed by a separate Windows installation of **Macs Fan Control 1.5.16 (Build 693)**.
+The physically verified production backend interoperates with the AppleSMC compatibility driver installed by a separate Windows installation of **Macs Fan Control 1.5.16 (Build 693)**.
 
 Official upstream release:
 
@@ -54,7 +60,7 @@ SHA-256:
 2E35DF03B80EF6FC6DA53C44A3C9454C945F4822C8F1F3355EEA2D1E06E53FD5
 ```
 
-Other Macs Fan Control versions may work, but they are not currently part of BCPC's verified compatibility matrix.
+Other Macs Fan Control versions may work, but they are not currently part of BCPC's physically validated interoperability environment.
 
 ## Legal and distribution boundary
 
@@ -65,7 +71,9 @@ User independently installs Macs Fan Control
         ->
 BCPC detects the separately installed AppleSMC service/device
         ->
-BCPC uses the compatible transport only on an explicitly verified model
+BCPC reads the live capability
+        ->
+BCPC writes only if the verified family and ownership policy pass
 ```
 
 The BCPC repository and release packages must not:
@@ -86,12 +94,13 @@ See [../THIRD_PARTY.md](../THIRD_PARTY.md).
 1. Install Macs Fan Control 1.5.16 from the official upstream release.
 2. Close the Macs Fan Control application if it is running.
 3. Start BCPC normally.
-4. Confirm that BCPC detects the exact Mac model.
-5. If BCPC reports the AppleSMC service as installed but stopped, use **Enable Fan Monitoring**.
+4. Review the detected Mac model and platform status.
+5. If BCPC reports the AppleSMC service as installed but stopped, use **Enable Fan Monitoring** only when you intentionally want BCPC to start that already installed service.
+6. Review monitoring state, fan topology, mode and write eligibility before applying a profile.
 
 The AppleSMC device is exclusive. BCPC does not kill another fan-control application and does not silently steal a device handle from another controller.
 
-## Explicit service activation
+## Explicit service activation and CPU-only Gaming
 
 Normal BCPC startup does not automatically start AppleSMC.
 
@@ -99,60 +108,134 @@ Normal BCPC startup does not automatically start AppleSMC.
 
 The normal fan polling path remains non-elevated.
 
-Gaming Optimised does not silently elevate or start AppleSMC. On the exact verified `MacBookPro16,1` path, if the required service/capability is unavailable, Gaming Optimised fails closed rather than falling back to CPU-only execution.
+Gaming Optimised does not silently elevate or start AppleSMC. If the backend is unavailable, stopped, unsupported, passive (`FNum = 0`) or not safely ownable, the processor Gaming profile can still apply:
 
-## Verified capability gate
+```text
+Maximum Processor State AC/DC: 95% / 95%
+Processor boost AC/DC:         Disabled / Disabled
+Fans:                          unchanged / Apple-managed
+```
+
+This CPU-only fallback is intentional. Fan failure must not remove the conservative processor target merely because fan control is unavailable.
+
+An ambiguous fan state after BCPC has already started hardware writes is different: recovery context is retained and BCPC fails closed rather than continuing on an uncertain hardware state.
+
+## Verified capability-family gate
 
 A running AppleSMC service by itself is not enough to enable writes.
 
-Before production fan writes, BCPC verifies the exact hardware identity and a fresh SMC capability snapshot, including the expected transport, fan count, key metadata and plausible runtime values.
+Before production fan writes, BCPC requires `SupportedIntelMac` and re-reads a fresh SMC capability snapshot.
 
-The current verified `MacBookPro16,1` schema includes:
+### Transport and count
+
+Required:
 
 ```text
-FNum  ui8   1 byte
-F0Mx  flt   4 bytes
-F1Mx  flt   4 bytes
-F0Ac  flt   4 bytes
-F1Ac  flt   4 bytes
-F0Md  ui8   1 byte
-F1Md  ui8   1 byte
-F0Tg  flt   4 bytes
-F1Tg  flt   4 bytes
+Protocol: MMIO (1)
+FNum:     ui8, length 1, attributes 0x80
 ```
 
-BCPC does not hard-code the final target RPM. Maximum Safe RPM is derived from the fresh verified `F0Mx` / `F1Mx` values.
+Fan count must be within the supported single-decimal `F0..F9` topology for writes.
+
+`FNum = 0` is accepted as a passive/read-only topology and produces zero fan writes.
+
+### Per-fan metadata
+
+For every discovered fan index `i`:
+
+```text
+F{i}Mx  flt   4 bytes   attributes 0x85
+F{i}Ac  flt   4 bytes   attributes 0x84
+F{i}Md  ui8   1 byte    attributes 0xD0
+F{i}Tg  flt   4 bytes   attributes 0xD4
+```
+
+Mode semantics for the verified family:
+
+```text
+0 = Apple Auto
+1 = Manual
+```
+
+### Runtime sanity
+
+For every fan, maximum RPM must be finite, greater than zero and no greater than `10000 RPM`. Current/target readings and mode must also pass the bounded runtime policy.
+
+`10000 RPM` is a broad anti-corruption ceiling only. It is not an Apple specification and BCPC never uses it as a requested target.
+
+Maximum Safe RPM is always the fresh live `F{i}Mx` value for the discovered fan.
+
+### T1 remains blocked
+
+The known T1-style `fpe2` encoding and global `FS!` manual-control concept do not satisfy this family gate. `0.5.0-rc.1` does not write those keys or infer T1/T2 equivalence.
+
+## Closed write surface
+
+The production SMC write codec remains intentionally narrow.
+
+Allowed discovered fan keys are only:
+
+```text
+F0..F9 Md
+F0..F9 Tg
+```
+
+BCPC does not expose or write:
+
+- `FS!`,
+- `fpe2` fan targets,
+- fan minimum keys,
+- arbitrary SMC keys,
+- user-defined RPM values,
+- a generic fan-speed slider.
 
 ## Ownership rules
 
 Observed Manual mode is not proof that BCPC owns the fans.
 
-If Manual mode is detected without BCPC's persisted ownership context, BCPC treats the state as externally controlled and does not silently take over.
+If Manual mode is detected without BCPC's persisted ownership context, BCPC treats the state as externally controlled and does not silently take over. Gaming Optimised may still apply the CPU profile while leaving those fans untouched.
 
-A new BCPC Maximum Safe RPM transaction requires both fans to be in verified Apple Auto before ownership is taken.
+A new BCPC Maximum Safe RPM transaction requires every discovered fan to be in verified Apple Auto before ownership is taken.
 
-BCPC saves its ownership marker before the first fan hardware write.
+BCPC persists its ownership marker before the first fan hardware write.
 
-## Gaming Optimised transaction
+## Ownership marker schemas and downgrade safety
 
-On `MacBookPro16,1`, Gaming Optimised is an atomic two-phase operation:
+`0.5.0-rc.1` reads:
 
-1. validate the requested processor profile,
-2. read the expected current processor state,
-3. open one short exclusive AppleSMC execution session,
-4. obtain a fresh fan capability snapshot,
-5. derive the Maximum Safe RPM plan,
+- legacy schema v1 for the historical two-fan `MacBookPro16,1` layout,
+- dynamic schema v2 with indexed targets.
+
+New exact `MacBookPro16,1` two-fan ownership markers intentionally remain schema v1 so stable `0.4.0` can recover after a downgrade. Other compatible models/topologies use schema v2.
+
+Unknown or malformed schemas are preserved and fail closed. Loading an existing v1 marker does not cause it to be rewritten merely because a newer application version is running.
+
+## Gaming Optimised execution
+
+The processor target is independent from fan capability and always uses `95% / 95%`, boost disabled, on `SupportedIntelMac`.
+
+When a compatible fan transaction is available, the high-level flow is:
+
+1. validate/capture the processor state needed for exact Restore,
+2. obtain a fresh AppleSMC capability snapshot,
+3. verify the dynamic topology, metadata and runtime sanity,
+4. require Apple Auto before new fan ownership,
+5. derive every target from fresh live `F{i}Mx`,
 6. persist BCPC fan ownership,
-7. apply and verify Maximum Safe RPM,
-8. apply and verify the processor profile.
+7. apply all discovered fan modes/targets through the closed write surface,
+8. reassert Manual mode as required by the verified sequence,
+9. read back and verify Maximum Safe RPM,
+10. apply and verify the processor profile.
 
-If the fan phase fails, processor settings remain untouched.
+If no safe fan transaction can start because the backend is absent/stopped/unsupported or fans are externally Manual, the CPU profile can proceed without fan writes.
 
-If the processor phase fails after BCPC has taken fan ownership, BCPC attempts non-cancellable Apple Auto compensation and preserves processor rollback semantics.
+If a fan write fails after writes have begun, BCPC attempts non-cancellable Apple Auto recovery. When that recovery is verified, CPU-only Gaming may continue. If fan state cannot be verified, BCPC retains ownership/recovery context and reports failure rather than guessing.
+
+If processor application fails after BCPC has successfully taken fan ownership, BCPC returns the owned fans to verified Apple Auto.
 
 ## Restore ordering
 
-For the verified fan-control path, Restore is intentionally ordered:
+If BCPC has active fan ownership/recovery context, Restore is intentionally ordered:
 
 ```text
 FANS -> Apple Auto verified
@@ -160,15 +243,17 @@ then
 POWER -> exact saved processor state
 ```
 
+If there is no BCPC fan ownership/recovery context, Restore does not invent SMC writes and restores the saved processor state only.
+
 BCPC never re-applies Maximum Safe RPM merely because processor Restore fails afterward.
 
 ## Clean exit behaviour
 
 A clean application exit is intentionally different from **Restore Original Settings**.
 
-When BCPC owns an active fan override and the user exits the application cleanly:
+When BCPC owns an active compatible-family fan override and the user exits the application cleanly:
 
-- BCPC restores the owned fans to verified Apple Auto,
+- BCPC restores owned fans to verified Apple Auto,
 - the fan-ownership marker is cleared only after verified recovery,
 - the processor remains in its current Gaming state,
 - the original processor Restore snapshot remains available.
@@ -177,19 +262,17 @@ This preserves fan safety without silently undoing the user's processor profile.
 
 ## Partial Gaming and fan-only resume
 
-After a clean exit from an active Gaming session, a later BCPC start can observe this valid split state:
+After clean fan recovery or startup fan-only crash recovery, BCPC may observe this valid split state:
 
 ```text
-Processor Maximum State: still Gaming
-Processor boost:         still Gaming
-Processor Restore snapshot: present
-Fans:                     Apple Auto
-Fan ownership marker:     absent
+Processor Maximum State:      95% / 95%
+Processor boost:              Disabled / Disabled
+Processor Restore snapshot:   present
+Fans:                         Apple Auto
+Fan ownership marker:         absent
 ```
 
-BCPC reports this truthfully as **Partial Gaming** rather than pretending the full Gaming transaction is active.
-
-On the verified `MacBookPro16,1` path, a fan-only resume can return the fans to Maximum Safe RPM without rewriting the processor settings and without recreating or replacing the original processor Restore snapshot.
+BCPC reports that split state truthfully. Activating Gaming Optimised again may perform a **fan-only resume** when the current machine still passes the family gate. The original processor Restore snapshot is not recreated or replaced.
 
 A later explicit **Restore Original Settings** still restores the exact processor state captured before the original Gaming transaction.
 
@@ -199,46 +282,74 @@ The ownership marker is durable across process termination.
 
 If BCPC is killed while its verified override is active:
 
-- the fans may remain in Manual / Maximum Safe RPM,
+- fans may remain in Manual / Maximum Safe RPM,
 - the ownership marker remains,
-- the processor restore snapshot remains.
+- the processor Restore snapshot remains.
 
-On the next startup, BCPC does not infer the physical state from the marker alone. It re-reads the hardware and uses the existing recovery policy.
+On the next startup, BCPC does not infer physical state from the marker alone. A recovery write requires, at minimum:
 
-When recovery is safe and AppleSMC is already available, BCPC restores **fans only** to Apple Auto and clears the ownership marker only after verified read-back.
+- current model exactly matches `marker.Model`,
+- current platform remains `SupportedIntelMac`,
+- AppleSMC is already available,
+- a fresh capability-family probe succeeds,
+- current topology/index set matches the marker,
+- expected target/max values match within policy,
+- recovery policy permits Apple Auto release.
+
+Any mismatch prevents speculative writes and retains recovery context.
+
+When recovery is permitted, BCPC restores **fans only** to Apple Auto, verifies read-back and clears ownership only after successful verification.
 
 BCPC does not automatically restore the saved processor profile at startup. The user retains explicit control through **Restore Original Settings**.
 
-If AppleSMC is stopped, startup recovery does not silently elevate or start it. Recovery remains pending until the user explicitly enables fan monitoring.
+If AppleSMC is stopped, startup recovery does not silently elevate or start it.
 
 ## Physical validation
 
-The complete production path was physically validated on a real `MacBookPro16,1` / Apple T2 machine:
+The complete production lifecycle was physically validated on a real `MacBookPro16,1` / Apple T2 machine on 2026-09-05 against the Phase B runtime merged at `5a041303c67175491a9f36ff1927db8c5484ec30`.
 
-- Apple Auto baseline read-back,
-- production WPF Gaming Optimised apply,
-- both fans at Maximum Safe RPM in Manual mode,
-- CPU Maximum State `95% / 95%`,
-- processor boost disabled,
-- clean application exit returning BCPC-owned fans to Apple Auto while preserving the Gaming processor state and Restore snapshot,
-- truthful Partial Gaming detection after restart,
-- fan-only resume to Maximum Safe RPM without processor or snapshot rewrites,
-- normal Restore to Apple Auto + exact original processor state,
-- forced BCPC process termination while Gaming Optimised was active,
-- durable fan ownership and processor snapshot after the crash,
-- automatic startup fan-only recovery,
-- final explicit processor Restore.
+Observed read-only baseline:
+
+```text
+F0: 5036 / 5616 RPM
+F1: 4658 / 5200 RPM
+Mode: Apple Auto
+```
+
+Observed Gaming Optimised read-back:
+
+```text
+F0: 5587 / 5616 RPM
+F1: 5208 / 5200 RPM
+Mode: Manual
+CPU: 95 / 95
+Boost: 0 / 0
+```
+
+Normal Restore returned Apple Auto and the exact original processor state. Forced-process termination then demonstrated durable ownership/snapshot persistence and automatic startup **fan-only** Apple Auto recovery while CPU remained in the Gaming state. Fan-only resume was subsequently exercised without replacing the original CPU snapshot, followed by a successful final exact Restore.
+
+See [0.5.0-rc.1 Hardware Validation Record](0.5.0-rc.1-HARDWARE-VALIDATION.md).
+
+This physical validation supports the reference model. It does not certify every T2-family machine.
 
 ## Native BootCampSmc research path
 
 BCPC also contains an independently authored experimental KMDF research driver under `drivers/BootCampSmc/`.
 
-That driver is **not** the production fan-control dependency for stable `0.4.0` and is **not** included in release packages. Its physically completed research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
+That driver is **not** the production fan-control dependency for `0.5.0-rc.1` and is **not** included in release packages. Its physically completed research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
 
 See [../drivers/BootCampSmc/README.md](../drivers/BootCampSmc/README.md) for the research-driver safety boundary.
 
-## Future models
+## Future validation
 
-T1 and additional T2 Macs require separate physical validation.
+Additional compatible T2-family machines should be validated in stages:
 
-Do not generalize the `MacBookPro16,1` fan mode keys, metadata, RPM ranges or transaction assumptions to another model without evidence.
+1. read-only hardware/platform capture,
+2. read-only AppleSMC protocol and topology capture,
+3. verify exact family metadata and runtime sanity,
+4. controlled Maximum Safe RPM apply/read-back,
+5. explicit Apple Auto Restore verification,
+6. processor snapshot/Restore round-trip,
+7. crash/startup recovery only after the earlier stages pass.
+
+T1 support remains a separate engineering track and must not reuse T2-family write assumptions.

@@ -6,15 +6,89 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 ## [Unreleased]
 
+No unreleased changes are currently recorded after the `0.5.0-rc.1` release-candidate preparation.
+
+## [0.5.0-rc.1] - 2026-09-05
+
+### Added
+
+- Dynamic fan-topology discovery from live `FNum` rather than assuming a fixed two-fan layout.
+- Runtime fan-write eligibility for the verified T2-style AppleSMC capability family instead of an exact `MacBookPro16,1` permission gate.
+- Model-neutral fan-maximum anti-corruption protection with a broad `10000 RPM` sanity ceiling.
+- Dynamic ownership-marker schema v2 for non-legacy topologies while retaining legacy schema-v1 compatibility for the physically validated two-fan `MacBookPro16,1` downgrade path.
+- Generalised fan-only resume, clean-exit recovery and startup crash recovery for compatible family members.
+- Compatibility reporting for transport, discovered fan count/topology, live fan state and write-eligibility reason.
+
+### Changed
+
+- Gaming Optimised processor behaviour is now explicitly global for every `SupportedIntelMac`:
+  - Maximum Processor State AC/DC `95% / 95%`,
+  - processor boost disabled on AC/DC.
+- Fan control is additive to the processor profile. A missing, stopped, unsupported or externally controlled fan backend no longer removes the conservative CPU Gaming profile.
+- A compatible fan transaction derives every target from the fresh live `F{i}Mx` value for the discovered topology.
+- Exact `MacBookPro16,1` runtime permission gates were removed from fan apply, resume, restore and startup recovery. The exact model remains only where required for legacy marker downgrade compatibility and historical physical-validation reporting.
+- Public documentation now distinguishes runtime capability-family eligibility from physical validation of an individual Mac model.
+
+### Safety
+
+- Fan writes still require `SupportedIntelMac`, MMIO protocol, exact verified `FNum`/`F{i}*` metadata, sane runtime values, a valid topology and Apple Auto before new ownership.
+- `FNum = 0` remains passive/read-only and cannot produce fan writes.
+- Fan counts outside the supported single-decimal `F0..F9` range fail closed.
+- A reported live maximum must be finite, greater than zero and no greater than the broad `10000 RPM` anti-corruption ceiling. This ceiling is not an Apple specification and is never used as a target.
+- The production write codec remains restricted to discovered `F0..F9` `Md` and `Tg` keys. No `FS!`, `fpe2`, minimum-RPM control, arbitrary SMC keys or fan-speed slider was added.
+- T1-style `fpe2` / global-mask layouts remain write-disabled.
+- Manual fan state without BCPC ownership is treated as external control and is not silently taken over.
+- If a fan write fails after hardware writes begin, BCPC keeps the existing non-cancellable Apple Auto recovery semantics. CPU-only continuation is allowed only after verified fan recovery; ambiguous fan state retains recovery context and fails closed.
+- If processor application fails after a successful fan takeover, BCPC returns owned fans to verified Apple Auto.
+- Restore with BCPC fan ownership remains ordered `FANS -> POWER`.
+
+### Automated qualification
+
+For the Phase B candidate before release preparation:
+
+- Debug tests: `589/589` passed.
+- Release build: `0 warnings / 0 errors`.
+- Release tests: `589/589` passed.
+- `git diff --check`: PASS.
+- Pull-request Windows CI (`Build and test`): PASS.
+- Post-merge Windows CI on `main`: PASS.
+
+### Physical validation
+
+The Phase B runtime was physically validated end-to-end on the reference `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2) running Windows 10 Boot Camp at pre-release `main` commit `5a041303c67175491a9f36ff1927db8c5484ec30`.
+
+Observed validation included:
+
+- Apple Auto read-only capability preflight: PASS,
+- live maxima `F0Mx = 5616 RPM`, `F1Mx = 5200 RPM`,
+- production Gaming Optimised apply to Manual / Maximum Safe RPM: PASS,
+- CPU read-back at `95% / 95%` with boost `0 / 0`: PASS,
+- normal Restore to Apple Auto and exact original `100% / 100%`, boost `2 / 2`: PASS,
+- forced-process termination while the override was active: PASS,
+- automatic startup fan-only recovery to Apple Auto while preserving Gaming CPU state and processor Restore snapshot: PASS,
+- fan-only resume without replacing the original processor snapshot: PASS,
+- final exact processor Restore after fan-only resume: PASS.
+
+The release-preparation change from that validated runtime to `0.5.0-rc.1` changes version metadata and documentation only; it does not alter hardware-control logic.
+
+Physical validation of this RC does **not** claim that every Apple T2 Mac has been physically tested. Other machines become fan-write eligible only if their live SMC capability fingerprint satisfies the same guarded family policy.
+
+See `docs/0.5.0-rc.1-HARDWARE-VALIDATION.md` for the preserved test record.
+
 ### Documentation
 
 - Polished the repository landing README after the stable `0.4.0` release.
-- Synchronized the public fan-control and hardware-compatibility documentation with the completed S0-S7 stabilisation record.
-- Documented clean-exit Apple Auto recovery and truthful Partial Gaming / fan-only resume behaviour.
-- Updated the experimental `BootCampSmc` research-driver README to reflect the physically completed Gate 5D-B checkpoint rather than the older Gate 4C phase.
+- Synchronized public fan-control and hardware-compatibility documentation with dynamic topology and capability-family gating.
+- Documented CPU-only Gaming fallback when fan control is unavailable or not safely ownable.
+- Documented clean-exit Apple Auto recovery, Partial Gaming / fan-only resume behaviour and startup crash recovery.
+- Updated the experimental `BootCampSmc` research-driver boundary without making it a production dependency.
 - Added contributor and support guidance for hardware-safe development and issue reporting.
 
-No runtime, hardware-control, release-package, or `v0.4.0` binary changes are included in these post-release documentation updates.
+### Distribution
+
+- The release remains Windows x64 ZIP-only.
+- BCPC does not bundle Macs Fan Control, `applesmc.sys`, the native experimental `BootCampSmc` driver, or any other third-party/kernel driver.
+- The physically validated compatibility environment still uses a separately installed copy of Macs Fan Control `1.5.16 (Build 693)` with AppleSMC driver file version `1.0.7.0`.
 
 ## [0.4.0] - 2026-09-05
 
