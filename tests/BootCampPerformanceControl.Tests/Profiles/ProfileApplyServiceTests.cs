@@ -27,6 +27,7 @@ public sealed class ProfileApplyServiceTests
         Assert.Same(powerOperation, result.PowerOperation);
         Assert.True(result.ProfileExecutionResolution?.IsExecutable);
         Assert.Equal(requestedSettings, result.ProfileExecutionResolution?.Settings);
+        Assert.True(result.IsFanOverrideActive);
         Assert.Equal(1, hardware.DetectCallCount);
         Assert.Equal(1, hardware.VerifyModelCallCount);
         Assert.Same(hardware.DetectedSnapshot, hardware.VerifiedSnapshot);
@@ -59,6 +60,7 @@ public sealed class ProfileApplyServiceTests
         Assert.Same(powerOperation, result.PowerOperation);
         Assert.True(result.ProfileExecutionResolution?.IsExecutable);
         Assert.Equal(requestedSettings, result.ProfileExecutionResolution?.Settings);
+        Assert.True(result.IsFanOverrideActive);
     }
 
     [Fact]
@@ -262,7 +264,7 @@ public sealed class ProfileApplyServiceTests
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_ExactVerifiedMacBookPro16_1_WithoutCoordinator_FailsClosedAndDoesNotTouchPower()
+    public async Task ApplyProfileAsync_SupportedIntelMacWithoutFanCoordinator_AppliesCpuOnly()
     {
         var hardware = new FakeHardwareDetectionService(SupportedMacBookPro16_1());
         var power = new FakePowerManagementService();
@@ -274,14 +276,13 @@ public sealed class ProfileApplyServiceTests
 
         var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
-        Assert.Contains("Transactional fan coordinator is required", result.FailureReason);
-        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(1, power.GuardedApplyCallCount);
         Assert.Equal(0, power.UnguardedApplyCallCount);
     }
 
     [Fact]
-    public async Task ApplyProfileAsync_ExactVerifiedMacBookPro16_1_AppleSmcServiceStopped_FailsClosedWithClearMessage()
+    public async Task ApplyProfileAsync_SupportedIntelMacAppleSmcStopped_AppliesCpuOnly()
     {
         var hardware = new FakeHardwareDetectionService(SupportedMacBookPro16_1());
         var power = new FakePowerManagementService();
@@ -299,9 +300,8 @@ public sealed class ProfileApplyServiceTests
 
         var result = await service.ApplyProfileAsync("gaming-optimised", CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
-        Assert.Contains("AppleSMC service is not running", result.FailureReason);
-        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(1, power.GuardedApplyCallCount);
     }
 
     [Fact]

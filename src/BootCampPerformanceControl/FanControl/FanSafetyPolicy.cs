@@ -1,14 +1,10 @@
 using BootCampPerformanceControl.FanControl.Smc;
-using BootCampPerformanceControl.HardwareDetection;
-
 namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanSafetyPolicy
 {
-    private const float Fan0MaximumMinimumRpm = 5000f;
-    private const float Fan0MaximumMaximumRpm = 6200f;
-    private const float Fan1MaximumMinimumRpm = 4600f;
-    private const float Fan1MaximumMaximumRpm = 5800f;
+    // Conservative model-neutral corruption guard; not an Apple specification or write target.
+    private const float MaximumReportedFanRpm = 10000f;
     private const float RuntimeRpmOvershootAllowance = 250f;
     private const int MaximumRepresentableFanCount = FanIndex.MaximumRepresentableValue + 1;
 
@@ -40,7 +36,7 @@ internal sealed class FanSafetyPolicy
         var writeFailures = new List<string>();
         if (readFailures.Count == 0)
         {
-            ValidateProductionWriteGate(model, snapshot, writeFailures);
+            ValidateFamilyWriteGate(snapshot, writeFailures);
         }
 
         return new FanControlCapabilityResult(
@@ -141,10 +137,10 @@ internal sealed class FanSafetyPolicy
     {
         var maximumKey = fan.Index.GetSmcKey("Mx");
         var maximum = fan.Maximum.GetFloat32();
-        if (!float.IsFinite(maximum) || maximum <= 0f)
+        if (!float.IsFinite(maximum) || maximum <= 0f || maximum > MaximumReportedFanRpm)
         {
             failures.Add(
-                $"SMC key '{maximumKey}' reported invalid maximum RPM {maximum}; expected a finite positive value.");
+                $"SMC key '{maximumKey}' reported invalid maximum RPM {maximum}; expected a finite value greater than 0 and no greater than {MaximumReportedFanRpm}.");
             return;
         }
 
@@ -153,30 +149,15 @@ internal sealed class FanSafetyPolicy
         ValidateMode(fan.Index.GetSmcKey("Md"), fan.Mode.GetUInt8(), failures);
     }
 
-    private static void ValidateProductionWriteGate(
-        string model,
+    private static void ValidateFamilyWriteGate(
         FanSmcSnapshot snapshot,
         ICollection<string> failures)
     {
-        if (!string.Equals(model, VerifiedHardwareModels.MacBookPro16_1, StringComparison.Ordinal))
+        if (snapshot.Fans.Count == 0)
         {
             failures.Add(
-                $"Production fan writes are not verified for model '{model}'. Expected '{VerifiedHardwareModels.MacBookPro16_1}'.");
-            return;
+                "The verified T2 SMC write family requires at least one discovered fan; FNum reported a passive topology.");
         }
-
-        if (snapshot.Fans.Count != 2)
-        {
-            failures.Add(
-                $"Production fan writes on {VerifiedHardwareModels.MacBookPro16_1} require exactly 2 fans; observed {snapshot.Fans.Count}.");
-            return;
-        }
-
-        // These conservative envelopes remain part of the existing MacBookPro16,1
-        // production write fingerprint. They are intentionally not used to decide
-        // whether a compatible MMIO/FLT4 topology is safe to monitor read-only.
-        ValidateRange("F0Mx", snapshot.Fans[0].Maximum.GetFloat32(), Fan0MaximumMinimumRpm, Fan0MaximumMaximumRpm, failures);
-        ValidateRange("F1Mx", snapshot.Fans[1].Maximum.GetFloat32(), Fan1MaximumMinimumRpm, Fan1MaximumMaximumRpm, failures);
     }
 
     private static void ValidateMetadata(
@@ -223,17 +204,4 @@ internal sealed class FanSafetyPolicy
         }
     }
 
-    private static void ValidateRange(
-        string key,
-        float value,
-        float minimum,
-        float maximum,
-        ICollection<string> failures)
-    {
-        if (!float.IsFinite(value) || value < minimum || value > maximum)
-        {
-            failures.Add(
-                $"SMC key '{key}' reported value {value}; verified write compatibility range is {minimum}..{maximum} RPM.");
-        }
-    }
 }

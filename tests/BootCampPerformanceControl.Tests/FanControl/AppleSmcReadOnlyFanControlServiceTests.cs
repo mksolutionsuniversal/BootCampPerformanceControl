@@ -10,7 +10,7 @@ namespace BootCampPerformanceControl.Tests.FanControl;
 public sealed class AppleSmcReadOnlyFanControlServiceTests
 {
     [Fact]
-    public async Task ReadStatusAsync_UnknownModelCanBeMonitoredButNotWriteEnabled()
+    public async Task ReadStatusAsync_UnknownModelWithVerifiedFamilyIsWriteEnabled()
     {
         var controller = new FakeAppleSmcServiceController(
             AppleSmcServiceState.Running,
@@ -25,8 +25,8 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(FanBackendState.Running, status.BackendState);
         Assert.Equal(FanSafetyState.ReadOnlyVerified, status.SafetyState);
         Assert.True(status.IsAvailable);
-        Assert.False(status.IsWriteControlEnabled);
-        Assert.Equal("Disabled (write capability not verified)", status.WriteControlDisplayText);
+        Assert.True(status.IsWriteControlEnabled);
+        Assert.Equal("Available (verified T2 SMC family)", status.WriteControlDisplayText);
         Assert.Equal(1, transportFactory.OpenCount);
     }
 
@@ -153,7 +153,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), status.Fans[0].Reading);
         Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), status.Fans[1].Reading);
         Assert.True(status.IsWriteControlEnabled);
-        Assert.Equal("Available (verified MacBookPro16,1)", status.WriteControlDisplayText);
+        Assert.Equal("Available (verified T2 SMC family)", status.WriteControlDisplayText);
         Assert.Equal(0, controller.StartCount);
         Assert.Equal(0, controller.StopCount);
         Assert.Equal(1, transportFactory.OpenCount);

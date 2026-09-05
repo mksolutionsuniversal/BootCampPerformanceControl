@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 
@@ -47,9 +49,22 @@ internal sealed class GamingOptimisedApplyCoordinator
             .ReadCurrentStateAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var fanSession = await _fanExecutionSessionFactory
-            .OpenAsync(cancellationToken)
-            .ConfigureAwait(false);
+        IFanExecutionSession fanSession;
+        try
+        {
+            fanSession = await _fanExecutionSessionFactory
+                .OpenAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsFanBackendUnavailable(exception))
+        {
+            return await ApplyProcessorOnlyAsync(
+                    profile.Id,
+                    processorResolution,
+                    expectedStateBefore,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         GamingOptimisedApplyResult result;
         try
@@ -90,9 +105,24 @@ internal sealed class GamingOptimisedApplyCoordinator
             ?? throw new InvalidOperationException(
                 "Executable processor resolution must include settings.");
 
-        var fanCapability = await fanSession.CapabilityProbe
-            .ProbeAsync(verificationResult.Model, cancellationToken)
-            .ConfigureAwait(false);
+        FanControlCapabilityResult fanCapability;
+        try
+        {
+            fanCapability = await fanSession.CapabilityProbe
+                .ProbeAsync(verificationResult.Model, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException ||
+            !cancellationToken.IsCancellationRequested)
+        {
+            return await ApplyProcessorOnlyAsync(
+                    profile.Id,
+                    processorResolution,
+                    expectedStateBefore,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
         var fanResolution = _fanProfileExecutionResolver.ResolveMaximumSafeRpmPlan(
             profile,
             verificationResult,
@@ -100,11 +130,12 @@ internal sealed class GamingOptimisedApplyCoordinator
 
         if (!fanResolution.IsExecutable || fanResolution.Plan is null)
         {
-            return GamingOptimisedApplyResult.Failed(
+            return await ApplyProcessorOnlyAsync(
                 profile.Id,
-                fanResolution.FailureReason,
                 processorResolution,
-                fanResolution);
+                expectedStateBefore,
+                cancellationToken,
+                fanResolution).ConfigureAwait(false);
         }
 
         FanOverrideExecutionResult fanExecution;
@@ -119,23 +150,37 @@ internal sealed class GamingOptimisedApplyCoordinator
         }
         catch (Exception exception)
         {
-            await RecoverFanOrThrowAsync(
+            var recovery = await RecoverFanOrThrowAsync(
                     fanSession,
                     verificationResult.Model,
                     "Fan apply failed and fan compensation could not be verified.",
                     exception)
                 .ConfigureAwait(false);
-            throw;
+
+            if (exception is OperationCanceledException)
+            {
+                throw;
+            }
+
+            return await ApplyProcessorOnlyAsync(
+                    profile.Id,
+                    processorResolution,
+                    expectedStateBefore,
+                    cancellationToken,
+                    fanResolution,
+                    fanCompensation: recovery.Decision)
+                .ConfigureAwait(false);
         }
 
         if (!fanExecution.IsApplied)
         {
-            return GamingOptimisedApplyResult.Failed(
+            return await ApplyProcessorOnlyAsync(
                 profile.Id,
-                fanExecution.Message,
                 processorResolution,
+                expectedStateBefore,
+                cancellationToken,
                 fanResolution,
-                fanExecution);
+                fanExecution).ConfigureAwait(false);
         }
 
         PowerOperationResult powerOperation;
@@ -226,6 +271,48 @@ internal sealed class GamingOptimisedApplyCoordinator
                 operationException,
                 cleanupException);
         }
+    }
+
+    private async Task<GamingOptimisedApplyResult> ApplyProcessorOnlyAsync(
+        string profileId,
+        ProfileExecutionResolution processorResolution,
+        PowerStateSnapshot expectedStateBefore,
+        CancellationToken cancellationToken,
+        FanProfileExecutionResolution? fanResolution = null,
+        FanOverrideExecutionResult? fanExecution = null,
+        FanOverrideRecoveryDecision? fanCompensation = null)
+    {
+        var settings = processorResolution.Settings
+            ?? throw new InvalidOperationException(
+                "Executable processor resolution must include settings.");
+        var powerOperation = await _powerManagementService
+            .ApplyProcessorSettingsAsync(
+                settings,
+                expectedStateBefore,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return powerOperation.IsSuccessful
+            ? GamingOptimisedApplyResult.SuccessfulProcessorOnly(
+                profileId,
+                processorResolution,
+                powerOperation,
+                fanResolution,
+                fanExecution,
+                fanCompensation)
+            : GamingOptimisedApplyResult.Failed(
+                profileId,
+                powerOperation.FailureMessage ?? "Processor power operation failed.",
+                processorResolution,
+                fanResolution,
+                fanExecution,
+                powerOperation,
+                fanCompensation);
+    }
+
+    private static bool IsFanBackendUnavailable(Exception exception)
+    {
+        return exception is AppleSmcServiceStateException or Win32Exception;
     }
 
     private static async Task DisposeFanSessionAfterResultAsync(

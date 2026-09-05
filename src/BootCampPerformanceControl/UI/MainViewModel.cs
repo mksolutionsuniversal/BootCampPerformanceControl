@@ -976,7 +976,7 @@ public sealed class MainViewModel : ViewModelBase
                 "gaming-optimised",
                 StringComparison.OrdinalIgnoreCase)
             && _gamingOptimisedSessionState == GamingOptimisedSessionState.PartialCpuOnly
-            && IsExactVerifiedMacBookPro16_1(_lastVerificationResult);
+            && _lastVerificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac;
 
         if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
             && _lastVerificationResult.ValidationLevel == ModelValidationLevel.NotIndividuallyTested)
@@ -1013,10 +1013,28 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             _logger.Info($"Profile application started: {profileId}.");
-            var result = await _profileApplyService.ApplyProfileAsync(profileId, cancellationToken);
+            ProfileApplyResult result;
+            try
+            {
+                result = await _profileApplyService.ApplyProfileAsync(profileId, cancellationToken);
+            }
+            catch
+            {
+                if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase))
+                {
+                    await InspectFanOwnershipAfterFanOperationFailureAsync();
+                }
+
+                throw;
+            }
 
             if (!result.IsSuccessful)
             {
+                if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase))
+                {
+                    await InspectFanOwnershipAfterFanOperationFailureAsync();
+                }
+
                 RefreshProfileStateAfterUncertainApply();
                 StatusMessage = $"Profile application failed: {result.FailureReason}";
                 _logger.Error(
@@ -1028,8 +1046,7 @@ public sealed class MainViewModel : ViewModelBase
             _logger.Info($"Profile application succeeded: {profileId}. Re-reading power state.");
             SetLastVerificationResult(result.ModelVerificationResult);
 
-            if (IsExactVerifiedMacBookPro16_1(result.ModelVerificationResult)
-                && string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -1038,12 +1055,18 @@ public sealed class MainViewModel : ViewModelBase
 
                     if (marker is null)
                     {
-                        _logger.Error(
-                            "Gaming Optimised apply succeeded but ownership marker is unexpectedly missing on disk.",
-                            new InvalidOperationException("Ownership marker was not found after successful apply."));
-                        SetFanRecoveryState(
-                            FanRecoveryState.RecoveryBlocked,
-                            "Fan recovery is blocked because the ownership marker could not be verified on disk.");
+                        if (result.IsFanOverrideActive)
+                        {
+                            SetFanRecoveryState(
+                                FanRecoveryState.RecoveryBlocked,
+                                "Fan recovery is blocked because Maximum Safe RPM was applied, but the ownership marker could not be verified on disk.");
+                        }
+                        else
+                        {
+                            SetFanRecoveryState(
+                                FanRecoveryState.None,
+                                "Gaming Optimised is active for the processor. No BCPC fan override is active.");
+                        }
                     }
                     else if (!string.Equals(marker.Model, result.ModelVerificationResult.Model, StringComparison.Ordinal))
                     {
@@ -1054,11 +1077,17 @@ public sealed class MainViewModel : ViewModelBase
                             FanRecoveryState.RecoveryBlocked,
                             "Fan recovery is blocked because current hardware state does not match the ownership marker.");
                     }
-                    else
+                    else if (result.IsFanOverrideActive)
                     {
                         SetFanRecoveryState(
                             FanRecoveryState.CurrentSessionOverrideActive,
                             "Gaming Optimised fan override is active. Restore returns fans to Apple Auto.");
+                    }
+                    else
+                    {
+                        SetFanRecoveryState(
+                            FanRecoveryState.RecoveryBlocked,
+                            "A fan ownership marker exists, but this apply did not establish a new verified fan override. Restore fan control before continuing.");
                     }
                 }
                 catch (Exception exception)
@@ -1133,14 +1162,14 @@ public sealed class MainViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            await InspectFanOwnershipAfterResumeFailureAsync();
+            await InspectFanOwnershipAfterFanOperationFailureAsync();
             await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
             throw;
         }
         catch (AppleSmcServiceStateException exception)
         {
             _logger.Info($"Gaming Optimised fan-only resume stopped because AppleSMC is unavailable: {exception.Message}");
-            await InspectFanOwnershipAfterResumeFailureAsync();
+            await InspectFanOwnershipAfterFanOperationFailureAsync();
             await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
             UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
             StatusMessage = "Maximum Safe RPM was not re-enabled. Enable fan monitoring/control, then try again.";
@@ -1149,7 +1178,7 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception exception)
         {
             _logger.Error("Gaming Optimised fan-only Maximum Safe RPM resume failed unexpectedly.", exception);
-            await InspectFanOwnershipAfterResumeFailureAsync();
+            await InspectFanOwnershipAfterFanOperationFailureAsync();
             await TryRefreshFanStatusUnderGateAsync(_lastVerificationResult.Model, CancellationToken.None);
             UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
             StatusMessage = "Maximum Safe RPM could not be re-enabled safely. Restore remains available; check the log for details.";
@@ -1160,7 +1189,7 @@ public sealed class MainViewModel : ViewModelBase
 
         if (!result.IsSuccessful)
         {
-            await InspectFanOwnershipAfterResumeFailureAsync();
+            await InspectFanOwnershipAfterFanOperationFailureAsync();
             await TryRefreshFanStatusUnderGateAsync(result.ModelVerificationResult.Model, cancellationToken);
             UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
             StatusMessage = $"Maximum Safe RPM was not re-enabled: {result.FailureReason}";
@@ -1219,7 +1248,7 @@ public sealed class MainViewModel : ViewModelBase
         UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
     }
 
-    private async Task InspectFanOwnershipAfterResumeFailureAsync()
+    private async Task InspectFanOwnershipAfterFanOperationFailureAsync()
     {
         try
         {
@@ -1629,7 +1658,6 @@ public sealed class MainViewModel : ViewModelBase
         ProfileButtons.Clear();
 
         var hasFanRecoveryContext = _fanRecoveryState != FanRecoveryState.None;
-        var isExactMbp161 = IsExactVerifiedMacBookPro16_1(verificationResult);
         var isPartialGamingState =
             _gamingOptimisedSessionState == GamingOptimisedSessionState.PartialCpuOnly;
 
@@ -1641,7 +1669,6 @@ public sealed class MainViewModel : ViewModelBase
                 isRestoreSnapshotAvailable: _restoreSnapshotStore.HasOriginalRestoreSnapshot,
                 isPowerStateReadable: isPowerStateReadable,
                 hasFanRecoveryContext: hasFanRecoveryContext,
-                isExactVerifiedMacBookPro16_1: isExactMbp161,
                 isPartialGamingState: isPartialGamingState));
         }
     }
@@ -1679,11 +1706,11 @@ public sealed class MainViewModel : ViewModelBase
 
         _logger.Info($"Previous-session fan override marker detected. Model={marker.Model}; CreatedAtUtc={marker.CreatedAtUtc:O}.");
 
-        if (!IsExactVerifiedMacBookPro16_1(verificationResult)
+        if (verificationResult.PlatformSupport != PlatformSupportStatus.SupportedIntelMac
             || !string.Equals(marker.Model, verificationResult.Model, StringComparison.Ordinal))
         {
             _logger.Info(
-                $"Startup fan recovery blocked: detected model '{verificationResult.Model}' does not match marker model '{marker.Model}' or is not verified MacBookPro16,1.");
+                $"Startup fan recovery blocked: detected supported model '{verificationResult.Model}' does not match marker model '{marker.Model}'.");
             SetFanRecoveryState(
                 FanRecoveryState.RecoveryBlocked,
                 "Fan recovery is blocked because current hardware state does not match the ownership marker.");
@@ -1783,16 +1810,6 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         UpdateProfiles(_lastVerificationResult, _lastPowerStateReadSucceeded);
-    }
-
-    private static bool IsExactVerifiedMacBookPro16_1(ModelVerificationResult verificationResult)
-    {
-        return string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal)
-            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
-            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
     }
 
     private AsyncCommand CreateProfileCommand(PerformanceProfile profile)

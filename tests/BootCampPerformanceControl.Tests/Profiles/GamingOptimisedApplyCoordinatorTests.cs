@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using BootCampPerformanceControl.FanControl;
 using BootCampPerformanceControl.FanControl.Smc;
+using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
+using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.PowerManagement;
 using BootCampPerformanceControl.Profiles;
@@ -105,7 +107,37 @@ public sealed class GamingOptimisedApplyCoordinatorTests
     }
 
     [Fact]
-    public async Task ApplyAsync_FanCapabilityBlocked_DoesNotApplyFansOrCpu()
+    public async Task ApplyAsync_AppleSmcStopped_AppliesCpuOnlyWithoutFanWrites()
+    {
+        var events = new List<string>();
+        var power = new RecordingPowerManagementService(events);
+        var fanProbe = new RecordingFanCapabilityProbe(events);
+        var fanCoordinator = new RecordingFanOverrideCoordinator(events);
+        var sessionFactory = new RecordingFanExecutionSessionFactory(
+            fanProbe,
+            fanCoordinator,
+            events)
+        {
+            OpenException = new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
+        var coordinator = CreateCoordinator(power, sessionFactory);
+
+        var result = await coordinator.ApplyAsync(
+            GamingOptimisedProfile(),
+            PerformanceValidatedMacBookPro16_1(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Null(result.FanExecution);
+        Assert.Equal(new ProcessorPowerSettings(95, 95, 0, 0), power.LastRequestedSettings);
+        Assert.Equal(1, power.GuardedApplyCallCount);
+        Assert.Equal(0, fanProbe.ProbeCallCount);
+        Assert.Equal(0, fanCoordinator.ApplyCallCount);
+        Assert.Equal(["power-read", "fan-session-open", "power-apply"], events);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_FanCapabilityBlocked_AppliesCpuOnly()
     {
         var events = new List<string>();
         var power = new RecordingPowerManagementService(events);
@@ -123,15 +155,15 @@ public sealed class GamingOptimisedApplyCoordinatorTests
             PerformanceValidatedMacBookPro16_1(),
             CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
+        Assert.True(result.IsSuccessful);
         Assert.False(result.FanResolution?.IsExecutable);
         Assert.Null(result.FanExecution);
-        Assert.Null(result.PowerOperation);
+        Assert.NotNull(result.PowerOperation);
         Assert.Equal(1, power.ReadCurrentStateCallCount);
         Assert.Equal(1, fanProbe.ProbeCallCount);
         Assert.Equal(0, fanCoordinator.ApplyCallCount);
-        Assert.Equal(0, power.GuardedApplyCallCount);
-        Assert.Equal(["power-read", "fan-session-open", "fan-probe", "fan-session-dispose"], events);
+        Assert.Equal(1, power.GuardedApplyCallCount);
+        Assert.Equal(["power-read", "fan-session-open", "fan-probe", "power-apply", "fan-session-dispose"], events);
     }
 
     [Fact]
@@ -156,7 +188,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
     }
 
     [Fact]
-    public async Task ApplyAsync_FanCoordinatorReturnsBlocked_DoesNotApplyCpu()
+    public async Task ApplyAsync_FanCoordinatorReturnsBlocked_AppliesCpuOnly()
     {
         var events = new List<string>();
         var power = new RecordingPowerManagementService(events);
@@ -172,18 +204,66 @@ public sealed class GamingOptimisedApplyCoordinatorTests
             PerformanceValidatedMacBookPro16_1(),
             CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
+        Assert.True(result.IsSuccessful);
         Assert.NotNull(result.FanExecution);
         Assert.False(result.FanExecution!.IsApplied);
-        Assert.Null(result.PowerOperation);
-        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.NotNull(result.PowerOperation);
+        Assert.Equal(1, power.GuardedApplyCallCount);
         Assert.Equal(
-            ["power-read", "fan-session-open", "fan-probe", "fan-apply", "fan-session-dispose"],
+            ["power-read", "fan-session-open", "fan-probe", "fan-apply", "power-apply", "fan-session-dispose"],
             events);
     }
 
     [Fact]
-    public async Task ApplyAsync_FanApplyThrowsBeforeSuccess_DoesNotApplyCpu()
+    public async Task ApplyAsync_PassiveFNumZeroTopology_AppliesCpuOnlyWithoutFanWrites()
+    {
+        var events = new List<string>();
+        var power = new RecordingPowerManagementService(events);
+        var passiveSnapshot = new FanSmcSnapshot(UInt8("FNum", 0, 0x80), []);
+        var fanProbe = new RecordingFanCapabilityProbe(
+            events,
+            Capability(
+                isReadSupported: true,
+                isHardwareSafetyGateSatisfied: false,
+                snapshot: passiveSnapshot));
+        var fanCoordinator = new RecordingFanOverrideCoordinator(events);
+        var coordinator = CreateCoordinator(power, fanProbe, fanCoordinator);
+
+        var result = await coordinator.ApplyAsync(
+            GamingOptimisedProfile(),
+            PerformanceValidatedMacBookPro16_1(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(new ProcessorPowerSettings(95, 95, 0, 0), power.LastRequestedSettings);
+        Assert.Equal(0, fanCoordinator.ApplyCallCount);
+        Assert.Equal(1, power.GuardedApplyCallCount);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ForeignManualMode_DoesNotTakeFanOwnershipAndAppliesCpuOnly()
+    {
+        var events = new List<string>();
+        var power = new RecordingPowerManagementService(events);
+        var fanProbe = new RecordingFanCapabilityProbe(
+            events,
+            ValidFanCapability(fan0Mode: 1));
+        var fanCoordinator = new RecordingFanOverrideCoordinator(events);
+        var coordinator = CreateCoordinator(power, fanProbe, fanCoordinator);
+
+        var result = await coordinator.ApplyAsync(
+            GamingOptimisedProfile(),
+            PerformanceValidatedMacBookPro16_1(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.False(result.FanResolution?.IsExecutable);
+        Assert.Equal(0, fanCoordinator.ApplyCallCount);
+        Assert.Equal(new ProcessorPowerSettings(95, 95, 0, 0), power.LastRequestedSettings);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_FanApplyThrowsAndRecoveryVerifies_AppliesCpuOnly()
     {
         var events = new List<string>();
         var power = new RecordingPowerManagementService(events);
@@ -195,14 +275,14 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         };
         var coordinator = CreateCoordinator(power, fanProbe, fanCoordinator);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => coordinator.ApplyAsync(
-                GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
-                CancellationToken.None));
+        var result = await coordinator.ApplyAsync(
+            GamingOptimisedProfile(),
+            PerformanceValidatedMacBookPro16_1(),
+            CancellationToken.None);
 
-        Assert.Same(originalException, exception);
-        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(1, power.GuardedApplyCallCount);
+        Assert.Equal(FanOverrideRecoveryAction.RestoreAppleAuto, result.FanCompensation?.Action);
         Assert.Equal(
             [
                 "power-read",
@@ -211,13 +291,14 @@ public sealed class GamingOptimisedApplyCoordinatorTests
                 "fan-apply",
                 "fresh-fan-probe",
                 "fan-recover",
+                "power-apply",
                 "fan-session-dispose"
             ],
             events);
     }
 
     [Fact]
-    public async Task ApplyAsync_FanApplyThrowsAndSessionDisposeSucceeds_PreservesOriginalException()
+    public async Task ApplyAsync_FanApplyThrowsAndSessionDisposeSucceeds_ReturnsCpuOnlySuccess()
     {
         var originalException = new InvalidOperationException("fan apply failed");
         var power = new RecordingPowerManagementService();
@@ -231,19 +312,19 @@ public sealed class GamingOptimisedApplyCoordinatorTests
             fanCoordinator);
         var coordinator = CreateCoordinator(power, sessionFactory);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => coordinator.ApplyAsync(
-                GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
-                CancellationToken.None));
+        var result = await coordinator.ApplyAsync(
+            GamingOptimisedProfile(),
+            PerformanceValidatedMacBookPro16_1(),
+            CancellationToken.None);
 
-        Assert.Same(originalException, exception);
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(1, power.GuardedApplyCallCount);
         Assert.Single(sessionFactory.Sessions);
         Assert.Equal(1, sessionFactory.Sessions[0].DisposeCallCount);
     }
 
     [Fact]
-    public async Task ApplyAsync_FanApplyThrowsAndSessionDisposeThrows_SurfacesOperationAndCleanupFailures()
+    public async Task ApplyAsync_FanApplyRecoversThenSessionDisposeThrows_SurfacesCleanupFailure()
     {
         var operationException = new InvalidOperationException("fan apply failed");
         var cleanupException = new InvalidOperationException("session dispose failed");
@@ -261,18 +342,14 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         };
         var coordinator = CreateCoordinator(power, sessionFactory);
 
-        var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
                 PerformanceValidatedMacBookPro16_1(),
                 CancellationToken.None));
 
-        Assert.Same(operationException, exception.OperationException);
-        Assert.Same(cleanupException, exception.CleanupException);
-        var aggregate = Assert.IsType<AggregateException>(exception.InnerException);
-        Assert.Contains(operationException, aggregate.InnerExceptions);
-        Assert.Contains(cleanupException, aggregate.InnerExceptions);
-        Assert.Equal(0, power.GuardedApplyCallCount);
+        Assert.Same(cleanupException, exception);
+        Assert.Equal(1, power.GuardedApplyCallCount);
     }
 
     [Fact]

@@ -61,7 +61,7 @@ internal sealed class CleanExitFanRecoveryService
                 .ConfigureAwait(false);
             var verificationResult = _hardwareDetectionService.VerifyModel(hardwareSnapshot);
 
-            if (!IsExactVerifiedMacBookPro16_1(verificationResult)
+            if (verificationResult.PlatformSupport != PlatformSupportStatus.SupportedIntelMac
                 || !string.Equals(marker.Model, verificationResult.Model, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
@@ -102,13 +102,4 @@ internal sealed class CleanExitFanRecoveryService
         }
     }
 
-    private static bool IsExactVerifiedMacBookPro16_1(ModelVerificationResult verificationResult)
-    {
-        return string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal)
-            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
-            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
-    }
 }

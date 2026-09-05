@@ -36,17 +36,20 @@ public sealed class FanControllerTests
         Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), result.Status.Fans[1].Reading);
         Assert.True(result.Status.IsWriteControlEnabled);
         Assert.Equal("Read-only monitoring verified", result.Status.SafetyDisplayText);
-        Assert.Equal("Available (verified MacBookPro16,1)", result.Status.WriteControlDisplayText);
+        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
+        Assert.Equal("MMIO (protocol 1)", result.Status.TransportDisplayText);
+        Assert.Equal(2, result.Status.ReportedFanCount);
+        Assert.Equal(2, result.Status.DiscoveredFanCount);
         Assert.True(result.Capability.IsReadSupported);
         Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Write control: Available (verified MacBookPro16,1)", result.Status.DisplayText, StringComparison.Ordinal);
+        Assert.Contains("Write control: Available (verified T2 SMC family)", result.Status.DisplayText, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ReadStatusAsync_ReportsUnknownCompatibleModelReadOnly()
+    public async Task ReadStatusAsync_ReportsUnknownCompatibleModelWriteFamilyAvailable()
     {
         await using var transport = new FakeSmcTransport();
         var controller = CreateController(transport);
@@ -56,9 +59,9 @@ public sealed class FanControllerTests
             CancellationToken.None);
 
         Assert.True(result.Status.IsAvailable);
-        Assert.Equal("Disabled (write capability not verified)", result.Status.WriteControlDisplayText);
+        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
         Assert.True(result.Capability.IsReadSupported);
-        Assert.False(result.Capability.IsHardwareSafetyGateSatisfied);
+        Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Equal(9, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);

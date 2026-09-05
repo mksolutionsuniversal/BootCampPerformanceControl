@@ -239,6 +239,8 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
         builder.AppendLine("Fan compatibility");
         builder.AppendLine("-----------------");
         builder.AppendLine($"AppleSMC backend state: {fanStatus.BackendDisplayText}");
+        builder.AppendLine($"Transport: {fanStatus.TransportDisplayText}");
+        builder.AppendLine($"FNum / discovered fan count: {FormatFanCount(fanStatus.ReportedFanCount)} / {FormatFanCount(fanStatus.DiscoveredFanCount)}");
         builder.AppendLine($"Fan safety state: {fanStatus.SafetyDisplayText}");
         AppendFanRpmLines(builder, fanStatus);
         builder.AppendLine($"Mode: {FormatFanMode(fanStatus)}");
@@ -353,6 +355,11 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
     private static string FormatFanMode(FanControlStatus fanStatus)
     {
         return fanStatus.IsAvailable ? fanStatus.ModeDisplayText : Unavailable;
+    }
+
+    private static string FormatFanCount(int? fanCount)
+    {
+        return fanCount?.ToString(CultureInfo.InvariantCulture) ?? Unavailable;
     }
 
     private static string FormatPowerScheme(PowerStateSnapshot? powerState)

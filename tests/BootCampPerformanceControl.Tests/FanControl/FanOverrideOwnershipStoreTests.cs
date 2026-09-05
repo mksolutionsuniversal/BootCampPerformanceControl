@@ -148,6 +148,40 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         Assert.False(document.RootElement.TryGetProperty("fan0ExpectedTargetRpm", out _));
     }
 
+    [Fact]
+    public async Task SaveNewAsync_ExactLegacyModelAndTwoFanTopology_WritesSchemaVersion1()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+
+        await store.SaveNewAsync(CreateMarker(), CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
+        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(5616f, document.RootElement.GetProperty("fan0ExpectedTargetRpm").GetSingle());
+        Assert.Equal(5200f, document.RootElement.GetProperty("fan1ExpectedTargetRpm").GetSingle());
+        Assert.False(document.RootElement.TryGetProperty("targets", out _));
+    }
+
+    [Fact]
+    public async Task SaveNewAsync_OtherModelWithTwoFans_WritesSchemaVersion2()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var marker = new FanOverrideOwnershipMarker(
+            "Macmini8,1",
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 2900f),
+                new FanOverrideOwnershipTarget(new FanIndex(1), 3100f)
+            ],
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+
+        await store.SaveNewAsync(marker, CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, document.RootElement.GetProperty("targets").GetArrayLength());
+        Assert.False(document.RootElement.TryGetProperty("fan0ExpectedTargetRpm", out _));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

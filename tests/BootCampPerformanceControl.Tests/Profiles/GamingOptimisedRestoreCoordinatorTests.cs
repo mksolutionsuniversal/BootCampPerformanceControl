@@ -12,7 +12,7 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
     private const string Model = VerifiedHardwareModels.MacBookPro16_1;
 
     [Fact]
-    public async Task RestoreAsync_WrongModel_FailsBeforeFanProbeRecoveryOrPowerRestore()
+    public async Task RestoreAsync_DifferentSupportedModel_UsesGenericFanRecoveryThenPowerRestore()
     {
         var power = new RecordingPowerManagementService();
         var fanProbe = new RecordingFanCapabilityProbe();
@@ -26,13 +26,13 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
             VerifiedHardwareModels.MacBookPro14_3,
             CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
-        Assert.Null(result.FanRecovery);
-        Assert.Null(result.PowerOperation);
-        Assert.Equal(0, fanProbe.ProbeCallCount);
-        Assert.Equal(0, fanCoordinator.RecoverCallCount);
-        Assert.Equal(0, sessionFactory.OpenCallCount);
-        Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
+        Assert.True(result.IsSuccessful);
+        Assert.NotNull(result.FanRecovery);
+        Assert.NotNull(result.PowerOperation);
+        Assert.Equal(1, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanCoordinator.RecoverCallCount);
+        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
     }
 
     [Fact]
@@ -509,7 +509,7 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
     }
 
     [Fact]
-    public async Task RecoverFansOnlyAsync_ModelMismatch_FailsClosedWithoutSession()
+    public async Task RecoverFansOnlyAsync_DifferentModel_IsHandledByGenericRecoveryPolicy()
     {
         var power = new RecordingPowerManagementService();
         var fanProbe = new RecordingFanCapabilityProbe();
@@ -518,10 +518,10 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
 
         var result = await coordinator.RecoverFansOnlyAsync("MacBookPro15,1", CancellationToken.None);
 
-        Assert.False(result.IsSuccessful);
-        Assert.Contains("MacBookPro16,1", result.FailureReason, StringComparison.Ordinal);
+        Assert.True(result.IsSuccessful);
         Assert.Null(result.PowerOperation);
-        Assert.Equal(0, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanProbe.ProbeCallCount);
+        Assert.Equal(1, fanCoordinator.RecoverCallCount);
         Assert.Equal(0, power.RestoreOriginalSettingsCallCount);
     }
 

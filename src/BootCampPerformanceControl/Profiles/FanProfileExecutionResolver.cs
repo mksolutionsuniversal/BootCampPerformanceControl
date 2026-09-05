@@ -46,21 +46,6 @@ internal sealed class FanProfileExecutionResolver
                 "Gaming Optimised fan execution requires a supported Intel Mac platform.");
         }
 
-        if (!string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal))
-        {
-            return FanProfileExecutionResolution.NotExecutable(
-                $"Gaming Optimised fan execution requires the verified {VerifiedHardwareModels.MacBookPro16_1} model.");
-        }
-
-        if (verificationResult.ValidationLevel != ModelValidationLevel.PerformanceValidated)
-        {
-            return FanProfileExecutionResolution.NotExecutable(
-                "Gaming Optimised fan execution requires a performance-validated model.");
-        }
-
         if (!profile.IsAvailableForDetectedModel)
         {
             return FanProfileExecutionResolution.NotExecutable(

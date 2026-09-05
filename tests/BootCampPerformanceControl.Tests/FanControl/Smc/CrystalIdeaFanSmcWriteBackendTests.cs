@@ -135,6 +135,36 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
                 new byte[] { 0, 0, 0, 0 }));
     }
 
+    [Theory]
+    [InlineData("FS! ")]
+    [InlineData("F0Mx")]
+    [InlineData("F0Ac")]
+    [InlineData("F0Mn")]
+    [InlineData("F10Md")]
+    [InlineData("FAMd")]
+    [InlineData("F0md")]
+    public void Codec_RejectsKeysOutsideF0ThroughF9ModeAndTargetWhitelist(string key)
+    {
+        Assert.Throws<ArgumentException>(
+            () => CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+                key,
+                new byte[] { 0 }));
+    }
+
+    [Fact]
+    public void Codec_AcceptsHighestRepresentableFanModeAndTargetKeys()
+    {
+        var modeRequest = CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+            "F9Md",
+            new byte[] { 1 });
+        var targetRequest = CrystalIdeaAppleSmcCodec.BuildWhitelistedFanWriteRequest(
+            "F9Tg",
+            new byte[] { 0, 0, 0, 0 });
+
+        Assert.Equal(new byte[] { 0x46, 0x39, 0x4D, 0x64, 0x01, 0x01 }, modeRequest);
+        Assert.Equal(new byte[] { 0x46, 0x39, 0x54, 0x67, 0x04, 0, 0, 0, 0 }, targetRequest);
+    }
+
     [Fact]
     public void Codec_RejectsWrongLengthForWhitelistedKey()
     {

@@ -215,6 +215,46 @@ public sealed class FanOverrideCoordinatorTests
         Assert.Equal(0, writer.RestoreCalls);
     }
 
+    [Fact]
+    public async Task RecoverAsync_OneFanNonLegacyModelMatchingFamily_RestoresAndClearsMarker()
+    {
+        const string model = "Macmini8,1";
+        const float maximum = 2900f;
+        var store = new InMemoryOwnershipStore
+        {
+            Marker = new FanOverrideOwnershipMarker(
+                model,
+                [new FanOverrideOwnershipTarget(new FanIndex(0), maximum)],
+                FixedUtc)
+        };
+        var writer = new FakeWriter();
+        var coordinator = CreateCoordinator(store, writer);
+        var snapshot = new FanSmcSnapshot(
+            UInt8("FNum", 1, 0x80),
+            [
+                new FanSmcChannelSnapshot(
+                    new FanIndex(0),
+                    Float32("F0Mx", maximum, 0x85),
+                    Float32("F0Ac", 2500f, 0x84),
+                    UInt8("F0Md", 1, 0xD0),
+                    Float32("F0Tg", maximum, 0xD4))
+            ]);
+        var capability = new FanSafetyPolicy().Evaluate(
+            model,
+            SmcTransportProtocol.Mmio,
+            snapshot);
+
+        var decision = await coordinator.RecoverAsync(
+            model,
+            capability,
+            CancellationToken.None);
+
+        Assert.Equal(FanOverrideRecoveryAction.RestoreAppleAuto, decision.Action);
+        Assert.Equal(1, writer.RestoreCalls);
+        Assert.Equal(1, store.ClearCalls);
+        Assert.Null(store.Marker);
+    }
+
     private static FanOverrideCoordinator CreateCoordinator(
         InMemoryOwnershipStore store,
         FakeWriter writer)

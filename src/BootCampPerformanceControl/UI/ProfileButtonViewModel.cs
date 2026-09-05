@@ -14,7 +14,6 @@ public sealed class ProfileButtonViewModel
         bool isRestoreSnapshotAvailable = false,
         bool isPowerStateReadable = false,
         bool hasFanRecoveryContext = false,
-        bool isExactVerifiedMacBookPro16_1 = false,
         bool isPartialGamingState = false)
     {
         ProfileId = profile.Id;
@@ -23,8 +22,7 @@ public sealed class ProfileButtonViewModel
             profile,
             isRestoreSnapshotAvailable,
             isPowerStateReadable,
-            hasFanRecoveryContext,
-            isExactVerifiedMacBookPro16_1);
+            hasFanRecoveryContext);
         Command = IsEnabled ? command : null;
         ToolTip = CreateToolTip(
             profile,
@@ -32,7 +30,6 @@ public sealed class ProfileButtonViewModel
             isRestoreSnapshotAvailable,
             isPowerStateReadable,
             hasFanRecoveryContext,
-            isExactVerifiedMacBookPro16_1,
             isPartialGamingState);
     }
 
@@ -50,15 +47,14 @@ public sealed class ProfileButtonViewModel
         PerformanceProfile profile,
         bool isRestoreSnapshotAvailable,
         bool isPowerStateReadable,
-        bool hasFanRecoveryContext,
-        bool isExactVerifiedMacBookPro16_1)
+        bool hasFanRecoveryContext)
     {
         if (string.Equals(
                 profile.Id,
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            if (isExactVerifiedMacBookPro16_1 && hasFanRecoveryContext)
+            if (hasFanRecoveryContext)
             {
                 return false;
             }
@@ -83,7 +79,6 @@ public sealed class ProfileButtonViewModel
         bool isRestoreSnapshotAvailable,
         bool isPowerStateReadable,
         bool hasFanRecoveryContext,
-        bool isExactVerifiedMacBookPro16_1,
         bool isPartialGamingState)
     {
         if (isEnabled)
@@ -123,7 +118,7 @@ public sealed class ProfileButtonViewModel
                 GamingOptimisedProfileId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            if (isExactVerifiedMacBookPro16_1 && hasFanRecoveryContext)
+            if (hasFanRecoveryContext)
             {
                 return "Restore the previous fan override before applying Gaming Optimised again.";
             }

@@ -45,6 +45,19 @@ internal sealed record LegacyFanOverrideOwnershipDocument(
 {
     public const int SchemaVersionValue = 1;
 
+    public static LegacyFanOverrideOwnershipDocument FromMarker(
+        FanOverrideOwnershipMarker marker)
+    {
+        ArgumentNullException.ThrowIfNull(marker);
+
+        return new LegacyFanOverrideOwnershipDocument(
+            SchemaVersionValue,
+            marker.Model,
+            marker.Targets[0].ExpectedTargetRpm,
+            marker.Targets[1].ExpectedTargetRpm,
+            marker.CreatedAtUtc);
+    }
+
     public FanOverrideOwnershipMarker ToMarker()
     {
         return new FanOverrideOwnershipMarker(

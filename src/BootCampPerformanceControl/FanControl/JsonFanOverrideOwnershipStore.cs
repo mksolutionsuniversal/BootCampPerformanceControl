@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl;
@@ -131,12 +132,22 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     bufferSize: 4096,
                     FileOptions.Asynchronous | FileOptions.WriteThrough))
                 {
-                    var document = FanOverrideOwnershipDocument.FromMarker(marker);
-                    await JsonSerializer.SerializeAsync(
-                        stream,
-                        document,
-                        JsonOptions,
-                        cancellationToken).ConfigureAwait(false);
+                    if (ShouldWriteLegacySchema(marker))
+                    {
+                        await JsonSerializer.SerializeAsync(
+                            stream,
+                            LegacyFanOverrideOwnershipDocument.FromMarker(marker),
+                            JsonOptions,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await JsonSerializer.SerializeAsync(
+                            stream,
+                            FanOverrideOwnershipDocument.FromMarker(marker),
+                            JsonOptions,
+                            cancellationToken).ConfigureAwait(false);
+                    }
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     stream.Flush(flushToDisk: true);
                 }
@@ -210,6 +221,17 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "BootCampPerformanceControl", "Backups");
+    }
+
+    private static bool ShouldWriteLegacySchema(FanOverrideOwnershipMarker marker)
+    {
+        return string.Equals(
+                marker.Model,
+                VerifiedHardwareModels.MacBookPro16_1,
+                StringComparison.Ordinal)
+            && marker.Targets.Count == 2
+            && marker.Targets[0].Index == new FanIndex(0)
+            && marker.Targets[1].Index == new FanIndex(1);
     }
 
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)

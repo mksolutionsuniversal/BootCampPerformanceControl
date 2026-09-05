@@ -1042,16 +1042,23 @@ public sealed class MainViewModelTests
             VerifiedFanStatus(),
             VerifiedFanStatus());
         var sessionFactory = new TestFanExecutionSessionFactory();
+        var ownershipStore = new TestFanOverrideOwnershipStore();
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
             powerManagementService,
             restoreSnapshotStore,
             fanControlService: fanControlService,
             fanPollingDelayAsync: pollingDelay.DelayAsync,
-            fanExecutionSessionFactory: sessionFactory);
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
+        ownershipStore.Marker = new FanOverrideOwnershipMarker(
+            VerifiedHardwareModels.MacBookPro16_1,
+            5321.25f,
+            4789.5f,
+            DateTimeOffset.UtcNow);
 
         var liveReadGate = new AsyncGate();
         fanControlService.QueueReadGate(liveReadGate);
@@ -1147,6 +1154,7 @@ public sealed class MainViewModelTests
             VerifiedFanStatus(),
             VerifiedFanStatus());
         var restoreGate = new AsyncGate();
+        var ownershipStore = new TestFanOverrideOwnershipStore();
         var sessionFactory = new TestFanExecutionSessionFactory
         {
             OpenSessionHandler = async () =>
@@ -1162,10 +1170,16 @@ public sealed class MainViewModelTests
             restoreSnapshotStore,
             fanControlService: fanControlService,
             fanPollingDelayAsync: pollingDelay.DelayAsync,
-            fanExecutionSessionFactory: sessionFactory);
+            fanExecutionSessionFactory: sessionFactory,
+            ownershipStore: ownershipStore);
 
         viewModel.RefreshCommand.Execute(null);
         await WaitForIdleAsync(viewModel);
+        ownershipStore.Marker = new FanOverrideOwnershipMarker(
+            VerifiedHardwareModels.MacBookPro16_1,
+            5321.25f,
+            4789.5f,
+            DateTimeOffset.UtcNow);
 
         var readCountBefore = fanControlService.ReadStatusCallCount;
 
@@ -1854,10 +1868,15 @@ public sealed class MainViewModelTests
             InitialPowerState(),
             expectedStateBefore,
             refreshedState);
+        var sessionFactory = new TestFanExecutionSessionFactory
+        {
+            OpenSessionHandler = () => throw new AppleSmcServiceStateException(AppleSmcServiceState.Stopped)
+        };
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(verification),
             powerManagementService,
-            userConfirmationService: confirmationService);
+            userConfirmationService: confirmationService,
+            fanExecutionSessionFactory: sessionFactory);
 
         viewModel.RefreshCommand.Execute(null);
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
@@ -1867,12 +1886,13 @@ public sealed class MainViewModelTests
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
         Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
 
-        // Second apply in same session should NOT prompt again
+        // Second activation in the same partial CPU-only session is fan-only:
+        // it must not prompt again or rewrite the processor snapshot/settings.
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
         Assert.Equal(1, confirmationService.CallCount);
-        Assert.Equal(2, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
     }
 
     [Fact]
@@ -2676,14 +2696,20 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task StartupRecovery_MatchingMarkerAndManualFans_RecoversAppleAutoAndClearsMarker()
+    public async Task StartupRecovery_MatchingNonLegacySupportedModel_RecoversAppleAutoAndClearsMarker()
     {
-        var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
+        var verification = new ModelVerificationResult(
+            "Apple Inc.",
+            VerifiedHardwareModels.MacBookPro14_3,
+            PlatformSupportStatus.SupportedIntelMac,
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac.");
+        var hardware = new FakeHardwareDetectionService(verification);
         var power = new FakePowerManagementService(InitialPowerState());
         var ownershipStore = new TestFanOverrideOwnershipStore
         {
             Marker = new FanOverrideOwnershipMarker(
-                VerifiedHardwareModels.MacBookPro16_1,
+                VerifiedHardwareModels.MacBookPro14_3,
                 5321.25f,
                 4789.5f,
                 DateTimeOffset.UtcNow)
@@ -3368,7 +3394,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task Restore_WithoutFanMarkerAndWithPowerSnapshot_VerifiesFanBaselineThenPower()
+    public async Task Restore_WithoutFanMarkerAndWithPowerSnapshot_RestoresPowerWithoutFanSession()
     {
         var hardware = new FakeHardwareDetectionService(VerifiedMacBookPro16_1());
         var initialPower = InitialPowerState();
@@ -3394,7 +3420,7 @@ public sealed class MainViewModelTests
         restoreProfile.Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(1, sessionFactory.OpenCallCount);
+        Assert.Equal(0, sessionFactory.OpenCallCount);
         Assert.Equal(1, power.RestoreOriginalSettingsCallCount);
     }
 
@@ -3554,8 +3580,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: false,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: true,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: true);
         Assert.True(fanOnlyVm.IsEnabled);
         Assert.Equal("Restore fan control to Apple Auto.", fanOnlyVm.ToolTip);
 
@@ -3565,8 +3590,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: true,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: true,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: true);
         Assert.True(fanAndCpuVm.IsEnabled);
         Assert.Equal("Restore fan control to Apple Auto and restore the exact original saved power state.", fanAndCpuVm.ToolTip);
 
@@ -3576,8 +3600,7 @@ public sealed class MainViewModelTests
             command: null,
             isRestoreSnapshotAvailable: true,
             isPowerStateReadable: true,
-            hasFanRecoveryContext: false,
-            isExactVerifiedMacBookPro16_1: true);
+            hasFanRecoveryContext: false);
         Assert.True(cpuOnlyVm.IsEnabled);
         Assert.Equal("Restore the exact original saved power state.", cpuOnlyVm.ToolTip);
     }
@@ -3859,7 +3882,7 @@ public sealed class MainViewModelTests
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
-            PlatformSupportStatus.SupportedIntelMac,
+            PlatformSupportStatus.DetectionIncomplete,
             ModelValidationLevel.NotIndividuallyTested,
             "Matching model string without verification.");
     }

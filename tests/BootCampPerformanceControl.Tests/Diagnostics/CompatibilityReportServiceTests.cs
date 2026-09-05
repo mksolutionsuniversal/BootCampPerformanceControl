@@ -48,11 +48,13 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
         Assert.Contains("Original Restore snapshot present: Yes", result.Content);
         Assert.Contains("AppleSMC backend state: Running", result.Content);
+        Assert.Contains("Transport: MMIO (protocol 1)", result.Content);
+        Assert.Contains("FNum / discovered fan count: 2 / 2", result.Content);
         Assert.Contains("Fan safety state: Read-only monitoring verified", result.Content);
         Assert.Contains("Fan 0 RPM: 1840 / 5616 RPM", result.Content);
         Assert.Contains("Fan 1 RPM: 1691 / 5200 RPM", result.Content);
         Assert.Contains("Mode: Apple Auto", result.Content);
-        Assert.Contains("Write control state: Available (verified MacBookPro16,1)", result.Content);
+        Assert.Contains("Write control state: Available (verified T2 SMC family)", result.Content);
         Assert.Contains("Fan status/details: Verified in test.", result.Content);
     }
 
@@ -256,7 +258,12 @@ public sealed class CompatibilityReportServiceTests
                 new FanChannelReading(1, new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto))
             ],
             "Verified in test.",
-            FanWriteControlState.Available);
+            FanWriteControlState.Available)
+        {
+            TransportDisplayText = "MMIO (protocol 1)",
+            ReportedFanCount = 2,
+            DiscoveredFanCount = 2
+        };
     }
 
     private static string ExpectedApplicationVersion()

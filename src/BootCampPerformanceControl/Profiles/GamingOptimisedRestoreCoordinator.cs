@@ -21,15 +21,7 @@ internal sealed class GamingOptimisedRestoreCoordinator
         string model,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(
-                model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal))
-        {
-            return GamingOptimisedRestoreResult.Failed(
-                model ?? string.Empty,
-                $"Gaming Optimised restore requires the verified {VerifiedHardwareModels.MacBookPro16_1} model.");
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
 
         FanControlCapabilityResult freshFanCapability;
         FanOverrideRecoveryDecision fanRecovery;

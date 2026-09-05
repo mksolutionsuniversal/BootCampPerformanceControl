@@ -1,3 +1,5 @@
+using BootCampPerformanceControl.FanControl.Smc;
+
 namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanController
@@ -40,7 +42,12 @@ internal sealed class FanController
                         fan.Maximum.GetFloat32(),
                         GetMode(fan.Mode.GetUInt8())))).ToArray(),
                 "The AppleSMC read-only protocol and fan metadata were verified.",
-                writeControlState),
+                writeControlState)
+            {
+                TransportDisplayText = FormatTransport(capability.Protocol),
+                ReportedFanCount = TryGetReportedFanCount(snapshot),
+                DiscoveredFanCount = snapshot.Fans.Count
+            },
             capability);
     }
 
@@ -56,7 +63,39 @@ internal sealed class FanController
         return FanControlStatus.CreateUnavailable(
             FanBackendState.Running,
             FanSafetyState.ReadOnlyUnavailable,
-            reason);
+            reason) with
+        {
+            TransportDisplayText = FormatTransport(capability.Protocol),
+            ReportedFanCount = TryGetReportedFanCount(capability.Snapshot),
+            DiscoveredFanCount = capability.Snapshot?.Fans.Count
+        };
+    }
+
+    private static int? TryGetReportedFanCount(FanSmcSnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return snapshot.FanCount.GetUInt8();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string FormatTransport(SmcTransportProtocol? protocol)
+    {
+        return protocol switch
+        {
+            SmcTransportProtocol.Mmio => "MMIO (protocol 1)",
+            SmcTransportProtocol.Unknown => "Unknown (protocol 0)",
+            _ => "Unavailable"
+        };
     }
 
     private static FanOperatingMode GetMode(byte mode)

@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using BootCampPerformanceControl.FanControl;
+using BootCampPerformanceControl.FanControl.Smc;
 using BootCampPerformanceControl.FanControl.Smc.CrystalIdea;
 using BootCampPerformanceControl.FanControl.Smc.Windows;
 using BootCampPerformanceControl.HardwareDetection;
@@ -18,13 +20,37 @@ public sealed class GamingOptimisedFanResumeServiceTests
         var restoreStore = new TrackingRestoreSnapshotStore(originalSnapshot);
         var power = new ReadOnlyTrackingPowerManagementService(PowerState(95, 95, 0, 0));
         var ownershipStore = new TestFanOverrideOwnershipStore();
-        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore);
+        var fanProbe = new TestFanCapabilityProbe
+        {
+            Handler = (model, cancellationToken) => Task.FromResult(OneFanCapability())
+        };
+        var fanCoordinator = new TestFanOverrideCoordinator
+        {
+            ApplyHandler = async (model, capability, cancellationToken) =>
+            {
+                var marker = new FanOverrideOwnershipMarker(
+                    model,
+                    [new FanOverrideOwnershipTarget(new FanIndex(0), 2900f)],
+                    DateTimeOffset.UtcNow);
+                await ownershipStore.SaveNewAsync(marker, cancellationToken);
+                return FanOverrideExecutionResult.Applied(marker);
+            }
+        };
+        var sessionFactory = new TestFanExecutionSessionFactory(ownershipStore)
+        {
+            OpenSessionHandler = () => Task.FromResult<IFanExecutionSession>(
+                new TestFanExecutionSession(fanProbe, fanCoordinator))
+        };
         var service = CreateService(power, restoreStore, sessionFactory);
 
         var result = await service.ResumeAsync(CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
         Assert.NotNull(ownershipStore.Marker);
+        Assert.Equal("Macmini8,1", ownershipStore.Marker.Model);
+        var target = Assert.Single(ownershipStore.Marker.Targets);
+        Assert.Equal(0, target.Index.Value);
+        Assert.Equal(2900f, target.ExpectedTargetRpm);
         Assert.Equal(originalSnapshot, restoreStore.Snapshot);
         Assert.Equal(0, restoreStore.SaveCallCount);
         Assert.Equal(0, restoreStore.ReplaceCallCount);
@@ -91,14 +117,40 @@ public sealed class GamingOptimisedFanResumeServiceTests
             DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"));
     }
 
+    private static FanControlCapabilityResult OneFanCapability()
+    {
+        return new FanSafetyPolicy().Evaluate(
+            "Macmini8,1",
+            SmcTransportProtocol.Mmio,
+            new FanSmcSnapshot(
+                new SmcValue(new SmcKeyInfo("FNum", 1, "ui8 ", 0x80), [1]),
+                [
+                    new FanSmcChannelSnapshot(
+                        new FanIndex(0),
+                        Float32("F0Mx", 2900f, 0x85),
+                        Float32("F0Ac", 1200f, 0x84),
+                        new SmcValue(new SmcKeyInfo("F0Md", 1, "ui8 ", 0xD0), [0]),
+                        Float32("F0Tg", 1200f, 0xD4))
+                ]));
+    }
+
+    private static SmcValue Float32(string key, float value, byte attributes)
+    {
+        Span<byte> rawData = stackalloc byte[sizeof(float)];
+        BinaryPrimitives.WriteInt32LittleEndian(
+            rawData,
+            BitConverter.SingleToInt32Bits(value));
+        return new SmcValue(new SmcKeyInfo(key, 4, "flt ", attributes), rawData);
+    }
+
     private sealed class FixedHardwareDetectionService : IHardwareDetectionService
     {
         private static readonly ModelVerificationResult Verification = new(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
+            "Macmini8,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified in test.");
+            ModelValidationLevel.NotIndividuallyTested,
+            "Supported Intel Mac in test.");
 
         public Task<HardwareSnapshot> DetectAsync(CancellationToken cancellationToken)
         {

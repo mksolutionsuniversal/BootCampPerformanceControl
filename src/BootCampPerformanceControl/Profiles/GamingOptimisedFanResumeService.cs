@@ -44,10 +44,10 @@ internal sealed class GamingOptimisedFanResumeService
             .ConfigureAwait(false);
         var verificationResult = _hardwareDetectionService.VerifyModel(hardwareSnapshot);
 
-        if (!IsExactVerifiedMacBookPro16_1(verificationResult))
+        if (verificationResult.PlatformSupport != PlatformSupportStatus.SupportedIntelMac)
         {
             return GamingOptimisedFanResumeResult.Failed(
-                $"Maximum Safe RPM resume requires the verified {VerifiedHardwareModels.MacBookPro16_1} model.",
+                "Maximum Safe RPM resume requires a supported Intel Mac platform.",
                 verificationResult);
         }
 
@@ -175,17 +175,6 @@ internal sealed class GamingOptimisedFanResumeService
             && currentState.ProcessorMaximumDc == gamingSettings.ProcessorMaximumDc
             && currentState.BoostModeAc == gamingSettings.BoostModeAc
             && currentState.BoostModeDc == gamingSettings.BoostModeDc;
-    }
-
-    private static bool IsExactVerifiedMacBookPro16_1(
-        ModelVerificationResult verificationResult)
-    {
-        return string.Equals(
-                verificationResult.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal)
-            && verificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac
-            && verificationResult.ValidationLevel == ModelValidationLevel.PerformanceValidated;
     }
 
     private static async Task DisposeFanSessionAfterFailureAsync(

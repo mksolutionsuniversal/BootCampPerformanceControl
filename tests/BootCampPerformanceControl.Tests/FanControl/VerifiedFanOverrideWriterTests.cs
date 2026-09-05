@@ -86,6 +86,45 @@ public sealed class VerifiedFanOverrideWriterTests
     }
 
     [Fact]
+    public async Task OneFanTopology_AppliesAndRestoresOnlyFan0()
+    {
+        const string model = Model;
+        var maxima = new[] { 2900f };
+        var plan = new FanMaximumSafeRpmPlan(
+            model,
+            [new FanMaximumSafeRpmTarget(new FanIndex(0), maxima[0])]);
+        var applyEvents = new List<string>();
+        var applyWriter = CreateWriter(
+            new RecordingWriteBackend(applyEvents),
+            new SequenceProbe(
+                applyEvents,
+                CreateDynamicCapability(maxima, manualMaximum: false),
+                CreateDynamicCapability(maxima, manualMaximum: true)));
+
+        await applyWriter.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None);
+
+        Assert.Equal(
+            ["probe", "manual:Fan0", "target:Fan0:2900", "manual:Fan0", "probe"],
+            applyEvents);
+
+        var marker = new FanOverrideOwnershipMarker(
+            model,
+            [new FanOverrideOwnershipTarget(new FanIndex(0), maxima[0])],
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+        var restoreEvents = new List<string>();
+        var restoreWriter = CreateWriter(
+            new RecordingWriteBackend(restoreEvents),
+            new SequenceProbe(
+                restoreEvents,
+                CreateDynamicCapability(maxima, manualMaximum: true),
+                CreateDynamicCapability(maxima, manualMaximum: false)));
+
+        await restoreWriter.RestoreAppleAutoAsync(marker, CancellationToken.None);
+
+        Assert.Equal(["probe", "auto:Fan0", "probe"], restoreEvents);
+    }
+
+    [Fact]
     public async Task ApplyMaximumSafeRpmAsync_FreshPlanMismatchBlocksBeforeAnyWrite()
     {
         var events = new List<string>();

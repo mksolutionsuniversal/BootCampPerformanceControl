@@ -57,6 +57,12 @@ public sealed record FanControlStatus(
     string Details,
     FanWriteControlState WriteControlState = FanWriteControlState.NotAvailable)
 {
+    public string TransportDisplayText { get; init; } = "Unavailable";
+
+    public int? ReportedFanCount { get; init; }
+
+    public int? DiscoveredFanCount { get; init; }
+
     public bool IsAvailable => SafetyState == FanSafetyState.ReadOnlyVerified;
 
     // Physical Manual mode is observed hardware state, not proof of BCPC ownership.
@@ -99,7 +105,7 @@ public sealed record FanControlStatus(
 
     public string WriteControlDisplayText => WriteControlState switch
     {
-        FanWriteControlState.Available => "Available (verified MacBookPro16,1)",
+        FanWriteControlState.Available => "Available (verified T2 SMC family)",
         FanWriteControlState.ManualModeDetected => "Manual mode detected",
         FanWriteControlState.MaximumSafeRpmDetected => "Maximum Safe RPM detected (Manual mode)",
         _ => FormatUnavailableWriteControl()
