@@ -37,10 +37,10 @@ public sealed class ProfileCatalog : IProfileCatalog
                     new ProfileSettingMetadata("CPU Maximum DC", "95%"),
                     new ProfileSettingMetadata("Turbo/Boost AC", "Disabled"),
                     new ProfileSettingMetadata("Turbo/Boost DC", "Disabled"),
-                    new ProfileSettingMetadata("Fans", "Maximum Safe RPM when verified T2 SMC family is available; otherwise unchanged"),
+                    new ProfileSettingMetadata("Fans", "Maximum Safe RPM when a verified SMC capability family is available; otherwise unchanged"),
                     new ProfileSettingMetadata("Display", "Unchanged")
                 ],
-                "Applies the global Gaming Optimised processor target (95% maximum state and disabled Turbo/Boost). When the verified T2 SMC fan family is available, Maximum Safe RPM is added using fresh live fan maxima.");
+                "Applies the global Gaming Optimised processor target (95% maximum state and disabled Turbo/Boost). When a verified SMC fan capability family is available, Maximum Safe RPM is added using fresh live fan maxima.");
         }
 
         return new PerformanceProfile(

@@ -1012,7 +1012,8 @@ public sealed class GamingOptimisedApplyCoordinatorTests
             isHardwareSafetyGateSatisfied,
             [],
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static FanSmcSnapshot ValidFanSnapshot(

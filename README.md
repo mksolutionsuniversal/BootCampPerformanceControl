@@ -18,7 +18,7 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 - **Current `main` development target:** `0.5.0-rc.2` — not tagged or published.
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
 - **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
-- **RC fan-control milestone:** dynamic topology plus capability-family T2-style fan-write eligibility.
+- **Current fan-control milestone:** dynamic topology plus bounded `PerFanModeFloat32` and `GlobalMaskFpe2` capability-family writers.
 - **Physical fan-control validation:** end-to-end on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2).
 
 Published `0.5.0-rc.1` identity:
@@ -64,11 +64,11 @@ On every `SupportedIntelMac`:
 
 Fan control is additive:
 
-- if the live AppleSMC backend matches the verified MMIO + `FNum` + per-fan FLT4 capability family and all ownership/safety checks pass, Gaming Optimised also applies `Maximum Safe RPM` to every discovered fan using fresh live `F{i}Mx` values;
+- if the live AppleSMC backend matches an exact bounded capability family and all ownership/safety checks pass, Gaming Optimised also applies `Maximum Safe RPM` to every discovered fan using fresh live `F{i}Mx` values;
 - if AppleSMC is missing, stopped, unsupported, reports `FNum = 0`, or the fans are already Manual without BCPC ownership, Gaming Optimised remains available as a CPU-only profile;
 - if fan state becomes ambiguous after BCPC has started hardware writes, the recovery context is retained and the operation fails closed rather than guessing.
 
-Only `MacBookPro16,1` has completed BCPC end-to-end physical validation for this production fan path so far. Other machines are release-candidate compatibility targets only when their live capability fingerprint passes the same guarded policy.
+Only `MacBookPro16,1` has completed BCPC end-to-end physical write validation for the per-fan family so far. `MacBookPro12,1` supplies read-only physical evidence for `GlobalMaskFpe2`; its physical Maximum Safe RPM / Apple Auto round trip remains a separate controlled qualification step. Runtime permission is never granted by either model identifier.
 
 ### Restore Original Settings
 
@@ -113,11 +113,11 @@ Primary validation machine:
 
 See [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md).
 
-### T1 fan writes remain blocked
+### GlobalMaskFpe2 capability family
 
-**MacBookPro14,3 — MacBook Pro 15-inch (2017), Apple T1**
+**MacBookPro12,1 — physical read-only capability reference**
 
-Processor power-management behaviour has been observed, but its `fpe2` / global-mask fan family is not the verified T2-style family used by this RC. Production fan writes remain disabled pending independent T1 work.
+Physical read-only evidence from `MacBookPro12,1` confirms the `fpe2` big-endian `/ 4` RPM encoding and the global `FS! ` Auto state. The bounded writer is selected only by the exact live `GlobalMaskFpe2` fingerprint, uses fresh exact maximum bytes, and permits writes only for the proven one- and two-fan mask range. This is not a model or T1/T2 generation gate.
 
 ### Other Intel Macs
 
@@ -164,8 +164,8 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 - require the exact verified runtime fan-family metadata rather than trusting a model name,
 - derive fan targets from fresh live SMC maxima rather than hard-coded RPM values,
 - reject non-finite, non-positive or implausibly high maximum RPM data,
-- allow only whitelisted per-fan mode/target keys,
-- never use `FS!`, T1 `fpe2`, arbitrary SMC writes, minimum-RPM controls or a manual fan-speed slider in this RC,
+- allow only bounded family-specific per-fan mode/target keys and the proven global `FS! ` mode key,
+- never expose arbitrary SMC writes, minimum-RPM controls or a manual fan-speed slider,
 - verify hardware state after writes,
 - attempt Apple Auto compensation if the processor phase fails after fan takeover,
 - restore owned fans before processor settings,

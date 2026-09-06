@@ -45,7 +45,7 @@ Apple T2
 Windows 10 Boot Camp
 ```
 
-T1-style `fpe2` / `FS!` fan control remains outside the production write backend.
+The capability-driven runtime also recognizes the bounded `GlobalMaskFpe2` mechanism. This does not imply a T1/T2 generation claim: runtime permission comes only from the exact live key schema, values and proven one- or two-fan global-mask topology.
 
 ## Third-party compatibility dependency
 
@@ -128,7 +128,7 @@ Fan count must be between `1` and `10`, mapping to the supported single-decimal 
 
 `FNum = 0` is accepted as a passive/read-only topology and produces zero fan writes.
 
-### Per-fan metadata
+### PerFanModeFloat32 metadata
 
 For every discovered fan index `i`:
 
@@ -156,9 +156,20 @@ Maximum Safe RPM is always the **fresh live `F{i}Mx` value** for the discovered 
 
 Current and target readings must remain finite and within the bounded validation policy; mode must decode to a supported Auto/Manual value.
 
-### T1 remains blocked
+### GlobalMaskFpe2 metadata
 
-The known T1-style `fpe2` encoding and global `FS!` manual-control concept do not satisfy this family gate. `0.5.0-rc.1` does not write those keys or infer T1/T2 equivalence.
+For every discovered fan index `i`:
+
+```text
+F{i}Mn  fpe2  2 bytes   attributes 0xC0
+F{i}Mx  fpe2  2 bytes   attributes 0xC0
+F{i}Ac  fpe2  2 bytes   attributes 0x90
+F{i}Tg  fpe2  2 bytes   attributes 0xD0
+F{i}Md  absent
+FS!     ui16  2 bytes   attributes 0xC0
+```
+
+`fpe2` is decoded as an unsigned big-endian 16-bit value divided by four. The proven `FS! ` write masks are `0000` (Apple Auto), `0001` (fan 0 manual), `0002` (fan 1 manual) and `0003` (fans 0 and 1 manual). Production writes are enabled only for one- and two-fan topologies; higher counts are discovered and reported read-only.
 
 ## Closed write surface
 
@@ -169,12 +180,11 @@ Allowed discovered fan keys are only:
 ```text
 F0..F9 Md
 F0..F9 Tg
+FS!
 ```
 
 BCPC does not expose or write:
 
-- `FS!`,
-- T1 `fpe2` fan targets,
 - fan minimum keys,
 - arbitrary SMC keys,
 - user-defined RPM values,
@@ -192,12 +202,13 @@ BCPC persists its ownership marker before the first fan hardware write.
 
 ## Ownership marker schemas and downgrade safety
 
-`0.5.0-rc.1` reads:
+The current runtime reads:
 
 - legacy schema v1 for the historical two-fan `MacBookPro16,1` layout,
-- dynamic schema v2 with indexed targets.
+- dynamic schema v2 with indexed targets,
+- family-aware schema v3 with capability family, topology, exact targets and family-specific ownership state.
 
-New exact `MacBookPro16,1` two-fan ownership markers intentionally remain schema v1 so stable `0.4.0` can recover after a downgrade. Other compatible models/topologies use schema v2.
+New ownership markers use schema v3. Legacy v1/v2 markers are interpreted only as `PerFanModeFloat32`; they are never reinterpreted as `GlobalMaskFpe2`.
 
 Unknown or malformed schemas are preserved and fail closed. Loading an existing v1 marker does not cause it to be rewritten merely because a newer application version is running.
 
@@ -213,13 +224,13 @@ When a compatible fan transaction is available, the high-level flow is:
 4. require Apple Auto before new fan ownership,
 5. derive every target from fresh live `F{i}Mx`,
 6. persist BCPC fan ownership,
-7. apply Manual mode to all discovered fans,
-8. apply each fresh live maximum target,
-9. reassert Manual mode for all fans,
-10. read back and verify Maximum Safe RPM,
+7. execute the bounded family strategy: per-fan mode/float target writes, or the proven global mask followed by exact fresh `fpe2` maximum payloads,
+8. verify required mode readback before targets where the family requires it,
+9. read back and verify the exact family-specific Maximum Safe state,
+10. retain confirmed BCPC ownership until Apple Auto is restored,
 11. apply and verify the processor profile.
 
-No reads are inserted inside the initial mode/target transaction sequence.
+For `PerFanModeFloat32`, the established mode/target/mode ordering remains unchanged. For `GlobalMaskFpe2`, `FS! ` manual mode is read back before any target is written, then every exact target is read back and verified.
 
 If no safe fan transaction can start because the backend is absent/stopped/unsupported or fans are externally Manual, the CPU profile can proceed without fan writes.
 

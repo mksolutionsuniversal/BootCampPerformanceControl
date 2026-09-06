@@ -1,6 +1,6 @@
 using System.IO;
+using System.Buffers.Binary;
 using System.Text.Json;
-using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl;
@@ -74,6 +74,10 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     (root.Deserialize<LegacyFanOverrideOwnershipDocument>(JsonOptions)
                         ?? throw new InvalidDataException("The legacy fan ownership marker JSON document is empty."))
                     .ToMarker(),
+                LegacyDynamicFanOverrideOwnershipDocument.SchemaVersionValue =>
+                    (root.Deserialize<LegacyDynamicFanOverrideOwnershipDocument>(JsonOptions)
+                        ?? throw new InvalidDataException("The legacy dynamic fan ownership marker JSON document is empty."))
+                    .ToMarker(),
                 FanOverrideOwnershipDocument.CurrentSchemaVersion =>
                     (root.Deserialize<FanOverrideOwnershipDocument>(JsonOptions)
                         ?? throw new InvalidDataException("The fan ownership marker JSON document is empty."))
@@ -132,22 +136,11 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     bufferSize: 4096,
                     FileOptions.Asynchronous | FileOptions.WriteThrough))
                 {
-                    if (ShouldWriteLegacySchema(marker))
-                    {
-                        await JsonSerializer.SerializeAsync(
-                            stream,
-                            LegacyFanOverrideOwnershipDocument.FromMarker(marker),
-                            JsonOptions,
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await JsonSerializer.SerializeAsync(
-                            stream,
-                            FanOverrideOwnershipDocument.FromMarker(marker),
-                            JsonOptions,
-                            cancellationToken).ConfigureAwait(false);
-                    }
+                    await JsonSerializer.SerializeAsync(
+                        stream,
+                        FanOverrideOwnershipDocument.FromMarker(marker),
+                        JsonOptions,
+                        cancellationToken).ConfigureAwait(false);
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     stream.Flush(flushToDisk: true);
                 }
@@ -223,17 +216,6 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         return Path.Combine(localAppData, "BootCampPerformanceControl", "Backups");
     }
 
-    private static bool ShouldWriteLegacySchema(FanOverrideOwnershipMarker marker)
-    {
-        return string.Equals(
-                marker.Model,
-                VerifiedHardwareModels.MacBookPro16_1,
-                StringComparison.Ordinal)
-            && marker.Targets.Count == 2
-            && marker.Targets[0].Index == new FanIndex(0)
-            && marker.Targets[1].Index == new FanIndex(1);
-    }
-
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)
     {
         ArgumentNullException.ThrowIfNull(marker);
@@ -242,6 +224,37 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         if (marker.Targets.Count == 0)
         {
             throw new ArgumentException("A fan ownership marker must contain at least one target.", nameof(marker));
+        }
+
+        if (marker.Family is FanCapabilityFamily.Unknown or FanCapabilityFamily.Passive)
+        {
+            throw new ArgumentException(
+                "A fan ownership marker must identify a bounded writable capability family.",
+                nameof(marker));
+        }
+
+        if (marker.Family == FanCapabilityFamily.GlobalMaskFpe2)
+        {
+            var expectedMask = GlobalMaskFpe2Strategy.GetManualMask(marker.Targets.Count);
+            if (marker.ExpectedGlobalModeMask != expectedMask ||
+                marker.Targets.Any(target => !HasValidExactFpe2Target(target)))
+            {
+                throw new ArgumentException(
+                    "A GlobalMaskFpe2 ownership marker requires the proven global mask and exact two-byte targets.",
+                    nameof(marker));
+            }
+        }
+        else if (marker.ExpectedGlobalModeMask is not null)
+        {
+            throw new ArgumentException(
+                "A per-fan ownership marker cannot contain global mode state.",
+                nameof(marker));
+        }
+        else if (marker.Targets.Any(target => target.ExpectedTargetRawHex is not null))
+        {
+            throw new ArgumentException(
+                "A PerFanModeFloat32 ownership marker cannot contain fpe2 raw targets.",
+                nameof(marker));
         }
 
         for (var position = 0; position < marker.Targets.Count; position++)
@@ -265,6 +278,26 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         if (marker.CreatedAtUtc == default || marker.CreatedAtUtc.Offset != TimeSpan.Zero)
         {
             throw new ArgumentException("Fan ownership marker timestamp must be a valid UTC timestamp.", nameof(marker));
+        }
+    }
+
+    private static bool HasValidExactFpe2Target(FanOverrideOwnershipTarget target)
+    {
+        if (target.ExpectedTargetRawHex is null ||
+            target.ExpectedTargetRawHex.Length != 4)
+        {
+            return false;
+        }
+
+        try
+        {
+            var raw = Convert.FromHexString(target.ExpectedTargetRawHex);
+            return raw.Length == 2 &&
+                BinaryPrimitives.ReadUInt16BigEndian(raw) / 4f == target.ExpectedTargetRpm;
+        }
+        catch (FormatException)
+        {
+            return false;
         }
     }
 }

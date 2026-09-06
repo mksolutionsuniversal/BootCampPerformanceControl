@@ -191,6 +191,60 @@ public sealed class FanOverrideSafetyTests
     }
 
     [Fact]
+    public void Recovery_BlocksCrossFamilyOwnershipMarker()
+    {
+        var policy = new FanOverrideRecoveryPolicy();
+        var marker = new FanOverrideOwnershipMarker(
+            Model,
+            FanCapabilityFamily.GlobalMaskFpe2,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 5616f)
+                {
+                    ExpectedTargetRawHex = "57C0"
+                },
+                new FanOverrideOwnershipTarget(new FanIndex(1), 5200f)
+                {
+                    ExpectedTargetRawHex = "5140"
+                }
+            ],
+            new DateTimeOffset(2026, 9, 6, 12, 0, 0, TimeSpan.Zero),
+            expectedGlobalModeMask: 0x0003);
+
+        var result = policy.Evaluate(Model, marker, CreateCapability());
+
+        Assert.Equal(FanOverrideRecoveryAction.Blocked, result.Action);
+        Assert.Contains("family differs", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Recovery_BlocksInvalidFamilySpecificMarkerState()
+    {
+        var policy = new FanOverrideRecoveryPolicy();
+        var marker = new FanOverrideOwnershipMarker(
+            Model,
+            FanCapabilityFamily.PerFanModeFloat32,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 5616f)
+                {
+                    ExpectedTargetRawHex = "57C0"
+                },
+                new FanOverrideOwnershipTarget(new FanIndex(1), 5200f)
+            ],
+            DateTimeOffset.UtcNow,
+            expectedGlobalModeMask: null);
+        var capability = CreateCapability(
+            fan0Mode: 1,
+            fan1Mode: 1,
+            fan0Target: 5616f,
+            fan1Target: 5200f);
+
+        var result = policy.Evaluate(Model, marker, capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.Blocked, result.Action);
+        Assert.Contains("family-specific", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Recovery_BlocksWhenCurrentTopologyDoesNotMatchMarker()
     {
         var policy = new FanOverrideRecoveryPolicy();
@@ -243,7 +297,8 @@ public sealed class FanOverrideSafetyTests
             IsHardwareSafetyGateSatisfied: true,
             Array.Empty<string>(),
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static SmcValue UInt8(string key, byte value, byte attributes)

@@ -74,35 +74,27 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
         EnsurePlanStillMatches(plan, freshPreparation.Plan);
 
+        var freshPlan = freshPreparation.Plan;
+        var strategy = FanCapabilityFamilyStrategies.Get(freshPlan.Family);
+        if (!_writeBackend.SupportsFamily(freshPlan.Family))
+        {
+            throw new InvalidOperationException(
+                $"No bounded writer implementation is available for capability family '{freshPlan.Family}'.");
+        }
+
         var writeStarted = false;
 
         try
         {
-            // Confirmed sequence from the read/write research handoff. Do not insert
-            // reads between the initial mode writes and target writes.
             writeStarted = true;
-            foreach (var target in plan.Targets)
-            {
-                await _writeBackend
-                    .SetManualModeAsync(target.Index, cancellationToken)
-                    .ConfigureAwait(false);
-            }
+            await strategy.WriteMaximumSafeStateAsync(
+                    _writeBackend,
+                    freshPlan,
+                    (mask, token) => VerifyGlobalMaskAsync(freshPlan, mask, token),
+                    cancellationToken)
+                .ConfigureAwait(false);
 
-            foreach (var target in plan.Targets)
-            {
-                await _writeBackend
-                    .SetTargetRpmAsync(target.Index, target.TargetRpm, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            foreach (var target in plan.Targets)
-            {
-                await _writeBackend
-                    .SetManualModeAsync(target.Index, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            await VerifyManualMaximumAsync(plan, cancellationToken)
+            await VerifyManualMaximumAsync(freshPlan, cancellationToken)
                 .ConfigureAwait(false);
 
             _logger.Info(
@@ -117,6 +109,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
                 // the caller token and must itself finish with Apple Auto readback.
                 await RestoreAppleAutoCoreAsync(
                         plan.Model,
+                        freshPlan.Family,
                         plan.Targets.Select(target => target.Index).ToArray(),
                         CancellationToken.None)
                     .ConfigureAwait(false);
@@ -166,8 +159,15 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
                 $"Fresh fan ownership check blocked Apple Auto restore. {freshDecision.Reason}");
         }
 
+        if (!_writeBackend.SupportsFamily(ownershipMarker.Family))
+        {
+            throw new InvalidOperationException(
+                $"No bounded restore writer is available for capability family '{ownershipMarker.Family}'.");
+        }
+
         await RestoreAppleAutoCoreAsync(
                 ownershipMarker.Model,
+                ownershipMarker.Family,
                 ownershipMarker.Targets.Select(target => target.Index).ToArray(),
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -178,30 +178,26 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
     private async Task RestoreAppleAutoCoreAsync(
         string model,
+        FanCapabilityFamily family,
         IReadOnlyList<FanIndex> fanIndexes,
         CancellationToken cancellationToken)
     {
         Exception? writeException = null;
 
-        foreach (var fanIndex in fanIndexes)
+        try
         {
-            try
-            {
-                await _writeBackend
-                    .SetAppleAutoAsync(fanIndex, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                writeException = writeException is null
-                    ? exception
-                    : new AggregateException(writeException, exception);
-            }
+            await FanCapabilityFamilyStrategies.Get(family)
+                .WriteAppleAutoAsync(_writeBackend, fanIndexes, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            writeException = exception;
         }
 
         try
         {
-            await VerifyAppleAutoAsync(model, fanIndexes, cancellationToken)
+            await VerifyAppleAutoAsync(model, family, fanIndexes, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception verificationException)
@@ -252,6 +248,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
 
     private async Task VerifyAppleAutoAsync(
         string model,
+        FanCapabilityFamily family,
         IReadOnlyList<FanIndex> fanIndexes,
         CancellationToken cancellationToken)
     {
@@ -261,7 +258,7 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
                 .ProbeAsync(model, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (IsVerifiedAppleAuto(capability, fanIndexes))
+            if (IsVerifiedAppleAuto(capability, family, fanIndexes))
             {
                 return;
             }
@@ -292,33 +289,30 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         FanControlCapabilityResult capability,
         FanMaximumSafeRpmPlan plan)
     {
-        if (!capability.IsReadSupported ||
-            !capability.IsHardwareSafetyGateSatisfied ||
-            capability.Snapshot is null)
+        if (capability.Family != plan.Family)
         {
             return false;
         }
 
-        var snapshot = capability.Snapshot;
-        if (snapshot.Fans.Count != plan.Targets.Count ||
-            !snapshot.Fans.Select(fan => fan.Index)
-                .SequenceEqual(plan.Targets.Select(target => target.Index)))
+        try
+        {
+            return FanCapabilityFamilyStrategies.Get(plan.Family)
+                .IsManualMaximum(capability, plan);
+        }
+        catch (InvalidOperationException)
         {
             return false;
         }
-
-        return snapshot.Fans.Zip(plan.Targets).All(pair =>
-            pair.First.Mode.GetUInt8() == 1
-            && ApproximatelyEqual(pair.First.Target.GetFloat32(), pair.Second.TargetRpm)
-            && ApproximatelyEqual(pair.First.Maximum.GetFloat32(), pair.Second.TargetRpm));
     }
 
     private static bool IsVerifiedAppleAuto(
         FanControlCapabilityResult capability,
+        FanCapabilityFamily family,
         IReadOnlyList<FanIndex> fanIndexes)
     {
         if (!capability.IsReadSupported ||
             !capability.IsHardwareSafetyGateSatisfied ||
+            capability.Family != family ||
             capability.Snapshot is null ||
             capability.Snapshot.Fans.Count != fanIndexes.Count ||
             !capability.Snapshot.Fans.Select(fan => fan.Index).SequenceEqual(fanIndexes))
@@ -326,7 +320,44 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
             return false;
         }
 
-        return capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
+        try
+        {
+            return FanCapabilityFamilyStrategies.Get(family).IsAppleAuto(capability);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private async Task VerifyGlobalMaskAsync(
+        FanMaximumSafeRpmPlan plan,
+        ushort expectedMask,
+        CancellationToken cancellationToken)
+    {
+        if (plan.Family != FanCapabilityFamily.GlobalMaskFpe2)
+        {
+            throw new InvalidOperationException(
+                "Global mask verification was requested for a non-global capability family.");
+        }
+
+        var capability = await _capabilityProbe
+            .ProbeAsync(plan.Model, cancellationToken)
+            .ConfigureAwait(false);
+        if (!capability.IsReadSupported ||
+            !capability.IsHardwareSafetyGateSatisfied ||
+            capability.Family != plan.Family ||
+            capability.Snapshot?.GlobalMode.Value is null ||
+            capability.Snapshot.GlobalMode.Value.GetUInt16BigEndian() != expectedMask ||
+            capability.Snapshot.Fans.Count != plan.Targets.Count ||
+            !capability.Snapshot.Fans.Zip(plan.Targets).All(pair =>
+                pair.Second.ExactTargetPayload.Length == 2 &&
+                pair.First.Maximum.RawData.Span.SequenceEqual(
+                    pair.Second.ExactTargetPayload.Span)))
+        {
+            throw new InvalidOperationException(
+                "GlobalMaskFpe2 manual mode could not be verified before target writes.");
+        }
     }
 
     private static void EnsurePlanStillMatches(
@@ -334,10 +365,13 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
         FanMaximumSafeRpmPlan freshPlan)
     {
         if (!string.Equals(requestedPlan.Model, freshPlan.Model, StringComparison.Ordinal) ||
+            requestedPlan.Family != freshPlan.Family ||
             requestedPlan.Targets.Count != freshPlan.Targets.Count ||
             !requestedPlan.Targets.Zip(freshPlan.Targets).All(pair =>
                 pair.First.Index == pair.Second.Index &&
-                ApproximatelyEqual(pair.First.TargetRpm, pair.Second.TargetRpm)))
+                pair.First.TargetRpm.Equals(pair.Second.TargetRpm) &&
+                pair.First.ExactTargetPayload.Span.SequenceEqual(
+                    pair.Second.ExactTargetPayload.Span)))
         {
             throw new InvalidOperationException(
                 "Fan maximum RPM values changed after the original preflight. No fan write was attempted.");
@@ -367,6 +401,8 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
             plan.Targets.Select(target => (target.Index, target.TargetRpm)),
             "Fan override plan",
             nameof(plan));
+
+        _ = FanCapabilityFamilyStrategies.Get(plan.Family);
     }
 
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)
@@ -386,6 +422,8 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
             marker.Targets.Select(target => (target.Index, target.ExpectedTargetRpm)),
             "Fan ownership marker",
             nameof(marker));
+
+        _ = FanCapabilityFamilyStrategies.Get(marker.Family);
     }
 
     private static void ValidateIndexedTargets(

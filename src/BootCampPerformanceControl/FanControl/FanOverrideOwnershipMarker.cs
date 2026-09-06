@@ -2,7 +2,10 @@ namespace BootCampPerformanceControl.FanControl;
 
 internal sealed record FanOverrideOwnershipTarget(
     FanIndex Index,
-    float ExpectedTargetRpm);
+    float ExpectedTargetRpm)
+{
+    public string? ExpectedTargetRawHex { get; init; }
+}
 
 internal sealed record FanOverrideOwnershipMarker
 {
@@ -10,11 +13,28 @@ internal sealed record FanOverrideOwnershipMarker
         string model,
         IEnumerable<FanOverrideOwnershipTarget> targets,
         DateTimeOffset createdAtUtc)
+        : this(
+            model,
+            FanCapabilityFamily.PerFanModeFloat32,
+            targets,
+            createdAtUtc,
+            expectedGlobalModeMask: null)
+    {
+    }
+
+    public FanOverrideOwnershipMarker(
+        string model,
+        FanCapabilityFamily family,
+        IEnumerable<FanOverrideOwnershipTarget> targets,
+        DateTimeOffset createdAtUtc,
+        ushort? expectedGlobalModeMask)
     {
         Model = model;
+        Family = family;
         ArgumentNullException.ThrowIfNull(targets);
         Targets = targets.ToArray();
         CreatedAtUtc = createdAtUtc;
+        ExpectedGlobalModeMask = expectedGlobalModeMask;
     }
 
     public FanOverrideOwnershipMarker(
@@ -34,9 +54,13 @@ internal sealed record FanOverrideOwnershipMarker
 
     public string Model { get; init; }
 
+    public FanCapabilityFamily Family { get; init; }
+
     public IReadOnlyList<FanOverrideOwnershipTarget> Targets { get; }
 
     public DateTimeOffset CreatedAtUtc { get; }
+
+    public ushort? ExpectedGlobalModeMask { get; }
 
     public static FanOverrideOwnershipMarker FromPlan(
         FanMaximumSafeRpmPlan plan,
@@ -46,9 +70,19 @@ internal sealed record FanOverrideOwnershipMarker
 
         return new FanOverrideOwnershipMarker(
             plan.Model,
-            plan.Targets.Select(target => new FanOverrideOwnershipTarget(
-                target.Index,
-                target.TargetRpm)),
-            createdAtUtc);
+            plan.Family,
+            plan.Targets.Select(target =>
+                new FanOverrideOwnershipTarget(
+                    target.Index,
+                    target.TargetRpm)
+                {
+                    ExpectedTargetRawHex = target.ExactTargetPayload.IsEmpty
+                        ? null
+                        : Convert.ToHexString(target.ExactTargetPayload.Span)
+                }),
+            createdAtUtc,
+            plan.Family == FanCapabilityFamily.GlobalMaskFpe2
+                ? GlobalMaskFpe2Strategy.GetManualMask(plan.Targets.Count)
+                : null);
     }
 }

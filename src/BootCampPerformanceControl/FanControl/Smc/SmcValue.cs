@@ -29,6 +29,18 @@ internal sealed class SmcValue
         return BitConverter.Int32BitsToSingle(bits);
     }
 
+    public ushort GetUInt16BigEndian()
+    {
+        EnsureTypeAndLength("ui16", 2);
+        return BinaryPrimitives.ReadUInt16BigEndian(_rawData);
+    }
+
+    public float GetFpe2()
+    {
+        EnsureTypeAndLength("fpe2", 2);
+        return BinaryPrimitives.ReadUInt16BigEndian(_rawData) / 4f;
+    }
+
     private void EnsureTypeAndLength(string expectedType, int expectedLength)
     {
         if (!string.Equals(Info.Type, expectedType, StringComparison.Ordinal) ||

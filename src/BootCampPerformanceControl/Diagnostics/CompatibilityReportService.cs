@@ -241,11 +241,24 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
         builder.AppendLine($"AppleSMC backend state: {fanStatus.BackendDisplayText}");
         builder.AppendLine($"Transport: {fanStatus.TransportDisplayText}");
         builder.AppendLine($"FNum / discovered fan count: {FormatFanCount(fanStatus.ReportedFanCount)} / {FormatFanCount(fanStatus.DiscoveredFanCount)}");
+        builder.AppendLine($"Capability family: {fanStatus.CapabilityFamily}");
         builder.AppendLine($"Fan safety state: {fanStatus.SafetyDisplayText}");
         AppendFanRpmLines(builder, fanStatus);
         builder.AppendLine($"Mode: {FormatFanMode(fanStatus)}");
         builder.AppendLine($"Write control state: {fanStatus.WriteControlDisplayText}");
         builder.AppendLine($"Fan status/details: {FormatValue(fanStatus.Details)}");
+        builder.AppendLine("Capability fingerprint:");
+        if (fanStatus.CapabilityDiagnostics.Count == 0)
+        {
+            builder.AppendLine("  - Unavailable");
+        }
+        else
+        {
+            foreach (var line in fanStatus.CapabilityDiagnostics)
+            {
+                builder.AppendLine($"  - {FormatValue(line)}");
+            }
+        }
 
         return DiagnosticPrivacySanitizer.RedactPrivacySensitiveValues(
             builder.ToString());

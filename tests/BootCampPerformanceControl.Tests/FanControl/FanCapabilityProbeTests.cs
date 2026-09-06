@@ -18,11 +18,12 @@ public sealed class FanCapabilityProbeTests
 
         Assert.True(result.IsReadSupported);
         Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, result.Family);
         Assert.Empty(result.Failures);
         Assert.True(result.Protocol.HasValue);
         Assert.Equal(SmcTransportProtocol.Mmio, result.Protocol.Value);
         Assert.NotNull(result.Snapshot);
-        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
     }
 
@@ -38,7 +39,7 @@ public sealed class FanCapabilityProbeTests
         Assert.True(result.IsHardwareSafetyGateSatisfied);
         Assert.Empty(result.Failures);
         Assert.Equal(1, transport.ProtocolCalls);
-        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
     }
 
@@ -100,7 +101,7 @@ public sealed class FanCapabilityProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_T1LikeFpe2RpmSchemaCannotEnterT2WriteFamily()
+    public async Task ProbeAsync_MixedFpe2SchemaCannotEnterPerFanWriteFamily()
     {
         await using var transport = new FakeSmcTransport();
         transport.SetFpe2("F0Mx", 5616, 0x85);
@@ -144,7 +145,7 @@ public sealed class FanCapabilityProbeTests
         Assert.True(result.IsHardwareSafetyGateSatisfied);
         Assert.Single(result.Snapshot!.Fans);
         Assert.Equal(
-            new[] { "FNum", "F0Mx", "F0Ac", "F0Md", "F0Tg" },
+            new[] { "FNum", "F0Mn", "F0Mx", "F0Ac", "F0Md", "F0Tg", "FS! " },
             transport.RequestedKeys);
     }
 
@@ -219,6 +220,7 @@ public sealed class FanCapabilityProbeTests
 
         Assert.False(result.IsReadSupported);
         Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.Unknown, result.Family);
         Assert.Contains(result.Failures, failure => failure.Contains("FNum", StringComparison.Ordinal));
         Assert.Equal(new[] { "FNum" }, transport.RequestedKeys);
     }
@@ -237,6 +239,73 @@ public sealed class FanCapabilityProbeTests
         Assert.False(result.IsReadSupported);
         Assert.False(result.IsHardwareSafetyGateSatisfied);
         Assert.Contains(result.Failures, failure => failure.Contains("implausible RPM", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ClassifiesOneFanGlobalMaskFpe2FromExactLiveFingerprint()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.ConfigureGlobalMaskFpe2(1, 0x0000);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("MacBookPro12,1", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, result.Family);
+        Assert.Single(result.Snapshot!.Fans);
+        Assert.Equal(6199f, result.Snapshot.Fans[0].Maximum.GetFpe2());
+        Assert.Null(result.Snapshot.Fans[0].Mode);
+        Assert.Equal((ushort)0, result.Snapshot.GlobalMode.Value!.GetUInt16BigEndian());
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ClassifiesTwoFanGlobalMaskFpe2UsingProvenMaskRange()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.ConfigureGlobalMaskFpe2(2, 0x0003);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("UnlistedIntelMac", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, result.Family);
+        Assert.Equal(2, result.Snapshot!.Fans.Count);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_GlobalMaskTopologyBeyondProvenRangeIsReadOnly()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.ConfigureGlobalMaskFpe2(3, 0x0007);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("UnlistedIntelMac", CancellationToken.None);
+
+        Assert.True(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, result.Family);
+        Assert.Equal((ushort)0x0007, result.Snapshot!.GlobalMode.Value!.GetUInt16BigEndian());
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("not verified for this topology", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_MixedSchemaIsUnknownAndRetainsReadOnlySnapshot()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetFpe2Raw("F0Mx", 0x60DC, 0xC0);
+        var probe = CreateProbe(transport);
+
+        var result = await probe.ProbeAsync("UnlistedIntelMac", CancellationToken.None);
+
+        Assert.False(result.IsReadSupported);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.Unknown, result.Family);
+        Assert.NotNull(result.Snapshot);
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("Write capability not verified", StringComparison.OrdinalIgnoreCase));
     }
 
     private static FanCapabilityProbe CreateProbe(FakeSmcTransport transport)
@@ -323,6 +392,32 @@ public sealed class FanCapabilityProbeTests
                 "fpe2",
                 attributes,
                 [checked((byte)(value >> 8)), checked((byte)(value & 0xFF))]);
+        }
+
+        public void SetFpe2Raw(string key, ushort raw, byte attributes)
+        {
+            _entries[key] = new Entry(
+                "fpe2",
+                attributes,
+                [checked((byte)(raw >> 8)), checked((byte)(raw & 0xFF))]);
+        }
+
+        public void ConfigureGlobalMaskFpe2(int fanCount, ushort mask)
+        {
+            _entries.Clear();
+            SetUInt8("FNum", checked((byte)fanCount), 0x80);
+            for (var index = 0; index < fanCount; index++)
+            {
+                SetFpe2Raw($"F{index}Mn", 0x144C, 0xC0);
+                SetFpe2Raw($"F{index}Mx", checked((ushort)(0x60DC - index * 0x0400)), 0xC0);
+                SetFpe2Raw($"F{index}Ac", 0x2404, 0x90);
+                SetFpe2Raw($"F{index}Tg", mask == 0 ? (ushort)0x248C : checked((ushort)(0x60DC - index * 0x0400)), 0xD0);
+            }
+
+            _entries["FS! "] = new Entry(
+                "ui16",
+                0xC0,
+                [checked((byte)(mask >> 8)), checked((byte)(mask & 0xFF))]);
         }
 
         public void SetFan(int index, float maximum, float actual, byte mode, float target)

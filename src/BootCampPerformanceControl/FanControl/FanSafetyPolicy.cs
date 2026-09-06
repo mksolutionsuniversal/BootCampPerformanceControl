@@ -1,9 +1,9 @@
 using BootCampPerformanceControl.FanControl.Smc;
+
 namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanSafetyPolicy
 {
-    // Conservative model-neutral corruption guard; not an Apple specification or write target.
     private const float MaximumReportedFanRpm = 10000f;
     private const float RuntimeRpmOvershootAllowance = 250f;
     private const int MaximumRepresentableFanCount = FanIndex.MaximumRepresentableValue + 1;
@@ -16,35 +16,78 @@ internal sealed class FanSafetyPolicy
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var readFailures = new List<string>();
-
         if (protocol != SmcTransportProtocol.Mmio)
         {
-            readFailures.Add(
-                $"Unexpected SMC transport protocol '{protocol}' ({(int)protocol}); MMIO (1) is required.");
+            return new FanControlCapabilityResult(
+                false,
+                false,
+                [$"Unexpected SMC transport protocol '{protocol}' ({(int)protocol}); MMIO (1) is required."],
+                protocol,
+                snapshot,
+                FanCapabilityFamily.Unknown);
         }
 
         if (!TryDecodeFanCount(snapshot.FanCount, out var fanCount, out var countFailure))
         {
-            readFailures.Add(countFailure);
-        }
-        else
-        {
-            ValidateTopology(snapshot, fanCount, readFailures);
+            return new FanControlCapabilityResult(
+                false,
+                false,
+                [countFailure],
+                protocol,
+                snapshot,
+                FanCapabilityFamily.Unknown);
         }
 
-        var writeFailures = new List<string>();
-        if (readFailures.Count == 0)
+        var failures = new List<string>();
+        if (!ValidateTopology(snapshot, fanCount, failures))
         {
-            ValidateFamilyWriteGate(snapshot, writeFailures);
+            return new FanControlCapabilityResult(
+                false,
+                false,
+                failures,
+                protocol,
+                snapshot,
+                FanCapabilityFamily.Unknown);
+        }
+
+        if (fanCount == 0)
+        {
+            return new FanControlCapabilityResult(
+                true,
+                false,
+                ["No controllable fans reported by AppleSMC (passive/fanless topology)."],
+                protocol,
+                snapshot,
+                FanCapabilityFamily.Passive);
+        }
+
+        var family = Classify(snapshot);
+        if (family == FanCapabilityFamily.Unknown)
+        {
+            return new FanControlCapabilityResult(
+                false,
+                false,
+                [CreateClassifierFailure(snapshot)],
+                protocol,
+                snapshot,
+                family);
+        }
+
+        ValidateRuntimeValues(snapshot, family, failures);
+        var runtimeValuesValid = failures.Count == 0;
+        if (family == FanCapabilityFamily.GlobalMaskFpe2 && fanCount > 2)
+        {
+            failures.Add(
+                $"Write capability not verified for this topology: GlobalMaskFpe2 mask semantics are proven only for fan indexes 0 and 1; FNum reported {fanCount}.");
         }
 
         return new FanControlCapabilityResult(
-            IsReadSupported: readFailures.Count == 0,
-            IsHardwareSafetyGateSatisfied: readFailures.Count == 0 && writeFailures.Count == 0,
-            [.. readFailures, .. writeFailures],
+            runtimeValuesValid,
+            failures.Count == 0,
+            failures,
             protocol,
-            snapshot);
+            snapshot,
+            family);
     }
 
     public FanControlCapabilityResult EvaluateIdentity(
@@ -61,11 +104,12 @@ internal sealed class FanSafetyPolicy
         }
 
         return new FanControlCapabilityResult(
-            IsReadSupported: false,
-            IsHardwareSafetyGateSatisfied: false,
+            false,
+            false,
             Array.Empty<string>(),
             protocol,
-            Snapshot: null);
+            null,
+            FanCapabilityFamily.Unknown);
     }
 
     public bool TryDecodeFanCount(
@@ -75,12 +119,10 @@ internal sealed class FanSafetyPolicy
     {
         ArgumentNullException.ThrowIfNull(value);
 
-        var failures = new List<string>();
-        ValidateMetadata(value, "FNum", 1, "ui8 ", 0x80, failures);
-        if (failures.Count > 0)
+        if (!Matches(value, "FNum", 1, "ui8 ", 0x80))
         {
             fanCount = 0;
-            failure = failures[0];
+            failure = MetadataMismatch(value, "FNum", 1, "ui8 ", 0x80);
             return false;
         }
 
@@ -96,7 +138,7 @@ internal sealed class FanSafetyPolicy
         return true;
     }
 
-    private static void ValidateTopology(
+    private static bool ValidateTopology(
         FanSmcSnapshot snapshot,
         int fanCount,
         ICollection<string> failures)
@@ -105,79 +147,162 @@ internal sealed class FanSafetyPolicy
         {
             failures.Add(
                 $"Fan topology mismatch. FNum reported {fanCount}, but {snapshot.Fans.Count} fan channels were captured.");
-            return;
+            return false;
         }
 
         for (var value = 0; value < fanCount; value++)
         {
-            var fan = snapshot.Fans[value];
-            var expectedIndex = new FanIndex(value);
-            if (fan.Index != expectedIndex)
+            if (snapshot.Fans[value].Index != new FanIndex(value))
             {
                 failures.Add(
-                    $"Fan topology index mismatch at position {value}; observed index {fan.Index.Value}.");
-                continue;
-            }
-
-            ValidateMetadata(fan.Maximum, expectedIndex.GetSmcKey("Mx"), 4, "flt ", 0x85, failures);
-            ValidateMetadata(fan.Actual, expectedIndex.GetSmcKey("Ac"), 4, "flt ", 0x84, failures);
-            ValidateMetadata(fan.Mode, expectedIndex.GetSmcKey("Md"), 1, "ui8 ", 0xD0, failures);
-            ValidateMetadata(fan.Target, expectedIndex.GetSmcKey("Tg"), 4, "flt ", 0xD4, failures);
-
-            if (failures.Count == 0)
-            {
-                ValidateRuntimeValues(fan, failures);
+                    $"Fan topology index mismatch at position {value}; observed index {snapshot.Fans[value].Index.Value}.");
             }
         }
+
+        return failures.Count == 0;
+    }
+
+    private static FanCapabilityFamily Classify(FanSmcSnapshot snapshot)
+    {
+        var perFan = snapshot.GlobalMode.Value is null;
+        var global = snapshot.GlobalMode.Value is { } globalMode &&
+            Matches(globalMode, "FS! ", 2, "ui16", 0xC0);
+
+        foreach (var fan in snapshot.Fans)
+        {
+            var index = fan.Index;
+            perFan &=
+                Matches(fan.MaximumObservation.Value, index.GetSmcKey("Mx"), 4, "flt ", 0x85) &&
+                Matches(fan.ActualObservation.Value, index.GetSmcKey("Ac"), 4, "flt ", 0x84) &&
+                Matches(fan.TargetObservation.Value, index.GetSmcKey("Tg"), 4, "flt ", 0xD4) &&
+                Matches(fan.ModeObservation.Value, index.GetSmcKey("Md"), 1, "ui8 ", 0xD0);
+
+            global &=
+                Matches(fan.Minimum.Value, index.GetSmcKey("Mn"), 2, "fpe2", 0xC0) &&
+                Matches(fan.MaximumObservation.Value, index.GetSmcKey("Mx"), 2, "fpe2", 0xC0) &&
+                Matches(fan.ActualObservation.Value, index.GetSmcKey("Ac"), 2, "fpe2", 0x90) &&
+                Matches(fan.TargetObservation.Value, index.GetSmcKey("Tg"), 2, "fpe2", 0xD0) &&
+                fan.ModeObservation.Value is null;
+        }
+
+        if (perFan)
+        {
+            return FanCapabilityFamily.PerFanModeFloat32;
+        }
+
+        return global
+            ? FanCapabilityFamily.GlobalMaskFpe2
+            : FanCapabilityFamily.Unknown;
     }
 
     private static void ValidateRuntimeValues(
-        FanSmcChannelSnapshot fan,
-        ICollection<string> failures)
-    {
-        var maximumKey = fan.Index.GetSmcKey("Mx");
-        var maximum = fan.Maximum.GetFloat32();
-        if (!float.IsFinite(maximum) || maximum <= 0f || maximum > MaximumReportedFanRpm)
-        {
-            failures.Add(
-                $"SMC key '{maximumKey}' reported invalid maximum RPM {maximum}; expected a finite value greater than 0 and no greater than {MaximumReportedFanRpm}.");
-            return;
-        }
-
-        ValidateRuntimeRpm(fan.Index.GetSmcKey("Ac"), fan.Actual.GetFloat32(), maximum, failures);
-        ValidateRuntimeRpm(fan.Index.GetSmcKey("Tg"), fan.Target.GetFloat32(), maximum, failures);
-        ValidateMode(fan.Index.GetSmcKey("Md"), fan.Mode.GetUInt8(), failures);
-    }
-
-    private static void ValidateFamilyWriteGate(
         FanSmcSnapshot snapshot,
+        FanCapabilityFamily family,
         ICollection<string> failures)
     {
-        if (snapshot.Fans.Count == 0)
+        foreach (var fan in snapshot.Fans)
         {
-            failures.Add(
-                "The verified SMC write family requires at least one discovered fan; FNum reported a passive topology.");
+            var maximum = DecodeRpm(fan.Maximum, family);
+            if (!float.IsFinite(maximum) || maximum <= 0f || maximum > MaximumReportedFanRpm)
+            {
+                failures.Add(
+                    $"SMC key '{fan.Index.GetSmcKey("Mx")}' reported invalid maximum RPM {maximum}; expected a finite value greater than 0 and no greater than {MaximumReportedFanRpm}.");
+                continue;
+            }
+
+            ValidateRuntimeRpm(fan.Index.GetSmcKey("Ac"), DecodeRpm(fan.Actual, family), maximum, failures);
+            ValidateRuntimeRpm(fan.Index.GetSmcKey("Tg"), DecodeRpm(fan.Target, family), maximum, failures);
+
+            if (family == FanCapabilityFamily.PerFanModeFloat32)
+            {
+                var mode = fan.Mode!.GetUInt8();
+                if (mode is not 0 and not 1)
+                {
+                    failures.Add(
+                        $"SMC key '{fan.Index.GetSmcKey("Md")}' reported unsupported mode value {mode}; expected 0 or 1.");
+                }
+            }
+            else
+            {
+                var minimum = fan.Minimum.Value!.GetFpe2();
+                if (minimum < 0f || minimum > maximum)
+                {
+                    failures.Add(
+                        $"SMC key '{fan.Index.GetSmcKey("Mn")}' reported implausible minimum RPM {minimum}; expected 0..{maximum}.");
+                }
+            }
+        }
+
+        if (family == FanCapabilityFamily.GlobalMaskFpe2)
+        {
+            var mask = snapshot.GlobalMode.Value!.GetUInt16BigEndian();
+            var provenMask = snapshot.Fans.Count switch
+            {
+                1 => 0x0001,
+                2 => 0x0003,
+                _ => (int?)null
+            };
+
+            if (provenMask.HasValue && (mask & ~provenMask.Value) != 0)
+            {
+                failures.Add(
+                    $"SMC key 'FS! ' reported unsupported manual mask 0x{mask:X4}; observed state is outside the proven mask range.");
+            }
         }
     }
 
-    private static void ValidateMetadata(
+    internal static float DecodeRpm(SmcValue value, FanCapabilityFamily family)
+    {
+        return family switch
+        {
+            FanCapabilityFamily.PerFanModeFloat32 => value.GetFloat32(),
+            FanCapabilityFamily.GlobalMaskFpe2 => value.GetFpe2(),
+            _ => throw new InvalidOperationException(
+                $"Capability family '{family}' does not define an RPM decoder.")
+        };
+    }
+
+    private static bool Matches(
+        SmcValue? value,
+        string key,
+        byte length,
+        string type,
+        byte attributes)
+    {
+        return value is not null &&
+            string.Equals(value.Info.Key, key, StringComparison.Ordinal) &&
+            value.Info.Length == length &&
+            string.Equals(value.Info.Type, type, StringComparison.Ordinal) &&
+            value.Info.Attributes == attributes &&
+            value.RawData.Length == length;
+    }
+
+    private static string MetadataMismatch(
         SmcValue value,
         string expectedKey,
         byte expectedLength,
         string expectedType,
-        byte expectedAttributes,
-        ICollection<string> failures)
+        byte expectedAttributes)
     {
-        if (!string.Equals(value.Info.Key, expectedKey, StringComparison.Ordinal) ||
-            value.Info.Length != expectedLength ||
-            !string.Equals(value.Info.Type, expectedType, StringComparison.Ordinal) ||
-            value.Info.Attributes != expectedAttributes)
-        {
-            failures.Add(
-                $"SMC key '{expectedKey}' metadata mismatch. " +
-                $"Observed key='{value.Info.Key}', len={value.Info.Length}, type='{value.Info.Type}', attrs=0x{value.Info.Attributes:X2}; " +
-                $"expected len={expectedLength}, type='{expectedType}', attrs=0x{expectedAttributes:X2}.");
-        }
+        return $"SMC key '{expectedKey}' metadata mismatch. " +
+            $"Observed key='{value.Info.Key}', len={value.Info.Length}, type='{value.Info.Type}', attrs=0x{value.Info.Attributes:X2}; " +
+            $"expected len={expectedLength}, type='{expectedType}', attrs=0x{expectedAttributes:X2}.";
+    }
+
+    private static string CreateClassifierFailure(FanSmcSnapshot snapshot)
+    {
+        var observed = snapshot.Fans
+            .SelectMany(fan => fan.Observations)
+            .Append(snapshot.GlobalMode)
+            .Where(observation => observation.Value is not null)
+            .Select(observation =>
+            {
+                var info = observation.Value!.Info;
+                return $"{info.Key}[type='{info.Type}',len={info.Length},attrs=0x{info.Attributes:X2}]";
+            });
+
+        return "Write capability not verified: SMC metadata mismatch; the live fan fingerprint does not match a bounded writer family. Observed: "
+            + string.Join(", ", observed) + ".";
     }
 
     private static void ValidateRuntimeRpm(
@@ -192,16 +317,4 @@ internal sealed class FanSafetyPolicy
                 $"SMC key '{key}' reported implausible RPM {value}; expected 0..{maximum + RuntimeRpmOvershootAllowance}.");
         }
     }
-
-    private static void ValidateMode(
-        string key,
-        byte value,
-        ICollection<string> failures)
-    {
-        if (value is not 0 and not 1)
-        {
-            failures.Add($"SMC key '{key}' reported unsupported mode value {value}; expected 0 or 1.");
-        }
-    }
-
 }

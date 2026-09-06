@@ -2,8 +2,6 @@ namespace BootCampPerformanceControl.FanControl;
 
 internal sealed class FanOverrideRecoveryPolicy
 {
-    private const float RpmComparisonTolerance = 1f;
-
     public FanOverrideRecoveryDecision Evaluate(
         string currentModel,
         FanOverrideOwnershipMarker marker,
@@ -25,6 +23,12 @@ internal sealed class FanOverrideRecoveryPolicy
             return Blocked("Recovery is blocked because the hardware safety gate is not satisfied.");
         }
 
+        if (capability.Family != marker.Family)
+        {
+            return Blocked(
+                "Recovery is blocked because the live capability family differs from the ownership marker family.");
+        }
+
         var snapshot = capability.Snapshot;
         if (snapshot.Fans.Count != marker.Targets.Count ||
             !snapshot.Fans.Select(fan => fan.Index)
@@ -34,35 +38,56 @@ internal sealed class FanOverrideRecoveryPolicy
                 "Recovery is blocked because the current fan topology does not match the application ownership marker.");
         }
 
-        if (snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0))
+        if (!HasValidFamilySpecificMarkerState(marker))
+        {
+            return Blocked(
+                "Recovery is blocked because the ownership marker contains invalid family-specific safety state.");
+        }
+
+        IFanCapabilityFamilyStrategy strategy;
+        try
+        {
+            strategy = FanCapabilityFamilyStrategies.Get(marker.Family);
+        }
+        catch (InvalidOperationException)
+        {
+            return Blocked(
+                "Recovery is blocked because the ownership marker does not identify a bounded writer family.");
+        }
+
+        if (strategy.IsAppleAuto(capability))
         {
             return new FanOverrideRecoveryDecision(
                 FanOverrideRecoveryAction.None,
                 "Every owned fan is already in Apple Auto. The stale ownership marker can be cleared.");
         }
 
-        if (!snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 1))
+        FanMaximumSafeRpmPlan expectedPlan;
+        try
+        {
+            expectedPlan = new FanMaximumSafeRpmPlan(
+                marker.Model,
+                marker.Family,
+                marker.Targets.Select(target =>
+                    new FanMaximumSafeRpmTarget(
+                        target.Index,
+                        target.ExpectedTargetRpm)
+                    {
+                        ExactTargetPayload = target.ExpectedTargetRawHex is null
+                            ? ReadOnlyMemory<byte>.Empty
+                            : Convert.FromHexString(target.ExpectedTargetRawHex)
+                    }));
+        }
+        catch (FormatException)
         {
             return Blocked(
-                "Recovery is blocked because the current fan modes no longer match the application-owned manual state.");
+                "Recovery is blocked because the ownership marker contains malformed raw target state.");
         }
 
-        for (var position = 0; position < snapshot.Fans.Count; position++)
+        if (!strategy.IsManualMaximum(capability, expectedPlan))
         {
-            var fan = snapshot.Fans[position];
-            var expected = marker.Targets[position];
-
-            if (!ApproximatelyEqual(fan.Target.GetFloat32(), expected.ExpectedTargetRpm))
-            {
-                return Blocked(
-                    "Recovery is blocked because the current fan targets do not match the application ownership marker.");
-            }
-
-            if (!ApproximatelyEqual(fan.Maximum.GetFloat32(), expected.ExpectedTargetRpm))
-            {
-                return Blocked(
-                    "Recovery is blocked because the current maximum RPM values do not match the application ownership marker.");
-            }
+            return Blocked(
+                "Recovery is blocked because the current family-specific modes, targets, or maximum RPM values no longer match the application ownership marker.");
         }
 
         return new FanOverrideRecoveryDecision(
@@ -70,17 +95,56 @@ internal sealed class FanOverrideRecoveryPolicy
             "The current manual/max state matches the application ownership marker. Apple Auto recovery is permitted.");
     }
 
-    private static bool ApproximatelyEqual(float left, float right)
-    {
-        return float.IsFinite(left) &&
-               float.IsFinite(right) &&
-               MathF.Abs(left - right) <= RpmComparisonTolerance;
-    }
-
     private static FanOverrideRecoveryDecision Blocked(string reason)
     {
         return new FanOverrideRecoveryDecision(
             FanOverrideRecoveryAction.Blocked,
             reason);
+    }
+
+    private static bool HasValidFamilySpecificMarkerState(
+        FanOverrideOwnershipMarker marker)
+    {
+        if (marker.Family == FanCapabilityFamily.PerFanModeFloat32)
+        {
+            return marker.ExpectedGlobalModeMask is null &&
+                marker.Targets.All(target => target.ExpectedTargetRawHex is null);
+        }
+
+        if (marker.Family != FanCapabilityFamily.GlobalMaskFpe2)
+        {
+            return false;
+        }
+
+        ushort expectedMask;
+        try
+        {
+            expectedMask = GlobalMaskFpe2Strategy.GetManualMask(marker.Targets.Count);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        return marker.ExpectedGlobalModeMask == expectedMask &&
+            marker.Targets.All(target =>
+            {
+                try
+                {
+                    if (target.ExpectedTargetRawHex is not { Length: 4 } rawHex)
+                    {
+                        return false;
+                    }
+
+                    var raw = Convert.FromHexString(rawHex);
+                    var decodedRpm = ((raw[0] << 8) | raw[1]) / 4f;
+                    return raw.Length == 2 && decodedRpm == target.ExpectedTargetRpm;
+                }
+                catch (Exception exception) when (
+                    exception is FormatException or IndexOutOfRangeException)
+                {
+                    return false;
+                }
+            });
     }
 }

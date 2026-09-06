@@ -8,6 +8,7 @@ Processor-profile availability and fan-write availability are intentionally sepa
 
 - Stable `0.4.0`: exact `MacBookPro16,1` production fan-write gate.
 - Release candidate `0.5.0-rc.1`: dynamic fan topology plus verified T2-style SMC capability-family write gate.
+- Current `main` development runtime: mechanism-based `PerFanModeFloat32` and bounded `GlobalMaskFpe2` writers selected from exact live capability fingerprints.
 - `0.5.0-rc.1` is published as a GitHub pre-release.
 - End-to-end physical fan-write validation is currently completed on `MacBookPro16,1` only.
 
@@ -27,11 +28,11 @@ Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is 
 
 ## Compatibility matrix
 
-| Model / family | Processor profile | Fan monitoring | Fan writes in `0.5.0-rc.1` | Crash fan recovery | Validation status |
+| Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Validation status |
 |---|---:|---:|---:|---:|---|
-| `MacBookPro16,1` / T2 | Yes | Yes | Yes | Yes | **Physically verified end-to-end** |
-| `MacBookPro14,3` / T1-style `fpe2` | Yes | Not production-verified | **Disabled** | **Disabled** | Processor behaviour observed; T1 fan validation pending |
-| Other `SupportedIntelMac` | Yes | Capability-dependent | Only if the complete verified MMIO + FLT4/per-fan family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
+| `MacBookPro16,1` / `PerFanModeFloat32` | Yes | Yes | Capability-qualified | Yes | **Physically verified end-to-end** |
+| `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Yes, with a valid v3 marker | Read-only fingerprint physically verified; write round trip pending |
+| Other `SupportedIntelMac` | Yes | Capability-dependent | Only when an exact bounded live family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
 
 ## Global Gaming Optimised processor target
 
@@ -45,7 +46,7 @@ The strongest empirical workload evidence for this target comes from the primary
 
 The product therefore uses `95% / 95%` globally for `SupportedIntelMac`, but those measured CS2 performance/temperature results must not be generalized as if every Intel Mac has been benchmarked identically.
 
-## `0.5.0-rc.1` verified fan capability family
+## Verified fan capability families
 
 Fan-write permission is no longer granted by a Mac-model whitelist in this release candidate. BCPC re-reads the live AppleSMC capability immediately before a write and requires the complete guarded family fingerprint.
 
@@ -59,7 +60,7 @@ Required for writes:
 
 `FNum = 0` is a valid passive/read-only topology but can never produce a fan write.
 
-### Required per-fan metadata
+### PerFanModeFloat32 metadata
 
 For every discovered fan index `i`, the following schema must match:
 
@@ -75,7 +76,18 @@ The mode values used by this family are:
 - `0` = Apple Auto
 - `1` = Manual
 
-A T1-style `fpe2` fan layout or global `FS!` mask does not match this family and remains write-disabled.
+### GlobalMaskFpe2 metadata
+
+```text
+F{i}Mn  fpe2  2 bytes   attributes 0xC0
+F{i}Mx  fpe2  2 bytes   attributes 0xC0
+F{i}Ac  fpe2  2 bytes   attributes 0x90
+F{i}Tg  fpe2  2 bytes   attributes 0xD0
+F{i}Md  absent
+FS!     ui16  2 bytes   attributes 0xC0
+```
+
+The RPM decoder is unsigned big-endian `raw / 4`. `FS! ` is the mode authority. Write support is bounded to the proven one- and two-fan masks; higher fan counts remain read-only even when the rest of the family schema matches.
 
 ### Runtime sanity requirements
 
@@ -122,7 +134,7 @@ Read-only baseline:
 F0 actual/max: 5036 / 5616 RPM
 F1 actual/max: 4658 / 5200 RPM
 Mode:          Apple Auto
-Write state:   Available (verified T2 SMC family)
+Write state:   Available (verified SMC capability family)
 CPU:           100 / 100
 Boost:         2 / 2 (Aggressive)
 ```
@@ -163,18 +175,19 @@ Startup recovery additionally requires the current model to match the persisted 
 
 ## Ownership-marker compatibility
 
-`0.5.0-rc.1` reads both marker schemas:
+The current runtime reads all existing marker schemas:
 
 - schema v1: legacy two-fan `MacBookPro16,1` ownership document,
-- schema v2: dynamic indexed fan targets.
+- schema v2: dynamic indexed fan targets,
+- schema v3: explicit capability family, topology, targets, exact raw target state where required, timestamp and family-specific global mode state.
 
-For exact `MacBookPro16,1` with the legacy two-fan topology, new ownership documents continue to use schema v1 so a downgrade to stable `0.4.0` can still recover the owned fans safely. Other compatible topologies/models use schema v2.
+New ownership documents use schema v3. Legacy v1/v2 documents are accepted only as `PerFanModeFloat32` ownership and are never reinterpreted as global-mask ownership.
 
 Malformed or unknown marker schemas are preserved and fail closed rather than being deleted or guessed.
 
 ## MacBookPro14,3 — T1 test machine
 
-`MacBookPro14,3` is intentionally not treated as equivalent to the verified T2-style family.
+Runtime classification does not treat `MacBookPro14,3`, any other model, or a T1/T2 label as a writer selector.
 
 Known project state:
 
@@ -186,20 +199,20 @@ Known project state:
 - `99%` Maximum Processor State improved behaviour in informal testing
 - reliable comparative `95%` benchmarking remains deferred until cooling-system maintenance is completed
 
-Its known fan encoding uses T1-style `fpe2` semantics and likely a global `FS!` manual-control mask. `0.5.0-rc.1` does not write that family.
+Physical read-only evidence on `MacBookPro12,1` confirms the exact `GlobalMaskFpe2` schema, `fpe2` byte order/scale and `FS! = 0000` Auto state. The bounded implementation is covered by fake-transport tests; physical write qualification is intentionally deferred to a controlled manual step.
 
 ## What “T2 family support” means in `0.5.0-rc.1`
 
-It means BCPC can enable the guarded fan-write path when the **live** AppleSMC interface matches the verified MMIO + `FNum` + per-fan FLT4/`Md`/`Tg` family described above.
+It means BCPC can enable one guarded writer only when the **live** AppleSMC interface exactly matches that writer's verified mechanism schema and runtime state.
 
 It does **not** mean:
 
-- every T2 Mac has been physically tested,
-- every machine containing a T2 chip is guaranteed to expose this exact schema,
+- every Mac in a chip generation has been physically tested,
+- every machine containing a T1 or T2 chip is guaranteed to expose either known schema,
 - model identity alone can enable writes,
 - BCPC will generate unknown SMC timings/keys or guess a fan-control protocol.
 
-The current end-to-end physical reference remains `MacBookPro16,1`. Additional T2-family machines should be validated with read-only capability capture first, then controlled write/read-back/Auto-restore testing.
+The current end-to-end physical write reference remains `MacBookPro16,1`. Additional machines should be validated with read-only capability capture first, then controlled write/read-back/Auto-restore testing.
 
 ## AppleSMC compatibility dependency
 

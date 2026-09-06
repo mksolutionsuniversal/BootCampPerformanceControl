@@ -40,7 +40,16 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
                 IsHardwareSafetyGateSatisfied: false,
                 [failure],
                 transportProtocol,
-                new FanSmcSnapshot(fanCountValue, Array.Empty<FanSmcChannelSnapshot>()));
+                new FanSmcSnapshot(fanCountValue, Array.Empty<FanSmcChannelSnapshot>()),
+                FanCapabilityFamily.Unknown);
+        }
+
+        if (fanCount == 0)
+        {
+            return _safetyPolicy.Evaluate(
+                model,
+                transportProtocol,
+                new FanSmcSnapshot(fanCountValue, []));
         }
 
         var fans = new List<FanSmcChannelSnapshot>(fanCount);
@@ -49,14 +58,37 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
             var index = new FanIndex(value);
             fans.Add(new FanSmcChannelSnapshot(
                 index,
-                await _protocol.ReadKeyAsync(index.GetSmcKey("Mx"), cancellationToken).ConfigureAwait(false),
-                await _protocol.ReadKeyAsync(index.GetSmcKey("Ac"), cancellationToken).ConfigureAwait(false),
-                await _protocol.ReadKeyAsync(index.GetSmcKey("Md"), cancellationToken).ConfigureAwait(false),
-                await _protocol.ReadKeyAsync(index.GetSmcKey("Tg"), cancellationToken).ConfigureAwait(false)));
+                await ProbeOptionalAsync(index.GetSmcKey("Mn"), cancellationToken).ConfigureAwait(false),
+                await ProbeOptionalAsync(index.GetSmcKey("Mx"), cancellationToken).ConfigureAwait(false),
+                await ProbeOptionalAsync(index.GetSmcKey("Ac"), cancellationToken).ConfigureAwait(false),
+                await ProbeOptionalAsync(index.GetSmcKey("Md"), cancellationToken).ConfigureAwait(false),
+                await ProbeOptionalAsync(index.GetSmcKey("Tg"), cancellationToken).ConfigureAwait(false)));
         }
 
-        var snapshot = new FanSmcSnapshot(fanCountValue, fans);
+        var snapshot = new FanSmcSnapshot(
+            fanCountValue,
+            fans,
+            await ProbeOptionalAsync("FS! ", cancellationToken).ConfigureAwait(false));
 
         return _safetyPolicy.Evaluate(model, transportProtocol, snapshot);
+    }
+
+    private async Task<SmcKeyObservation> ProbeOptionalAsync(
+        string key,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return SmcKeyObservation.Available(
+                await _protocol.ReadKeyAsync(key, cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return SmcKeyObservation.Unavailable(key, exception);
+        }
     }
 }

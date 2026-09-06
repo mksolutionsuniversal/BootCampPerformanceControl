@@ -94,7 +94,7 @@ public sealed class ProfileCatalogTests
 
         var fanSetting = Assert.Single(gaming.Settings, s => s.Name == "Fans");
         Assert.Equal(
-            "Maximum Safe RPM when verified T2 SMC family is available; otherwise unchanged",
+            "Maximum Safe RPM when a verified SMC capability family is available; otherwise unchanged",
             fanSetting.Value);
         Assert.DoesNotContain("5616", fanSetting.Value);
         Assert.DoesNotContain("5200", fanSetting.Value);
@@ -142,7 +142,7 @@ public sealed class ProfileCatalogTests
         Assert.Equal("Disabled", Assert.Single(gaming.Settings, s => s.Name == "Turbo/Boost DC").Value);
         Assert.Contains(gaming.Settings, s =>
             s.Name == "Fans"
-            && s.Value.Contains("when verified T2 SMC family is available", StringComparison.Ordinal));
+            && s.Value.Contains("when a verified SMC capability family is available", StringComparison.Ordinal));
         Assert.Equal("Unchanged", Assert.Single(gaming.Settings, s => s.Name == "Display").Value);
 
         var restore = Assert.Single(profiles, profile => profile.Id == "restore");

@@ -260,7 +260,8 @@ public sealed class FanProfileExecutionResolverTests
             isHardwareSafetyGateSatisfied,
             [],
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static FanSmcSnapshot ValidSnapshot(

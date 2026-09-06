@@ -70,7 +70,8 @@ internal sealed class TestFanCapabilityProbe : IFanCapabilityProbe
             IsHardwareSafetyGateSatisfied: true,
             Failures: [],
             SmcTransportProtocol.Mmio,
-            Snapshot: CreateTestFanSnapshot()));
+            Snapshot: CreateTestFanSnapshot(),
+            Family: FanCapabilityFamily.PerFanModeFloat32));
     }
 
     public static FanSmcSnapshot CreateTestFanSnapshot()

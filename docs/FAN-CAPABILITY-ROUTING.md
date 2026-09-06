@@ -78,7 +78,9 @@ Physically observed on a project Mac with:
 
 Physical evidence confirms `fpe2` RPM scale 4 on the validated capture: `0x60DC = 24796`, `24796 / 4 = 6199 RPM`.
 
-The production writer for this family must remain disabled until its bounded write/readback/rollback path is implemented and physically round-trip tested.
+The bounded production path for this family is capability-gated and implements only Maximum Safe RPM plus Apple Auto release. It writes the proven `FS! ` masks only for one- and two-fan topologies, copies fresh exact `F{i}Mx` bytes to matching `F{i}Tg` keys, and verifies each transition by readback. Topologies above fan index 1 remain read-only because broader mask semantics have not been proven.
+
+The writer implementation and in-memory transport tests do not constitute physical write qualification. A controlled physical Maximum Safe RPM / Apple Auto round trip remains a separate manual validation step.
 
 ## Unknown fingerprints
 

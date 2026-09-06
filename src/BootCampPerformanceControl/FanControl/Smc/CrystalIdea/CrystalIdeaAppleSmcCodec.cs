@@ -33,26 +33,28 @@ internal static class CrystalIdeaAppleSmcCodec
         var isIndexedFanKey = key is { Length: AppleSmcProtocol.KeyLength }
             && key[0] == 'F'
             && key[1] is >= '0' and <= '9';
-        var expectedLength = isIndexedFanKey
+        var expectedLengths = isIndexedFanKey
             ? key[2..] switch
             {
-                "Md" => 1,
-                "Tg" => 4,
-                _ => 0
+                "Md" => new[] { 1 },
+                "Tg" => new[] { 2, 4 },
+                _ => Array.Empty<int>()
             }
-            : 0;
+            : string.Equals(key, "FS! ", StringComparison.Ordinal)
+                ? new[] { 2 }
+                : Array.Empty<int>();
 
-        if (expectedLength == 0)
+        if (expectedLengths.Length == 0)
         {
             throw new ArgumentException(
-                "Only single-digit indexed fan mode (F{i}Md) and target (F{i}Tg) keys may be written.",
+                "Only bounded fan mode (F{i}Md), target (F{i}Tg), and global mode (FS! ) keys may be written.",
                 nameof(key));
         }
 
-        if (data.Length != expectedLength)
+        if (!expectedLengths.Contains(data.Length))
         {
             throw new ArgumentException(
-                $"SMC key '{key}' requires exactly {expectedLength} data byte(s).",
+                $"SMC key '{key}' does not permit a {data.Length}-byte bounded fan payload.",
                 nameof(data));
         }
 

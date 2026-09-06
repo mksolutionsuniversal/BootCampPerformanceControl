@@ -299,7 +299,8 @@ public sealed class FanOverrideCoordinatorTests
             IsHardwareSafetyGateSatisfied: true,
             Array.Empty<string>(),
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static SmcValue UInt8(string key, byte value, byte attributes)
