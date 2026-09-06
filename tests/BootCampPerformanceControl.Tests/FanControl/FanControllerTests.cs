@@ -36,7 +36,7 @@ public sealed class FanControllerTests
         Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), result.Status.Fans[1].Reading);
         Assert.True(result.Status.IsWriteControlEnabled);
         Assert.Equal("Read-only monitoring verified", result.Status.SafetyDisplayText);
-        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
+        Assert.Equal("Available (verified SMC capability family)", result.Status.WriteControlDisplayText);
         Assert.Equal("MMIO (protocol 1)", result.Status.TransportDisplayText);
         Assert.Equal(2, result.Status.ReportedFanCount);
         Assert.Equal(2, result.Status.DiscoveredFanCount);
@@ -45,7 +45,7 @@ public sealed class FanControllerTests
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Contains("Write control: Available (verified T2 SMC family)", result.Status.DisplayText, StringComparison.Ordinal);
+        Assert.Contains("Write control: Available (verified SMC capability family)", result.Status.DisplayText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class FanControllerTests
             CancellationToken.None);
 
         Assert.True(result.Status.IsAvailable);
-        Assert.Equal("Available (verified T2 SMC family)", result.Status.WriteControlDisplayText);
+        Assert.Equal("Available (verified SMC capability family)", result.Status.WriteControlDisplayText);
         Assert.True(result.Capability.IsReadSupported);
         Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
