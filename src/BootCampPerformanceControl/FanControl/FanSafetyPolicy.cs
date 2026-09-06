@@ -156,7 +156,7 @@ internal sealed class FanSafetyPolicy
         if (snapshot.Fans.Count == 0)
         {
             failures.Add(
-                "The verified T2 SMC write family requires at least one discovered fan; FNum reported a passive topology.");
+                "The verified SMC write family requires at least one discovered fan; FNum reported a passive topology.");
         }
     }
 

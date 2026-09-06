@@ -26,7 +26,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(FanSafetyState.ReadOnlyVerified, status.SafetyState);
         Assert.True(status.IsAvailable);
         Assert.True(status.IsWriteControlEnabled);
-        Assert.Equal("Available (verified T2 SMC family)", status.WriteControlDisplayText);
+        Assert.Equal("Available (verified SMC capability family)", status.WriteControlDisplayText);
         Assert.Equal(1, transportFactory.OpenCount);
     }
 
@@ -153,7 +153,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(new FanReading(1840f, 5616f, FanOperatingMode.AppleAuto), status.Fans[0].Reading);
         Assert.Equal(new FanReading(1691f, 5200f, FanOperatingMode.AppleAuto), status.Fans[1].Reading);
         Assert.True(status.IsWriteControlEnabled);
-        Assert.Equal("Available (verified T2 SMC family)", status.WriteControlDisplayText);
+        Assert.Equal("Available (verified SMC capability family)", status.WriteControlDisplayText);
         Assert.Equal(0, controller.StartCount);
         Assert.Equal(0, controller.StopCount);
         Assert.Equal(1, transportFactory.OpenCount);

@@ -105,7 +105,7 @@ public sealed record FanControlStatus(
 
     public string WriteControlDisplayText => WriteControlState switch
     {
-        FanWriteControlState.Available => "Available (verified T2 SMC family)",
+        FanWriteControlState.Available => "Available (verified SMC capability family)",
         FanWriteControlState.ManualModeDetected => "Manual mode detected",
         FanWriteControlState.MaximumSafeRpmDetected => "Maximum Safe RPM detected (Manual mode)",
         _ => FormatUnavailableWriteControl()
