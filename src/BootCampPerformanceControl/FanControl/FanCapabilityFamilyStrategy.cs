@@ -65,7 +65,12 @@ internal sealed class PerFanModeFloat32Strategy : IFanCapabilityFamilyStrategy
             Family,
             capability.Snapshot!.Fans.Select(fan => new FanMaximumSafeRpmTarget(
                 fan.Index,
-                fan.Maximum.GetFloat32())));
+                fan.Maximum.GetFloat32())
+            {
+                ExactTargetPayload = fan.Maximum.RawData.ToArray(),
+                BaselineTargetPayload = fan.Target.RawData.ToArray(),
+                BaselineMode = fan.Mode!.GetUInt8()
+            }));
     }
 
     public FanOperatingMode GetFanMode(
@@ -206,8 +211,10 @@ internal sealed class GlobalMaskFpe2Strategy : IFanCapabilityFamilyStrategy
                     fan.Index,
                     fan.Maximum.GetFpe2())
                 {
-                    ExactTargetPayload = fan.Maximum.RawData.ToArray()
-                }));
+                    ExactTargetPayload = fan.Maximum.RawData.ToArray(),
+                    BaselineTargetPayload = fan.Target.RawData.ToArray()
+                }),
+            capability.Snapshot.GlobalMode.Value!.GetUInt16BigEndian());
     }
 
     public FanOperatingMode GetFanMode(

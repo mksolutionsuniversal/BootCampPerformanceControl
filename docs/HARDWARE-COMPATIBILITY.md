@@ -31,7 +31,7 @@ Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is 
 | Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Validation status |
 |---|---:|---:|---:|---:|---|
 | `MacBookPro16,1` / `PerFanModeFloat32` | Yes | Yes | Capability-qualified | Yes | **Physically verified end-to-end** |
-| `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Yes, with a valid v3 marker | Read-only fingerprint physically verified; write round trip pending |
+| `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Implemented with v4 journal; fake restart-tested | Read-only fingerprint physically verified; physical write round trip pending |
 | Other `SupportedIntelMac` | Yes | Capability-dependent | Only when an exact bounded live family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
 
 ## Global Gaming Optimised processor target
@@ -59,6 +59,8 @@ Required for writes:
 - discovered fan count: at least `1` and within the supported single-decimal `F0..F9` range
 
 `FNum = 0` is a valid passive/read-only topology but can never produce a fan write.
+
+Read-only discovery may continue on an unverified transport when its read IOCTLs work, so community reports retain topology, metadata, raw values, and a candidate family. The write safety gate remains false unless the transport is MMIO protocol 1.
 
 ### PerFanModeFloat32 metadata
 
@@ -88,6 +90,8 @@ FS!     ui16  2 bytes   attributes 0xC0
 ```
 
 The RPM decoder is unsigned big-endian `raw / 4`. `FS! ` is the mode authority. Write support is bounded to the proven one- and two-fan masks; higher fan counts remain read-only even when the rest of the family schema matches.
+
+The classifier records each optional key as `Available`, `ConfirmedAbsent`, or `ReadFailed`. Only backend-confirmed absence may match `F{i}Md absent` or `FS! absent`; transport and malformed-response failures never count as absence.
 
 ### Runtime sanity requirements
 
@@ -180,8 +184,11 @@ The current runtime reads all existing marker schemas:
 - schema v1: legacy two-fan `MacBookPro16,1` ownership document,
 - schema v2: dynamic indexed fan targets,
 - schema v3: explicit capability family, topology, targets, exact raw target state where required, timestamp and family-specific global mode state.
+- schema v4: in-progress transaction journal with the exact pre-write Apple Auto target/mode baseline and exact expected target payloads.
 
-New ownership documents use schema v3. Legacy v1/v2 documents are accepted only as `PerFanModeFloat32` ownership and are never reinterpreted as global-mask ownership.
+Current transactions start with schema v4 and atomically move to a final marker after successful acquisition. The exact two-fan `MacBookPro16,1` / `PerFanModeFloat32` final marker remains schema v1 for stable `0.4.0` downgrade recovery; other final markers use schema v3. This persistence-only model check is not a runtime writer whitelist. Legacy v1/v2 documents are accepted only as `PerFanModeFloat32` ownership and are never reinterpreted as global-mask ownership.
+
+Older versions cannot represent `GlobalMaskFpe2` ownership. Restore Apple Auto before downgrading to a version that predates this family.
 
 Malformed or unknown marker schemas are preserved and fail closed rather than being deleted or guessed.
 
@@ -200,6 +207,8 @@ Known project state:
 - reliable comparative `95%` benchmarking remains deferred until cooling-system maintenance is completed
 
 Physical read-only evidence on `MacBookPro12,1` confirms the exact `GlobalMaskFpe2` schema, `fpe2` byte order/scale and `FS! = 0000` Auto state. The bounded implementation is covered by fake-transport tests; physical write qualification is intentionally deferred to a controlled manual step.
+
+Hard-crash recovery of the implementation's deterministic partial write prefixes is also covered by fake/in-memory restart tests. This does not change the physical qualification status: the real Maximum Safe RPM / Apple Auto round trip is still pending.
 
 ## What “T2 family support” means in `0.5.0-rc.1`
 

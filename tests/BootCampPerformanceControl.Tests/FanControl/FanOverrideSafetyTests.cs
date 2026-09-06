@@ -264,6 +264,128 @@ public sealed class FanOverrideSafetyTests
         Assert.Contains("topology", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(0x248C)]
+    [InlineData(0x60DC)]
+    public void Recovery_GlobalOneFanRecognizesEveryHardwareWriteBoundary(
+        ushort liveTarget)
+    {
+        const string model = "MacBookPro12,1";
+        var marker = CreateGlobalJournal(model, [0x60DC], [0x248C]);
+        var capability = CreateGlobalCapability(
+            model,
+            [0x60DC],
+            expectedMask: 0x0001,
+            [liveTarget]);
+
+        var result = new FanOverrideRecoveryPolicy().Evaluate(
+            model,
+            marker,
+            capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.RestoreAppleAuto, result.Action);
+        Assert.Contains("deterministic prefix", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0x248C, 0x228C)]
+    [InlineData(0x60DC, 0x228C)]
+    [InlineData(0x60DC, 0x5CDC)]
+    public void Recovery_GlobalTwoFansRecognizesEveryTargetWriteBoundary(
+        ushort fan0Target,
+        ushort fan1Target)
+    {
+        const string model = "UnlistedIntelMac";
+        var marker = CreateGlobalJournal(
+            model,
+            [0x60DC, 0x5CDC],
+            [0x248C, 0x228C]);
+        var capability = CreateGlobalCapability(
+            model,
+            [0x60DC, 0x5CDC],
+            expectedMask: 0x0003,
+            [fan0Target, fan1Target]);
+
+        var result = new FanOverrideRecoveryPolicy().Evaluate(
+            model,
+            marker,
+            capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.RestoreAppleAuto, result.Action);
+    }
+
+    [Theory]
+    [InlineData(1, 0, 1836f, 1700f)]
+    [InlineData(1, 1, 1836f, 1700f)]
+    [InlineData(1, 1, 5616f, 1700f)]
+    [InlineData(1, 1, 5616f, 5200f)]
+    public void Recovery_PerFanRecognizesEveryHardwareWritePhase(
+        byte fan0Mode,
+        byte fan1Mode,
+        float fan0Target,
+        float fan1Target)
+    {
+        var marker = CreatePerFanJournal();
+        var capability = CreateCapability(
+            fan0Mode: fan0Mode,
+            fan1Mode: fan1Mode,
+            fan0Target: fan0Target,
+            fan1Target: fan1Target);
+
+        var result = new FanOverrideRecoveryPolicy().Evaluate(
+            Model,
+            marker,
+            capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.RestoreAppleAuto, result.Action);
+    }
+
+    [Fact]
+    public void Recovery_GlobalJournalBlocksNonPrefixTargetMutation()
+    {
+        const string model = "UnlistedIntelMac";
+        var marker = CreateGlobalJournal(
+            model,
+            [0x60DC, 0x5CDC],
+            [0x248C, 0x228C]);
+        var capability = CreateGlobalCapability(
+            model,
+            [0x60DC, 0x5CDC],
+            expectedMask: 0x0003,
+            [0x248C, 0x5CDC]);
+
+        var result = new FanOverrideRecoveryPolicy().Evaluate(
+            model,
+            marker,
+            capability);
+
+        Assert.Equal(FanOverrideRecoveryAction.Blocked, result.Action);
+        Assert.Contains("not a deterministic prefix", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0, 1, 1836f, 1700f)]
+    [InlineData(1, 1, 1836f, 5200f)]
+    [InlineData(1, 1, 4000f, 1700f)]
+    public void Recovery_PerFanJournalBlocksExternalModeOrTargetMutation(
+        byte fan0Mode,
+        byte fan1Mode,
+        float fan0Target,
+        float fan1Target)
+    {
+        var result = new FanOverrideRecoveryPolicy().Evaluate(
+            Model,
+            CreatePerFanJournal(),
+            CreateCapability(
+                fan0Mode: fan0Mode,
+                fan1Mode: fan1Mode,
+                fan0Target: fan0Target,
+                fan1Target: fan1Target));
+
+        Assert.Equal(FanOverrideRecoveryAction.Blocked, result.Action);
+        Assert.Contains("not a deterministic prefix", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static FanOverrideOwnershipMarker CreateMarker()
     {
         return new FanOverrideOwnershipMarker(
@@ -271,6 +393,63 @@ public sealed class FanOverrideSafetyTests
             5616f,
             5200f,
             DateTimeOffset.UtcNow);
+    }
+
+    private static FanOverrideOwnershipMarker CreatePerFanJournal()
+    {
+        var preparation = new FanOverridePreflightPolicy().PrepareMaximumSafeRpm(
+            Model,
+            CreateCapability());
+        Assert.True(preparation.IsAllowed);
+        return FanOverrideOwnershipMarker.CreateTransactionJournal(
+            preparation.Plan!,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static FanOverrideOwnershipMarker CreateGlobalJournal(
+        string model,
+        IReadOnlyList<ushort> maxima,
+        IReadOnlyList<ushort> baselines)
+    {
+        var preparation = new FanOverridePreflightPolicy().PrepareMaximumSafeRpm(
+            model,
+            CreateGlobalCapability(model, maxima, expectedMask: 0, baselines));
+        Assert.True(preparation.IsAllowed);
+        return FanOverrideOwnershipMarker.CreateTransactionJournal(
+            preparation.Plan!,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static FanControlCapabilityResult CreateGlobalCapability(
+        string model,
+        IReadOnlyList<ushort> maxima,
+        ushort expectedMask,
+        IReadOnlyList<ushort> targets)
+    {
+        Assert.Equal(maxima.Count, targets.Count);
+        var fans = maxima.Select((maximum, index) =>
+        {
+            var fan = new FanIndex(index);
+            return new FanSmcChannelSnapshot(
+                fan,
+                SmcKeyObservation.Available(Fpe2(fan.GetSmcKey("Mn"), 0x144C, 0xC0)),
+                SmcKeyObservation.Available(Fpe2(fan.GetSmcKey("Mx"), maximum, 0xC0)),
+                SmcKeyObservation.Available(Fpe2(fan.GetSmcKey("Ac"), 0x2404, 0x90)),
+                SmcKeyObservation.ConfirmedAbsent(fan.GetSmcKey("Md")),
+                SmcKeyObservation.Available(Fpe2(fan.GetSmcKey("Tg"), targets[index], 0xD0)));
+        });
+        var snapshot = new FanSmcSnapshot(
+            UInt8("FNum", checked((byte)maxima.Count), 0x80),
+            fans,
+            SmcKeyObservation.Available(UInt16("FS! ", expectedMask, 0xC0)));
+
+        return new FanControlCapabilityResult(
+            true,
+            true,
+            Array.Empty<string>(),
+            SmcTransportProtocol.Mmio,
+            snapshot,
+            FanCapabilityFamily.GlobalMaskFpe2);
     }
 
     private static FanControlCapabilityResult CreateCapability(
@@ -313,5 +492,19 @@ public sealed class FanOverrideSafetyTests
         return new SmcValue(
             new SmcKeyInfo(key, 4, "flt ", attributes),
             BitConverter.GetBytes(value));
+    }
+
+    private static SmcValue Fpe2(string key, ushort raw, byte attributes)
+    {
+        return new SmcValue(
+            new SmcKeyInfo(key, 2, "fpe2", attributes),
+            [checked((byte)(raw >> 8)), checked((byte)(raw & 0xFF))]);
+    }
+
+    private static SmcValue UInt16(string key, ushort value, byte attributes)
+    {
+        return new SmcValue(
+            new SmcKeyInfo(key, 2, "ui16", attributes),
+            [checked((byte)(value >> 8)), checked((byte)(value & 0xFF))]);
     }
 }

@@ -33,6 +33,10 @@ Classify capability family
 Run only the bounded writer implemented for that exact live fingerprint
 ```
 
+Optional key discovery records `Available`, `ConfirmedAbsent`, or `ReadFailed`. Only a positive backend missing-key result can satisfy an absence requirement. A failed IOCTL, access error, or malformed non-zero response remains `ReadFailed`, keeps its diagnostic reason, and prevents write-family classification.
+
+Transport qualification is a write gate, not a prerequisite for attempting safe diagnostic reads. When an unverified transport successfully serves the read requests, BCPC reports the discovered candidate fingerprint but performs zero writes because the hardware safety gate remains false.
+
 ## Dynamic topology
 
 `FNum` is the authority for discovered fan count.
@@ -81,6 +85,8 @@ Physical evidence confirms `fpe2` RPM scale 4 on the validated capture: `0x60DC 
 The bounded production path for this family is capability-gated and implements only Maximum Safe RPM plus Apple Auto release. It writes the proven `FS! ` masks only for one- and two-fan topologies, copies fresh exact `F{i}Mx` bytes to matching `F{i}Tg` keys, and verifies each transition by readback. Topologies above fan index 1 remain read-only because broader mask semantics have not been proven.
 
 The writer implementation and in-memory transport tests do not constitute physical write qualification. A controlled physical Maximum Safe RPM / Apple Auto round trip remains a separate manual validation step.
+
+The crash-recovery implementation persists exact pre-write mode/target baselines and accepts only deterministic prefixes of BCPC's documented write ordering. Fake/in-memory restart tests cover those boundaries. Restore Apple Auto before downgrading from a live `GlobalMaskFpe2` override because older releases cannot represent this ownership family.
 
 ## Unknown fingerprints
 

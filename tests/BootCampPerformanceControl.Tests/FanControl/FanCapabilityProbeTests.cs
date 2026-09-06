@@ -44,7 +44,7 @@ public sealed class FanCapabilityProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_RejectsNonMmioProtocolBeforeKeyReads()
+    public async Task ProbeAsync_UnverifiedProtocolRetainsDiagnosticsButDisablesWrites()
     {
         await using var transport = new FakeSmcTransport
         {
@@ -56,13 +56,16 @@ public sealed class FanCapabilityProbeTests
             VerifiedHardwareModels.MacBookPro16_1,
             CancellationToken.None);
 
-        Assert.False(result.IsReadSupported);
+        Assert.True(result.IsReadSupported);
         Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, result.Family);
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("MMIO", StringComparison.Ordinal));
         Assert.True(result.Protocol.HasValue);
         Assert.Equal(SmcTransportProtocol.Unknown, result.Protocol.Value);
         Assert.Equal(1, transport.ProtocolCalls);
-        Assert.Equal(0, transport.KeyInfoCalls);
-        Assert.Equal(0, transport.ReadCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
+        Assert.Equal(9, transport.ReadCalls);
     }
 
     [Fact]
@@ -257,6 +260,46 @@ public sealed class FanCapabilityProbeTests
         Assert.Equal(6199f, result.Snapshot.Fans[0].Maximum.GetFpe2());
         Assert.Null(result.Snapshot.Fans[0].Mode);
         Assert.Equal((ushort)0, result.Snapshot.GlobalMode.Value!.GetUInt16BigEndian());
+        Assert.Equal(
+            SmcKeyObservationState.ConfirmedAbsent,
+            result.Snapshot.Fans[0].ModeObservation.State);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ConfirmedMissingGlobalModeCompletesPerFanFingerprint()
+    {
+        await using var transport = new FakeSmcTransport();
+        var result = await CreateProbe(transport).ProbeAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, result.Family);
+        Assert.True(result.IsHardwareSafetyGateSatisfied);
+        Assert.Equal(
+            SmcKeyObservationState.ConfirmedAbsent,
+            result.Snapshot!.GlobalMode.State);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_GlobalModeReadFailureCannotSatisfyPerFanFingerprint()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.FailKeyInfo("FS! ", new IOException("transient DeviceIoControl failure"));
+
+        var result = await CreateProbe(transport).ProbeAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+        var preparation = new FanOverridePreflightPolicy().PrepareMaximumSafeRpm(
+            VerifiedHardwareModels.MacBookPro16_1,
+            result);
+
+        Assert.Equal(FanCapabilityFamily.Unknown, result.Family);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.False(preparation.IsAllowed);
+        Assert.Equal(SmcKeyObservationState.ReadFailed, result.Snapshot!.GlobalMode.State);
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("read failed", StringComparison.OrdinalIgnoreCase) &&
+            failure.Contains("transient DeviceIoControl failure", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -272,6 +315,31 @@ public sealed class FanCapabilityProbeTests
         Assert.True(result.IsHardwareSafetyGateSatisfied);
         Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, result.Family);
         Assert.Equal(2, result.Snapshot!.Fans.Count);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ModeReadFailureCannotSatisfyGlobalFingerprint()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.ConfigureGlobalMaskFpe2(2, 0x0000);
+        transport.FailKeyInfo("F0Md", new IOException("transient DeviceIoControl failure"));
+
+        var result = await CreateProbe(transport).ProbeAsync(
+            "UnlistedIntelMac",
+            CancellationToken.None);
+        var preparation = new FanOverridePreflightPolicy().PrepareMaximumSafeRpm(
+            "UnlistedIntelMac",
+            result);
+
+        Assert.Equal(FanCapabilityFamily.Unknown, result.Family);
+        Assert.False(result.IsHardwareSafetyGateSatisfied);
+        Assert.False(preparation.IsAllowed);
+        Assert.Equal(
+            SmcKeyObservationState.ReadFailed,
+            result.Snapshot!.Fans[0].ModeObservation.State);
+        Assert.Contains(result.Failures, failure =>
+            failure.Contains("F0Md", StringComparison.Ordinal) &&
+            failure.Contains("read failed", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -318,6 +386,7 @@ public sealed class FanCapabilityProbeTests
     private sealed class FakeSmcTransport : ISmcTransport
     {
         private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Exception> _keyInfoFailures = new(StringComparer.Ordinal);
 
         public FakeSmcTransport()
         {
@@ -356,7 +425,15 @@ public sealed class FanCapabilityProbeTests
             cancellationToken.ThrowIfCancellationRequested();
             KeyInfoCalls++;
             RequestedKeys.Add(key);
-            var entry = _entries[key];
+            if (_keyInfoFailures.TryGetValue(key, out var failure))
+            {
+                throw failure;
+            }
+
+            if (!_entries.TryGetValue(key, out var entry))
+            {
+                throw new SmcKeyNotFoundException(key);
+            }
             return Task.FromResult(new SmcKeyInfo(
                 key,
                 checked((byte)entry.Raw.Length),
@@ -426,6 +503,11 @@ public sealed class FanCapabilityProbeTests
             SetFloat32($"F{index}Ac", actual, 0x84);
             SetUInt8($"F{index}Md", mode, 0xD0);
             SetFloat32($"F{index}Tg", target, 0xD4);
+        }
+
+        public void FailKeyInfo(string key, Exception exception)
+        {
+            _keyInfoFailures[key] = exception;
         }
 
         public ValueTask DisposeAsync()

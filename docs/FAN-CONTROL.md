@@ -171,6 +171,10 @@ FS!     ui16  2 bytes   attributes 0xC0
 
 `fpe2` is decoded as an unsigned big-endian 16-bit value divided by four. The proven `FS! ` write masks are `0000` (Apple Auto), `0001` (fan 0 manual), `0002` (fan 1 manual) and `0003` (fans 0 and 1 manual). Production writes are enabled only for one- and two-fan topologies; higher counts are discovered and reported read-only.
 
+Key observations have three explicit states: `Available`, `ConfirmedAbsent`, and `ReadFailed`. Only `ConfirmedAbsent` satisfies an `absent` fingerprint requirement. On the observed CrystalIdea transport, an exactly zero-byte `GET_KEY_INFO` response is the positive missing-key signal. Any non-zero malformed length, device/IOCTL error, access error, or other exception is `ReadFailed` and disables the writer while retaining the diagnostic reason.
+
+An unverified transport may still be queried for read-only diagnostics when its read IOCTLs work. Its discovered topology, metadata, raw values, and candidate family are reported, but only MMIO protocol 1 is write-qualified.
+
 ## Closed write surface
 
 The production SMC write codec remains intentionally narrow.
@@ -207,8 +211,11 @@ The current runtime reads:
 - legacy schema v1 for the historical two-fan `MacBookPro16,1` layout,
 - dynamic schema v2 with indexed targets,
 - family-aware schema v3 with capability family, topology, exact targets and family-specific ownership state.
+- in-progress transaction journal schema v4 with exact expected target bytes plus pre-write target/mode baseline.
 
-New ownership markers use schema v3. Legacy v1/v2 markers are interpreted only as `PerFanModeFloat32`; they are never reinterpreted as `GlobalMaskFpe2`.
+Before the first possible fan write, current BCPC persists schema v4. After a successful complete acquisition, it atomically replaces that journal with a final marker. The physically validated two-fan `MacBookPro16,1` / `PerFanModeFloat32` final state is deliberately serialized as schema v1 so stable `0.4.0` retains its established downgrade-recovery guarantee. Other final states use schema v3. This model check selects only a backwards-compatible persistence representation; it never selects or authorizes a writer.
+
+Legacy v1/v2 markers are interpreted only as `PerFanModeFloat32`; they are never reinterpreted as `GlobalMaskFpe2`. No old stable schema can represent `GlobalMaskFpe2`: restore Apple Auto with the current version before downgrading to a version that predates that family.
 
 Unknown or malformed schemas are preserved and fail closed. Loading an existing v1 marker does not cause it to be rewritten merely because a newer application version is running.
 
@@ -293,6 +300,10 @@ If BCPC is killed while its verified override is active:
 - the ownership marker remains,
 - the processor Restore snapshot remains.
 
+The schema-v4 journal allows recovery from exact deterministic write prefixes captured from an Apple Auto baseline. For `GlobalMaskFpe2`, BCPC recognizes the expected acquired mask followed by the first `N` targets at their exact fresh maximum bytes and the remaining targets at their exact captured baseline bytes. For `PerFanModeFloat32`, it recognizes the ordered manual-mode acquisition prefix while all targets remain at baseline, then all modes Manual with the first `N` exact maximum targets and the remaining exact baseline targets. The fully applied state is the final prefix in both families.
+
+Any non-prefix mode pattern, altered maximum, unexpected mask, or target payload that is neither the required expected prefix nor captured baseline suffix remains blocked as possible external interference. An all-Apple-Auto live state needs no recovery write and permits removal of a stale journal.
+
 On the next startup, BCPC does not infer physical state from the marker alone. A recovery write requires, at minimum:
 
 - current model exactly matches `marker.Model`,
@@ -306,6 +317,8 @@ On the next startup, BCPC does not infer physical state from the marker alone. A
 Any mismatch prevents speculative writes and retains recovery context.
 
 When recovery is permitted, BCPC restores **fans only** to Apple Auto, verifies read-back and clears ownership only after successful verification.
+
+These partial-transaction restart decisions are covered by fake/in-memory tests at the hardware-write boundaries. `GlobalMaskFpe2` physical Maximum Safe RPM / Apple Auto round-trip qualification remains pending.
 
 BCPC does not automatically restore the saved processor profile at startup. The user retains explicit control through **Restore Original Settings**.
 

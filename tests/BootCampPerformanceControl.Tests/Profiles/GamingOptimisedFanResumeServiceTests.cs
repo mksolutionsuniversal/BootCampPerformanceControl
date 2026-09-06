@@ -131,7 +131,8 @@ public sealed class GamingOptimisedFanResumeServiceTests
                         Float32("F0Ac", 1200f, 0x84),
                         new SmcValue(new SmcKeyInfo("F0Md", 1, "ui8 ", 0xD0), [0]),
                         Float32("F0Tg", 1200f, 0xD4))
-                ]));
+                ],
+                SmcKeyObservation.ConfirmedAbsent("FS! ")));
     }
 
     private static SmcValue Float32(string key, float value, byte attributes)

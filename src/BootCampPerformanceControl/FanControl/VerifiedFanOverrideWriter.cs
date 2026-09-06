@@ -366,12 +366,16 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
     {
         if (!string.Equals(requestedPlan.Model, freshPlan.Model, StringComparison.Ordinal) ||
             requestedPlan.Family != freshPlan.Family ||
+            requestedPlan.BaselineGlobalModeMask != freshPlan.BaselineGlobalModeMask ||
             requestedPlan.Targets.Count != freshPlan.Targets.Count ||
             !requestedPlan.Targets.Zip(freshPlan.Targets).All(pair =>
                 pair.First.Index == pair.Second.Index &&
                 pair.First.TargetRpm.Equals(pair.Second.TargetRpm) &&
+                pair.First.BaselineMode == pair.Second.BaselineMode &&
                 pair.First.ExactTargetPayload.Span.SequenceEqual(
-                    pair.Second.ExactTargetPayload.Span)))
+                    pair.Second.ExactTargetPayload.Span) &&
+                pair.First.BaselineTargetPayload.Span.SequenceEqual(
+                    pair.Second.BaselineTargetPayload.Span)))
         {
             throw new InvalidOperationException(
                 "Fan maximum RPM values changed after the original preflight. No fan write was attempted.");
@@ -403,6 +407,29 @@ internal sealed class VerifiedFanOverrideWriter : IFanOverrideWriter
             nameof(plan));
 
         _ = FanCapabilityFamilyStrategies.Get(plan.Family);
+
+        var validFamilyState = plan.Family switch
+        {
+            FanCapabilityFamily.PerFanModeFloat32 =>
+                plan.BaselineGlobalModeMask is null &&
+                plan.Targets.All(target =>
+                    target.ExactTargetPayload.Length == 4 &&
+                    target.BaselineTargetPayload.Length == 4 &&
+                    target.BaselineMode == 0),
+            FanCapabilityFamily.GlobalMaskFpe2 =>
+                plan.BaselineGlobalModeMask == 0 &&
+                plan.Targets.All(target =>
+                    target.ExactTargetPayload.Length == 2 &&
+                    target.BaselineTargetPayload.Length == 2 &&
+                    target.BaselineMode is null),
+            _ => false
+        };
+        if (!validFamilyState)
+        {
+            throw new ArgumentException(
+                "Fan override plan does not contain a complete Apple Auto baseline and exact family target state.",
+                nameof(plan));
+        }
     }
 
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)

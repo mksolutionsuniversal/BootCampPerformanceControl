@@ -59,6 +59,47 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveLoad_SchemaVersion4TransactionJournalPreservesExactBaseline()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var journal = CreatePerFanJournal();
+
+        await store.SaveNewAsync(journal, CancellationToken.None);
+
+        using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath())))
+        {
+            Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(2, document.RootElement.GetProperty("baselineTargets").GetArrayLength());
+        }
+
+        var loaded = await store.LoadAsync(CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.True(loaded.IsTransactionJournal);
+        Assert.Equal(journal.Targets, loaded.Targets);
+        Assert.Equal(journal.BaselineTargets, loaded.BaselineTargets);
+        Assert.Null(loaded.BaselineGlobalModeMask);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_CompletedValidatedPerFanTransactionWritesLegacySchemaVersion1()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var journal = CreatePerFanJournal();
+        await store.SaveNewAsync(journal, CancellationToken.None);
+
+        await store.ReplaceAsync(
+            journal.ToFinalOwnershipMarker(),
+            CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
+        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.False(document.RootElement.TryGetProperty("baselineTargets", out _));
+        var loaded = await store.LoadAsync(CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.False(loaded.IsTransactionJournal);
+    }
+
+    [Fact]
     public async Task LoadAsync_PreservesMalformedMarkerAndThrows()
     {
         Directory.CreateDirectory(_directory);
@@ -177,17 +218,17 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveNewAsync_ExactLegacyModelNowWritesFamilyAwareSchemaVersion3()
+    public async Task SaveNewAsync_ExactLegacyModelRetainsDowngradeCompatibleSchemaVersion1()
     {
         var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
 
         await store.SaveNewAsync(CreateMarker(), CancellationToken.None);
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
-        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("PerFanModeFloat32", document.RootElement.GetProperty("capabilityFamily").GetString());
-        Assert.Equal(2, document.RootElement.GetProperty("targets").GetArrayLength());
-        Assert.False(document.RootElement.TryGetProperty("fan0ExpectedTargetRpm", out _));
+        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(5616f, document.RootElement.GetProperty("fan0ExpectedTargetRpm").GetSingle());
+        Assert.Equal(5200f, document.RootElement.GetProperty("fan1ExpectedTargetRpm").GetSingle());
+        Assert.False(document.RootElement.TryGetProperty("capabilityFamily", out _));
     }
 
     [Fact]
@@ -255,6 +296,38 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
             5616f,
             5200f,
             new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+    }
+
+    private static FanOverrideOwnershipMarker CreatePerFanJournal()
+    {
+        return new FanOverrideOwnershipMarker(
+            "MacBookPro16,1",
+            FanCapabilityFamily.PerFanModeFloat32,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 5616f)
+                {
+                    ExpectedTargetRawHex = Convert.ToHexString(BitConverter.GetBytes(5616f))
+                },
+                new FanOverrideOwnershipTarget(new FanIndex(1), 5200f)
+                {
+                    ExpectedTargetRawHex = Convert.ToHexString(BitConverter.GetBytes(5200f))
+                }
+            ],
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero),
+            expectedGlobalModeMask: null)
+        {
+            BaselineTargets =
+            [
+                new FanOverrideBaselineTarget(
+                    new FanIndex(0),
+                    Convert.ToHexString(BitConverter.GetBytes(1836f)),
+                    Mode: 0),
+                new FanOverrideBaselineTarget(
+                    new FanIndex(1),
+                    Convert.ToHexString(BitConverter.GetBytes(1700f)),
+                    Mode: 0)
+            ]
+        };
     }
 
     private sealed class TestLogger : IApplicationLogger

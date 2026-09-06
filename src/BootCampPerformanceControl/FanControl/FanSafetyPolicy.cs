@@ -16,15 +16,11 @@ internal sealed class FanSafetyPolicy
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        var writeFailures = new List<string>();
         if (protocol != SmcTransportProtocol.Mmio)
         {
-            return new FanControlCapabilityResult(
-                false,
-                false,
-                [$"Unexpected SMC transport protocol '{protocol}' ({(int)protocol}); MMIO (1) is required."],
-                protocol,
-                snapshot,
-                FanCapabilityFamily.Unknown);
+            writeFailures.Add(
+                $"Write capability not verified for SMC transport protocol '{protocol}' ({(int)protocol}); MMIO (1) is required for writes.");
         }
 
         if (!TryDecodeFanCount(snapshot.FanCount, out var fanCount, out var countFailure))
@@ -32,19 +28,19 @@ internal sealed class FanSafetyPolicy
             return new FanControlCapabilityResult(
                 false,
                 false,
-                [countFailure],
+                [.. writeFailures, countFailure],
                 protocol,
                 snapshot,
                 FanCapabilityFamily.Unknown);
         }
 
-        var failures = new List<string>();
-        if (!ValidateTopology(snapshot, fanCount, failures))
+        var readFailures = new List<string>();
+        if (!ValidateTopology(snapshot, fanCount, readFailures))
         {
             return new FanControlCapabilityResult(
                 false,
                 false,
-                failures,
+                [.. writeFailures, .. readFailures],
                 protocol,
                 snapshot,
                 FanCapabilityFamily.Unknown);
@@ -55,7 +51,10 @@ internal sealed class FanSafetyPolicy
             return new FanControlCapabilityResult(
                 true,
                 false,
-                ["No controllable fans reported by AppleSMC (passive/fanless topology)."],
+                [
+                    .. writeFailures,
+                    "No controllable fans reported by AppleSMC (passive/fanless topology)."
+                ],
                 protocol,
                 snapshot,
                 FanCapabilityFamily.Passive);
@@ -67,47 +66,38 @@ internal sealed class FanSafetyPolicy
             return new FanControlCapabilityResult(
                 false,
                 false,
-                [CreateClassifierFailure(snapshot)],
+                [.. writeFailures, CreateClassifierFailure(snapshot)],
                 protocol,
                 snapshot,
                 family);
         }
 
-        ValidateRuntimeValues(snapshot, family, failures);
-        var runtimeValuesValid = failures.Count == 0;
+        ValidateRuntimeValues(snapshot, family, readFailures);
+        var runtimeValuesValid = readFailures.Count == 0;
         if (family == FanCapabilityFamily.GlobalMaskFpe2 && fanCount > 2)
         {
-            failures.Add(
+            writeFailures.Add(
                 $"Write capability not verified for this topology: GlobalMaskFpe2 mask semantics are proven only for fan indexes 0 and 1; FNum reported {fanCount}.");
         }
 
         return new FanControlCapabilityResult(
             runtimeValuesValid,
-            failures.Count == 0,
-            failures,
+            runtimeValuesValid && writeFailures.Count == 0,
+            [.. writeFailures, .. readFailures],
             protocol,
             snapshot,
             family);
     }
 
-    public FanControlCapabilityResult EvaluateIdentity(
-        string model,
-        SmcTransportProtocol? protocol = null)
+    public FanControlCapabilityResult EvaluateIdentity(string model)
     {
         ArgumentNullException.ThrowIfNull(model);
-
-        if (protocol.HasValue && protocol.Value != SmcTransportProtocol.Mmio)
-        {
-            return FanControlCapabilityResult.Rejected(
-                protocol,
-                $"Unexpected SMC transport protocol '{protocol.Value}' ({(int)protocol.Value}); MMIO (1) is required.");
-        }
 
         return new FanControlCapabilityResult(
             false,
             false,
             Array.Empty<string>(),
-            protocol,
+            null,
             null,
             FanCapabilityFamily.Unknown);
     }
@@ -164,7 +154,7 @@ internal sealed class FanSafetyPolicy
 
     private static FanCapabilityFamily Classify(FanSmcSnapshot snapshot)
     {
-        var perFan = snapshot.GlobalMode.Value is null;
+        var perFan = snapshot.GlobalMode.State == SmcKeyObservationState.ConfirmedAbsent;
         var global = snapshot.GlobalMode.Value is { } globalMode &&
             Matches(globalMode, "FS! ", 2, "ui16", 0xC0);
 
@@ -182,7 +172,7 @@ internal sealed class FanSafetyPolicy
                 Matches(fan.MaximumObservation.Value, index.GetSmcKey("Mx"), 2, "fpe2", 0xC0) &&
                 Matches(fan.ActualObservation.Value, index.GetSmcKey("Ac"), 2, "fpe2", 0x90) &&
                 Matches(fan.TargetObservation.Value, index.GetSmcKey("Tg"), 2, "fpe2", 0xD0) &&
-                fan.ModeObservation.Value is null;
+                fan.ModeObservation.State == SmcKeyObservationState.ConfirmedAbsent;
         }
 
         if (perFan)
@@ -294,11 +284,17 @@ internal sealed class FanSafetyPolicy
         var observed = snapshot.Fans
             .SelectMany(fan => fan.Observations)
             .Append(snapshot.GlobalMode)
-            .Where(observation => observation.Value is not null)
             .Select(observation =>
             {
-                var info = observation.Value!.Info;
-                return $"{info.Key}[type='{info.Type}',len={info.Length},attrs=0x{info.Attributes:X2}]";
+                if (observation.Value is { } value)
+                {
+                    var info = value.Info;
+                    return $"{info.Key}[available,type='{info.Type}',len={info.Length},attrs=0x{info.Attributes:X2}]";
+                }
+
+                return observation.State == SmcKeyObservationState.ConfirmedAbsent
+                    ? $"{observation.Key}[absent]"
+                    : $"{observation.Key}[read failed: {observation.Failure}]";
             });
 
         return "Write capability not verified: SMC metadata mismatch; the live fan fingerprint does not match a bounded writer family. Observed: "

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Buffers.Binary;
 using System.Text.Json;
+using BootCampPerformanceControl.HardwareDetection;
 using BootCampPerformanceControl.Logging;
 
 namespace BootCampPerformanceControl.FanControl;
@@ -78,6 +79,10 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     (root.Deserialize<LegacyDynamicFanOverrideOwnershipDocument>(JsonOptions)
                         ?? throw new InvalidDataException("The legacy dynamic fan ownership marker JSON document is empty."))
                     .ToMarker(),
+                FanOverrideTransactionJournalDocument.SchemaVersionValue =>
+                    (root.Deserialize<FanOverrideTransactionJournalDocument>(JsonOptions)
+                        ?? throw new InvalidDataException("The fan transaction journal JSON document is empty."))
+                    .ToMarker(),
                 FanOverrideOwnershipDocument.CurrentSchemaVersion =>
                     (root.Deserialize<FanOverrideOwnershipDocument>(JsonOptions)
                         ?? throw new InvalidDataException("The fan ownership marker JSON document is empty."))
@@ -136,11 +141,8 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                     bufferSize: 4096,
                     FileOptions.Asynchronous | FileOptions.WriteThrough))
                 {
-                    await JsonSerializer.SerializeAsync(
-                        stream,
-                        FanOverrideOwnershipDocument.FromMarker(marker),
-                        JsonOptions,
-                        cancellationToken).ConfigureAwait(false);
+                    await SerializeMarkerAsync(stream, marker, cancellationToken)
+                        .ConfigureAwait(false);
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     stream.Flush(flushToDisk: true);
                 }
@@ -174,6 +176,74 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         catch (Exception exception)
         {
             _logger.Error("Saving the fan override ownership marker failed.", exception);
+            throw;
+        }
+        finally
+        {
+            _fileGate.Release();
+        }
+    }
+
+    public async Task ReplaceAsync(
+        FanOverrideOwnershipMarker marker,
+        CancellationToken cancellationToken)
+    {
+        ValidateMarker(marker);
+        if (marker.IsTransactionJournal)
+        {
+            throw new ArgumentException(
+                "Completing fan ownership requires a final marker, not another transaction journal.",
+                nameof(marker));
+        }
+
+        await _fileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!File.Exists(_markerFilePath))
+            {
+                throw new IOException(
+                    "The in-progress fan transaction journal is missing and cannot be completed safely.");
+            }
+
+            var temporaryFilePath = Path.Combine(
+                _backupDirectory,
+                $"fan-override-ownership.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await using (var stream = new FileStream(
+                    temporaryFilePath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.WriteThrough))
+                {
+                    await SerializeMarkerAsync(stream, marker, cancellationToken)
+                        .ConfigureAwait(false);
+                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    stream.Flush(flushToDisk: true);
+                }
+
+                File.Move(temporaryFilePath, _markerFilePath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryFilePath))
+                {
+                    File.Delete(temporaryFilePath);
+                }
+            }
+
+            _logger.Info(
+                $"Fan transaction journal replaced by final ownership marker. Model={marker.Model}; CreatedAtUtc={marker.CreatedAtUtc:O}.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Completing the fan transaction journal failed.", exception);
             throw;
         }
         finally
@@ -216,6 +286,48 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         return Path.Combine(localAppData, "BootCampPerformanceControl", "Backups");
     }
 
+    private static Task SerializeMarkerAsync(
+        Stream stream,
+        FanOverrideOwnershipMarker marker,
+        CancellationToken cancellationToken)
+    {
+        if (marker.IsTransactionJournal)
+        {
+            return JsonSerializer.SerializeAsync(
+                stream,
+                FanOverrideTransactionJournalDocument.FromMarker(marker),
+                JsonOptions,
+                cancellationToken);
+        }
+
+        if (ShouldWriteLegacySchema(marker))
+        {
+            return JsonSerializer.SerializeAsync(
+                stream,
+                LegacyFanOverrideOwnershipDocument.FromMarker(marker),
+                JsonOptions,
+                cancellationToken);
+        }
+
+        return JsonSerializer.SerializeAsync(
+            stream,
+            FanOverrideOwnershipDocument.FromMarker(marker),
+            JsonOptions,
+            cancellationToken);
+    }
+
+    private static bool ShouldWriteLegacySchema(FanOverrideOwnershipMarker marker)
+    {
+        return marker.Family == FanCapabilityFamily.PerFanModeFloat32 &&
+            string.Equals(
+                marker.Model,
+                VerifiedHardwareModels.MacBookPro16_1,
+                StringComparison.Ordinal) &&
+            marker.Targets.Count == 2 &&
+            marker.Targets[0].Index == new FanIndex(0) &&
+            marker.Targets[1].Index == new FanIndex(1);
+    }
+
     private static void ValidateMarker(FanOverrideOwnershipMarker marker)
     {
         ArgumentNullException.ThrowIfNull(marker);
@@ -233,7 +345,11 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
                 nameof(marker));
         }
 
-        if (marker.Family == FanCapabilityFamily.GlobalMaskFpe2)
+        if (marker.IsTransactionJournal)
+        {
+            ValidateTransactionJournal(marker);
+        }
+        else if (marker.Family == FanCapabilityFamily.GlobalMaskFpe2)
         {
             var expectedMask = GlobalMaskFpe2Strategy.GetManualMask(marker.Targets.Count);
             if (marker.ExpectedGlobalModeMask != expectedMask ||
@@ -294,6 +410,99 @@ internal sealed class JsonFanOverrideOwnershipStore : IFanOverrideOwnershipStore
             var raw = Convert.FromHexString(target.ExpectedTargetRawHex);
             return raw.Length == 2 &&
                 BinaryPrimitives.ReadUInt16BigEndian(raw) / 4f == target.ExpectedTargetRpm;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static void ValidateTransactionJournal(
+        FanOverrideOwnershipMarker marker)
+    {
+        if (marker.BaselineTargets.Count != marker.Targets.Count ||
+            !marker.BaselineTargets.Select(target => target.Index)
+                .SequenceEqual(marker.Targets.Select(target => target.Index)))
+        {
+            throw new ArgumentException(
+                "A fan transaction journal requires one ordered baseline for every target.",
+                nameof(marker));
+        }
+
+        var expectedPayloadLength = marker.Family == FanCapabilityFamily.GlobalMaskFpe2
+            ? 2
+            : 4;
+        if (marker.Targets.Any(target =>
+                !HasValidExactTarget(target, marker.Family, expectedPayloadLength)) ||
+            marker.BaselineTargets.Any(target =>
+                !HasValidRawPayload(target.TargetRawHex, expectedPayloadLength)))
+        {
+            throw new ArgumentException(
+                "A fan transaction journal contains invalid expected or baseline target bytes.",
+                nameof(marker));
+        }
+
+        if (marker.Family == FanCapabilityFamily.PerFanModeFloat32)
+        {
+            if (marker.ExpectedGlobalModeMask is not null ||
+                marker.BaselineGlobalModeMask is not null ||
+                marker.BaselineTargets.Any(target => target.Mode != 0))
+            {
+                throw new ArgumentException(
+                    "A PerFanModeFloat32 transaction journal requires an all-Apple-Auto per-fan baseline.",
+                    nameof(marker));
+            }
+
+            return;
+        }
+
+        var expectedMask = GlobalMaskFpe2Strategy.GetManualMask(marker.Targets.Count);
+        if (marker.ExpectedGlobalModeMask != expectedMask ||
+            marker.BaselineGlobalModeMask != 0 ||
+            marker.BaselineTargets.Any(target => target.Mode is not null))
+        {
+            throw new ArgumentException(
+                "A GlobalMaskFpe2 transaction journal requires the proven takeover mask and global Apple Auto baseline.",
+                nameof(marker));
+        }
+    }
+
+    private static bool HasValidExactTarget(
+        FanOverrideOwnershipTarget target,
+        FanCapabilityFamily family,
+        int expectedLength)
+    {
+        if (!TryGetRawPayload(target.ExpectedTargetRawHex, expectedLength, out var raw))
+        {
+            return false;
+        }
+
+        var decoded = family == FanCapabilityFamily.GlobalMaskFpe2
+            ? BinaryPrimitives.ReadUInt16BigEndian(raw) / 4f
+            : BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(raw));
+        return float.IsFinite(decoded) && decoded == target.ExpectedTargetRpm;
+    }
+
+    private static bool HasValidRawPayload(string rawHex, int expectedLength)
+    {
+        return TryGetRawPayload(rawHex, expectedLength, out _);
+    }
+
+    private static bool TryGetRawPayload(
+        string? rawHex,
+        int expectedLength,
+        out byte[] raw)
+    {
+        raw = Array.Empty<byte>();
+        if (rawHex is null || rawHex.Length != expectedLength * 2)
+        {
+            return false;
+        }
+
+        try
+        {
+            raw = Convert.FromHexString(rawHex);
+            return raw.Length == expectedLength;
         }
         catch (FormatException)
         {

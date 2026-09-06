@@ -322,7 +322,10 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             KeyInfoCalls++;
-            var entry = _entries[key];
+            if (!_entries.TryGetValue(key, out var entry))
+            {
+                throw new SmcKeyNotFoundException(key);
+            }
             return Task.FromResult(new SmcKeyInfo(
                 key,
                 checked((byte)entry.Data.Length),

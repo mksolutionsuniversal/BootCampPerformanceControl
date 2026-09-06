@@ -6,5 +6,9 @@ internal interface IFanOverrideOwnershipStore : IFanOverrideOwnershipReader
         FanOverrideOwnershipMarker marker,
         CancellationToken cancellationToken);
 
+    Task ReplaceAsync(
+        FanOverrideOwnershipMarker marker,
+        CancellationToken cancellationToken);
+
     Task ClearAsync(CancellationToken cancellationToken);
 }

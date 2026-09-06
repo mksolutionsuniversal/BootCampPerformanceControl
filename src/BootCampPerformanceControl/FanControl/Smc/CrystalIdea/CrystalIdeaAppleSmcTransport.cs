@@ -43,6 +43,11 @@ internal sealed class CrystalIdeaAppleSmcTransport : ISmcTransport
             request,
             CrystalIdeaAppleSmcCodec.KeyInfoLength);
 
+        if (response.Length == 0)
+        {
+            throw new SmcKeyNotFoundException(key);
+        }
+
         return Task.FromResult(CrystalIdeaAppleSmcCodec.ParseKeyInfo(key, response));
     }
 

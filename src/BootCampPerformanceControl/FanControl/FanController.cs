@@ -173,7 +173,9 @@ internal sealed class FanController
     {
         if (observation.Value is null)
         {
-            return $"{observation.Key}: unavailable ({observation.Failure})";
+            return observation.State == SmcKeyObservationState.ConfirmedAbsent
+                ? $"{observation.Key}: absent"
+                : $"{observation.Key}: read failed: {observation.Failure}";
         }
 
         var value = observation.Value;

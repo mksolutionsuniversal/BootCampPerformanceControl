@@ -1,25 +1,65 @@
 namespace BootCampPerformanceControl.FanControl.Smc;
 
-internal sealed record SmcKeyObservation(
-    string Key,
-    SmcValue? Value,
-    string? Failure)
+internal enum SmcKeyObservationState
 {
+    Available,
+    ConfirmedAbsent,
+    ReadFailed
+}
+
+internal sealed record SmcKeyObservation
+{
+    private SmcKeyObservation(
+        string key,
+        SmcKeyObservationState state,
+        SmcValue? value,
+        string? failure)
+    {
+        Key = key;
+        State = state;
+        Value = value;
+        Failure = failure;
+    }
+
+    public string Key { get; }
+
+    public SmcKeyObservationState State { get; }
+
+    public SmcValue? Value { get; }
+
+    public string? Failure { get; }
+
     public static SmcKeyObservation Available(SmcValue value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return new SmcKeyObservation(value.Info.Key, value, null);
+        return new SmcKeyObservation(
+            value.Info.Key,
+            SmcKeyObservationState.Available,
+            value,
+            null);
     }
 
-    public static SmcKeyObservation Unavailable(string key, Exception exception)
+    public static SmcKeyObservation ConfirmedAbsent(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        return new SmcKeyObservation(
+            key,
+            SmcKeyObservationState.ConfirmedAbsent,
+            null,
+            null);
+    }
+
+    public static SmcKeyObservation ReadFailed(string key, Exception exception)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(exception);
         return new SmcKeyObservation(
             key,
+            SmcKeyObservationState.ReadFailed,
             null,
             $"{exception.GetType().Name}: {exception.Message}");
     }
+
 }
 
 internal sealed record FanSmcChannelSnapshot
@@ -32,7 +72,7 @@ internal sealed record FanSmcChannelSnapshot
         SmcValue target)
         : this(
             index,
-            SmcKeyObservation.Unavailable(
+            SmcKeyObservation.ReadFailed(
                 index.GetSmcKey("Mn"),
                 new InvalidOperationException("Key was not probed.")),
             SmcKeyObservation.Available(maximum),
@@ -95,7 +135,7 @@ internal sealed record FanSmcSnapshot
         FanCount = fanCount ?? throw new ArgumentNullException(nameof(fanCount));
         ArgumentNullException.ThrowIfNull(fans);
         Fans = fans.ToArray();
-        GlobalMode = globalMode ?? SmcKeyObservation.Unavailable(
+        GlobalMode = globalMode ?? SmcKeyObservation.ReadFailed(
             "FS! ",
             new InvalidOperationException("Key was not probed."));
     }

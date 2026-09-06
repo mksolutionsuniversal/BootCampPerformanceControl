@@ -119,6 +119,8 @@ See [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.
 
 Physical read-only evidence from `MacBookPro12,1` confirms the `fpe2` big-endian `/ 4` RPM encoding and the global `FS! ` Auto state. The bounded writer is selected only by the exact live `GlobalMaskFpe2` fingerprint, uses fresh exact maximum bytes, and permits writes only for the proven one- and two-fan mask range. This is not a model or T1/T2 generation gate.
 
+The writer and hard-crash recovery paths are covered by fake/in-memory validation. Physical Maximum Safe RPM / Apple Auto write qualification for this family is still pending. Restore Apple Auto with the current BCPC version before downgrading to a version that predates `GlobalMaskFpe2`; older marker schemas cannot represent global-mask ownership safely.
+
 ### Other Intel Macs
 
 The processor Gaming profile is available on `SupportedIntelMac` systems. Fan-write eligibility is not granted merely because a machine is an Intel Mac or is believed to contain T2.
@@ -162,6 +164,7 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 - verify expected current state before processor writes,
 - re-read fan capability immediately before fan writes,
 - require the exact verified runtime fan-family metadata rather than trusting a model name,
+- distinguish a backend-confirmed missing key from a failed key read; only confirmed absence can satisfy a family fingerprint,
 - derive fan targets from fresh live SMC maxima rather than hard-coded RPM values,
 - reject non-finite, non-positive or implausibly high maximum RPM data,
 - allow only bounded family-specific per-fan mode/target keys and the proven global `FS! ` mode key,
@@ -169,7 +172,7 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 - verify hardware state after writes,
 - attempt Apple Auto compensation if the processor phase fails after fan takeover,
 - restore owned fans before processor settings,
-- retain recovery context across crashes,
+- persist an exact pre-write baseline transaction journal before hardware writes and retain recovery context across crashes,
 - never infer BCPC fan ownership from Manual mode alone,
 - never auto-start AppleSMC merely because a stale recovery marker exists,
 - preserve CPU-only Gaming when fan control is unavailable or safely declined,

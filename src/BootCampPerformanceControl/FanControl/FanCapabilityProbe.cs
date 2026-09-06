@@ -23,12 +23,6 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
             .GetProtocolAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var protocolGate = _safetyPolicy.EvaluateIdentity(model, transportProtocol);
-        if (protocolGate.Failures.Count > 0)
-        {
-            return protocolGate;
-        }
-
         var fanCountValue = await _protocol
             .ReadKeyAsync("FNum", cancellationToken)
             .ConfigureAwait(false);
@@ -82,13 +76,17 @@ internal sealed class FanCapabilityProbe : IFanCapabilityProbe
             return SmcKeyObservation.Available(
                 await _protocol.ReadKeyAsync(key, cancellationToken).ConfigureAwait(false));
         }
+        catch (SmcKeyNotFoundException)
+        {
+            return SmcKeyObservation.ConfirmedAbsent(key);
+        }
         catch (OperationCanceledException)
         {
             throw;
         }
         catch (Exception exception)
         {
-            return SmcKeyObservation.Unavailable(key, exception);
+            return SmcKeyObservation.ReadFailed(key, exception);
         }
     }
 }

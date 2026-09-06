@@ -7,6 +7,11 @@ internal sealed record FanOverrideOwnershipTarget(
     public string? ExpectedTargetRawHex { get; init; }
 }
 
+internal sealed record FanOverrideBaselineTarget(
+    FanIndex Index,
+    string TargetRawHex,
+    byte? Mode);
+
 internal sealed record FanOverrideOwnershipMarker
 {
     public FanOverrideOwnershipMarker(
@@ -62,6 +67,13 @@ internal sealed record FanOverrideOwnershipMarker
 
     public ushort? ExpectedGlobalModeMask { get; }
 
+    public IReadOnlyList<FanOverrideBaselineTarget> BaselineTargets { get; init; } =
+        Array.Empty<FanOverrideBaselineTarget>();
+
+    public ushort? BaselineGlobalModeMask { get; init; }
+
+    public bool IsTransactionJournal => BaselineTargets.Count > 0;
+
     public static FanOverrideOwnershipMarker FromPlan(
         FanMaximumSafeRpmPlan plan,
         DateTimeOffset createdAtUtc)
@@ -76,7 +88,8 @@ internal sealed record FanOverrideOwnershipMarker
                     target.Index,
                     target.TargetRpm)
                 {
-                    ExpectedTargetRawHex = target.ExactTargetPayload.IsEmpty
+                    ExpectedTargetRawHex = plan.Family != FanCapabilityFamily.GlobalMaskFpe2 ||
+                        target.ExactTargetPayload.IsEmpty
                         ? null
                         : Convert.ToHexString(target.ExactTargetPayload.Span)
                 }),
@@ -84,5 +97,53 @@ internal sealed record FanOverrideOwnershipMarker
             plan.Family == FanCapabilityFamily.GlobalMaskFpe2
                 ? GlobalMaskFpe2Strategy.GetManualMask(plan.Targets.Count)
                 : null);
+    }
+
+    public static FanOverrideOwnershipMarker CreateTransactionJournal(
+        FanMaximumSafeRpmPlan plan,
+        DateTimeOffset createdAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        var marker = new FanOverrideOwnershipMarker(
+            plan.Model,
+            plan.Family,
+            plan.Targets.Select(target =>
+                new FanOverrideOwnershipTarget(target.Index, target.TargetRpm)
+                {
+                    ExpectedTargetRawHex = target.ExactTargetPayload.IsEmpty
+                        ? null
+                        : Convert.ToHexString(target.ExactTargetPayload.Span)
+                }),
+            createdAtUtc,
+            plan.Family == FanCapabilityFamily.GlobalMaskFpe2
+                ? GlobalMaskFpe2Strategy.GetManualMask(plan.Targets.Count)
+                : null)
+        {
+            BaselineTargets = plan.Targets.Select(target =>
+                new FanOverrideBaselineTarget(
+                    target.Index,
+                    Convert.ToHexString(target.BaselineTargetPayload.Span),
+                    target.BaselineMode)).ToArray(),
+            BaselineGlobalModeMask = plan.BaselineGlobalModeMask
+        };
+
+        return marker;
+    }
+
+    public FanOverrideOwnershipMarker ToFinalOwnershipMarker()
+    {
+        return new FanOverrideOwnershipMarker(
+            Model,
+            Family,
+            Targets.Select(target =>
+                new FanOverrideOwnershipTarget(target.Index, target.ExpectedTargetRpm)
+                {
+                    ExpectedTargetRawHex = Family == FanCapabilityFamily.GlobalMaskFpe2
+                        ? target.ExpectedTargetRawHex
+                        : null
+                }),
+            CreatedAtUtc,
+            ExpectedGlobalModeMask);
     }
 }

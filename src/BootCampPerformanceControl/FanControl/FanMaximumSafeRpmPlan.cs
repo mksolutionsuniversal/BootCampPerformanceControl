@@ -5,6 +5,10 @@ internal sealed record FanMaximumSafeRpmTarget(
     float TargetRpm)
 {
     public ReadOnlyMemory<byte> ExactTargetPayload { get; init; }
+
+    public ReadOnlyMemory<byte> BaselineTargetPayload { get; init; }
+
+    public byte? BaselineMode { get; init; }
 }
 
 internal sealed record FanMaximumSafeRpmPlan
@@ -19,12 +23,14 @@ internal sealed record FanMaximumSafeRpmPlan
     public FanMaximumSafeRpmPlan(
         string model,
         FanCapabilityFamily family,
-        IEnumerable<FanMaximumSafeRpmTarget> targets)
+        IEnumerable<FanMaximumSafeRpmTarget> targets,
+        ushort? baselineGlobalModeMask = null)
     {
         Model = model;
         Family = family;
         ArgumentNullException.ThrowIfNull(targets);
         Targets = targets.ToArray();
+        BaselineGlobalModeMask = baselineGlobalModeMask;
     }
 
     public string Model { get; init; }
@@ -32,4 +38,6 @@ internal sealed record FanMaximumSafeRpmPlan
     public FanCapabilityFamily Family { get; init; }
 
     public IReadOnlyList<FanMaximumSafeRpmTarget> Targets { get; }
+
+    public ushort? BaselineGlobalModeMask { get; }
 }

@@ -12,6 +12,8 @@ internal sealed class TestFanOverrideOwnershipStore : IFanOverrideOwnershipStore
 
     public int SaveCallCount { get; private set; }
 
+    public int ReplaceCallCount { get; private set; }
+
     public int ClearCallCount { get; private set; }
 
     public List<CancellationToken> LoadTokens { get; } = [];
@@ -19,6 +21,8 @@ internal sealed class TestFanOverrideOwnershipStore : IFanOverrideOwnershipStore
     public Func<CancellationToken, Task<FanOverrideOwnershipMarker?>>? LoadHandler { get; set; }
 
     public Func<FanOverrideOwnershipMarker, CancellationToken, Task>? SaveHandler { get; set; }
+
+    public Func<FanOverrideOwnershipMarker, CancellationToken, Task>? ReplaceHandler { get; set; }
 
     public Func<CancellationToken, Task>? ClearHandler { get; set; }
 
@@ -53,6 +57,16 @@ internal sealed class TestFanOverrideOwnershipStore : IFanOverrideOwnershipStore
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task ReplaceAsync(
+        FanOverrideOwnershipMarker marker,
+        CancellationToken cancellationToken)
+    {
+        ReplaceCallCount++;
+        Marker = marker;
+
+        return ReplaceHandler?.Invoke(marker, cancellationToken) ?? Task.CompletedTask;
     }
 
     public Task ClearAsync(CancellationToken cancellationToken)
