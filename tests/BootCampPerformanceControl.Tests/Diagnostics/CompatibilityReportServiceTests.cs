@@ -54,7 +54,7 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("Fan 0 RPM: 1840 / 5616 RPM", result.Content);
         Assert.Contains("Fan 1 RPM: 1691 / 5200 RPM", result.Content);
         Assert.Contains("Mode: Apple Auto", result.Content);
-        Assert.Contains("Write control state: Available (verified T2 SMC family)", result.Content);
+        Assert.Contains("Write control state: Available (verified SMC capability family)", result.Content);
         Assert.Contains("Fan status/details: Verified in test.", result.Content);
     }
 
