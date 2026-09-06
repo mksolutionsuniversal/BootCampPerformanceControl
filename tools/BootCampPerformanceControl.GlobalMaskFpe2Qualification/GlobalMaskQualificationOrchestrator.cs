@@ -46,9 +46,10 @@ internal sealed class GlobalMaskQualificationOrchestrator
         }
         PrintMachine(machine);
 
+        QualificationRunResult result;
         try
         {
-            return await RunCoreAsync(
+            result = await RunCoreAsync(
                     options,
                     machine,
                     conflicts,
@@ -59,6 +60,25 @@ internal sealed class GlobalMaskQualificationOrchestrator
         {
             _writes.PrintSummary();
         }
+
+        if (!result.IsPass)
+        {
+            return result;
+        }
+
+        if (_writes.HasReportingFailures)
+        {
+            return ReportingIntegrityFailure();
+        }
+
+        if (!_writes.ReportBestEffort(
+                "PHYSICAL QUALIFICATION: PASS",
+                "final PASS result"))
+        {
+            return ReportingIntegrityFailure();
+        }
+
+        return result;
     }
 
     private async Task<QualificationRunResult> RunCoreAsync(
@@ -216,24 +236,31 @@ internal sealed class GlobalMaskQualificationOrchestrator
             {
                 try
                 {
-                    _output.WriteLine("NON-CANCELLABLE EMERGENCY APPLE AUTO RESTORE");
+                    _writes.ReportBestEffort(
+                        "NON-CANCELLABLE EMERGENCY APPLE AUTO RESTORE",
+                        "emergency Apple Auto restore start");
                     await _writes.WriteAsync(
                             "FS! ",
                             new byte[] { 0x00, 0x00 },
                             CancellationToken.None)
                         .ConfigureAwait(false);
-                    var restoredMode = await ReadAndLogAsync(
-                            "FS! ",
-                            CancellationToken.None)
+                    var restoredMode = await _session
+                        .ReadKeyAsync("FS! ", CancellationToken.None)
                         .ConfigureAwait(false);
                     RequireValue(restoredMode, "FS! ", 2, "ui16", 0xC0, "0000");
-                    _output.WriteLine("Emergency/final Apple Auto readback: VERIFIED 0000");
+                    _writes.ReportBestEffort(
+                        $"READBACK: {FormatValue(restoredMode)}",
+                        "emergency Apple Auto readback");
+                    _writes.ReportBestEffort(
+                        "Emergency/final Apple Auto readback: VERIFIED 0000",
+                        "emergency Apple Auto verification result");
                 }
                 catch (Exception exception)
                 {
                     rollbackFailure = exception;
-                    _output.WriteLine(
-                        $"ROLLBACK FAILURE: {exception.GetType().Name}: {exception.Message}");
+                    _writes.ReportBestEffort(
+                        $"ROLLBACK FAILURE: {exception.GetType().Name}: {exception.Message}",
+                        "rollback failure result");
                 }
             }
         }
@@ -273,10 +300,21 @@ internal sealed class GlobalMaskQualificationOrchestrator
                 rollbackFailure);
         }
 
-        _output.WriteLine("PHYSICAL QUALIFICATION: PASS");
         return new QualificationRunResult(
             QualificationOutcome.Pass,
             "GlobalMaskFpe2 one-fan physical write/readback/Apple Auto round trip passed.");
+    }
+
+    private QualificationRunResult ReportingIntegrityFailure()
+    {
+        var firstFailure = _writes.ReportingFailures[0];
+        _writes.ReportBestEffort(
+            $"PHYSICAL QUALIFICATION: FAIL/INCONCLUSIVE - reporting integrity failed during {firstFailure.Context}: {firstFailure.Exception.GetType().Name}: {firstFailure.Exception.Message}",
+            "reporting-integrity failure result");
+        return new QualificationRunResult(
+            QualificationOutcome.Fail,
+            "Physical hardware rollback was verified, but qualification reporting integrity failed.",
+            firstFailure.Exception);
     }
 
     private QualificationRunResult Refused(string message)

@@ -289,6 +289,7 @@ public sealed class GlobalMaskFpe2QualificationTests
         Assert.Equal(
             [("FS! ", "0001"), ("F0Tg", "60DC"), ("FS! ", "0000")],
             fixture.Session.Writes.Select(write => (write.Key, write.RawHex)));
+        AssertNoPhysicalPassWasPrinted(fixture);
     }
 
     [Fact]
@@ -350,6 +351,97 @@ public sealed class GlobalMaskFpe2QualificationTests
         Assert.Equal("0000", fixture.Session.Writes[1].RawHex);
     }
 
+    [Fact]
+    public async Task FirstManualWriteReportingFailureStillPerformsBackendAndRollback()
+    {
+        var fixture = new Fixture();
+        fixture.Output.ThrowOnceWhen = line =>
+            line.StartsWith("WRITE #1: FS! ", StringComparison.Ordinal);
+
+        var result = await fixture.RunAsync(Armed());
+
+        Assert.Equal(QualificationOutcome.Fail, result.Outcome);
+        Assert.IsType<IOException>(result.PrimaryFailure);
+        Assert.Equal(
+            [("FS! ", "0001"), ("F0Tg", "60DC"), ("FS! ", "0000")],
+            fixture.Session.Writes.Select(write => (write.Key, write.RawHex)));
+    }
+
+    [Fact]
+    public async Task OutputFailureAfterManualWriteStillAttemptsEmergencyAuto()
+    {
+        var fixture = new Fixture();
+        fixture.Output.ThrowOnceWhen = line =>
+            line.StartsWith("READBACK:", StringComparison.Ordinal) &&
+            line.Contains("raw=0001", StringComparison.Ordinal);
+
+        var result = await fixture.RunAsync(Armed());
+
+        Assert.Equal(QualificationOutcome.Fail, result.Outcome);
+        Assert.Equal(
+            [("FS! ", "0001"), ("FS! ", "0000")],
+            fixture.Session.Writes.Select(write => (write.Key, write.RawHex)));
+        AssertNoPhysicalPassWasPrinted(fixture);
+    }
+
+    [Fact]
+    public async Task EmergencyRestoreStartReportingFailureCannotPreventAutoWrite()
+    {
+        var fixture = new Fixture();
+        fixture.Output.ThrowOnceWhen = line => string.Equals(
+            line,
+            "NON-CANCELLABLE EMERGENCY APPLE AUTO RESTORE",
+            StringComparison.Ordinal);
+
+        var result = await fixture.RunAsync(Armed());
+
+        Assert.Equal(QualificationOutcome.Fail, result.Outcome);
+        Assert.Equal("FS! ", fixture.Session.Writes[^1].Key);
+        Assert.Equal("0000", fixture.Session.Writes[^1].RawHex);
+        AssertNoPhysicalPassWasPrinted(fixture);
+    }
+
+    [Fact]
+    public async Task RollbackWriteReportingFailureCannotPreventAutoBackendWrite()
+    {
+        var fixture = new Fixture();
+        fixture.Output.ThrowOnceWhen = line =>
+            line.StartsWith("WRITE #3: FS! ", StringComparison.Ordinal);
+
+        var result = await fixture.RunAsync(Armed());
+
+        Assert.Equal(QualificationOutcome.Fail, result.Outcome);
+        Assert.Equal(3, fixture.Session.Writes.Count);
+        Assert.Equal("FS! ", fixture.Session.Writes[^1].Key);
+        Assert.Equal("0000", fixture.Session.Writes[^1].RawHex);
+        Assert.Equal((ushort)0, fixture.Session.Mask);
+        AssertNoPhysicalPassWasPrinted(fixture);
+    }
+
+    [Fact]
+    public async Task RollbackReadbackReportingFailureOccursAfterExactVerificationAndCannotPass()
+    {
+        var fixture = new Fixture();
+        fixture.Output.ThrowOnceWhen = line =>
+            line.StartsWith("READBACK:", StringComparison.Ordinal) &&
+            line.Contains("raw=0000", StringComparison.Ordinal);
+
+        var result = await fixture.RunAsync(Armed());
+
+        Assert.Equal(QualificationOutcome.Fail, result.Outcome);
+        Assert.Equal(2, fixture.Session.GlobalModeReadCount);
+        Assert.Equal((ushort)0, fixture.Session.Mask);
+        Assert.Equal("0000", fixture.Session.Writes[^1].RawHex);
+        AssertNoPhysicalPassWasPrinted(fixture);
+    }
+
+    private static void AssertNoPhysicalPassWasPrinted(Fixture fixture)
+    {
+        Assert.DoesNotContain(
+            "PHYSICAL QUALIFICATION: PASS",
+            fixture.Output.Lines);
+    }
+
     private static QualificationOptions Armed() => QualificationOptions.Parse(
         ["--execute", "--confirm", QualificationOptions.ConfirmationToken]);
 
@@ -387,7 +479,23 @@ public sealed class GlobalMaskFpe2QualificationTests
     {
         public List<string> Lines { get; } = [];
 
-        public void WriteLine(string message = "") => Lines.Add(message);
+        public List<string> AttemptedLines { get; } = [];
+
+        public Func<string, bool>? ThrowOnceWhen { get; set; }
+
+        private bool HasThrown { get; set; }
+
+        public void WriteLine(string message = "")
+        {
+            AttemptedLines.Add(message);
+            if (!HasThrown && ThrowOnceWhen?.Invoke(message) == true)
+            {
+                HasThrown = true;
+                throw new IOException("simulated qualification output failure");
+            }
+
+            Lines.Add(message);
+        }
     }
 
     private sealed class FakeQualificationSession : IGlobalMaskQualificationSession
@@ -431,6 +539,8 @@ public sealed class GlobalMaskFpe2QualificationTests
         public CancellationTokenSource? CancelAfterManualWrite { get; set; }
 
         public List<QualificationWriteAttempt> Writes { get; } = [];
+
+        public int GlobalModeReadCount => _globalModeReadCount;
 
         public AppleSmcServiceState GetServiceState()
         {

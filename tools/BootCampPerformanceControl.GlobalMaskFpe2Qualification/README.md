@@ -29,3 +29,5 @@ FS!  0000 (non-cancellable finally path)
 ```
 
 The last Auto write is attempted even after cancellation or any failure after the first write boundary, and exact `FS! raw=0000` readback is required. Logs are created without overwrite on the Desktop as `BCPC-GLOBALMASK-FPE2-QUALIFICATION-<UTC timestamp>.txt`.
+
+Safety-critical writes are independent of console/file output success. Reporting exceptions are retained in memory and force a FAIL/INCONCLUSIVE result, while the non-cancellable `FS! 0000` backend call and exact readback verification still proceed.

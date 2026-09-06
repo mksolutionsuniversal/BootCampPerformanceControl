@@ -75,11 +75,16 @@ internal sealed record QualificationWriteAttempt(
     string RawHex,
     CancellationToken CancellationToken);
 
+internal sealed record QualificationReportingFailure(
+    string Context,
+    Exception Exception);
+
 internal sealed class QualificationWriteLedger
 {
     private readonly IGlobalMaskQualificationSession _session;
     private readonly IQualificationOutput _output;
     private readonly List<QualificationWriteAttempt> _attempts = [];
+    private readonly List<QualificationReportingFailure> _reportingFailures = [];
 
     public QualificationWriteLedger(
         IGlobalMaskQualificationSession session,
@@ -90,6 +95,11 @@ internal sealed class QualificationWriteLedger
     }
 
     public IReadOnlyList<QualificationWriteAttempt> Attempts => _attempts;
+
+    public IReadOnlyList<QualificationReportingFailure> ReportingFailures =>
+        _reportingFailures;
+
+    public bool HasReportingFailures => _reportingFailures.Count > 0;
 
     public async Task WriteAsync(
         string key,
@@ -104,7 +114,9 @@ internal sealed class QualificationWriteLedger
             Convert.ToHexString(payload.Span),
             cancellationToken);
         _attempts.Add(attempt);
-        _output.WriteLine($"WRITE #{attempt.Number}: {attempt.Key} {attempt.RawHex}");
+        ReportBestEffort(
+            $"WRITE #{attempt.Number}: {attempt.Key} {attempt.RawHex}",
+            $"write attempt #{attempt.Number}");
 
         await _session.WriteKeyAsync(key, payload, cancellationToken)
             .ConfigureAwait(false);
@@ -112,19 +124,41 @@ internal sealed class QualificationWriteLedger
 
     public void PrintSummary()
     {
-        _output.WriteLine();
-        _output.WriteLine($"SMC writes issued: {_attempts.Count}");
-        _output.WriteLine($"Total SMC write attempts: {_attempts.Count}");
-        _output.WriteLine("Keys written:");
+        ReportBestEffort(string.Empty, "write summary separator");
+        ReportBestEffort(
+            $"SMC writes issued: {_attempts.Count}",
+            "SMC write count summary");
+        ReportBestEffort(
+            $"Total SMC write attempts: {_attempts.Count}",
+            "total write-attempt summary");
+        ReportBestEffort("Keys written:", "written-key summary heading");
         if (_attempts.Count == 0)
         {
-            _output.WriteLine("(none)");
+            ReportBestEffort("(none)", "empty written-key summary");
             return;
         }
 
         foreach (var attempt in _attempts)
         {
-            _output.WriteLine($"{attempt.Number}: {attempt.Key} {attempt.RawHex}");
+            ReportBestEffort(
+                $"{attempt.Number}: {attempt.Key} {attempt.RawHex}",
+                $"written-key summary item #{attempt.Number}");
+        }
+    }
+
+    public bool ReportBestEffort(string message, string context)
+    {
+        try
+        {
+            _output.WriteLine(message);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _reportingFailures.Add(new QualificationReportingFailure(
+                context,
+                exception));
+            return false;
         }
     }
 
