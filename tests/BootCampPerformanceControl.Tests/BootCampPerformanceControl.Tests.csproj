@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BootCampPerformanceControl\BootCampPerformanceControl.csproj" />
+    <ProjectReference Include="..\..\tools\BootCampPerformanceControl.GlobalMaskFpe2Qualification\BootCampPerformanceControl.GlobalMaskFpe2Qualification.csproj" />
   </ItemGroup>
 
 </Project>

@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl.SmcResourceProbe", "tools\BootCampPerformanceControl.SmcResourceProbe\BootCampPerformanceControl.SmcResourceProbe.csproj", "{3F6C835A-9A6A-4B8E-9E7E-1DE8BB3E3DF2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BootCampPerformanceControl.GlobalMaskFpe2Qualification", "tools\BootCampPerformanceControl.GlobalMaskFpe2Qualification\BootCampPerformanceControl.GlobalMaskFpe2Qualification.csproj", "{6FCB776B-CADB-4E04-9438-F8CD14B8415B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -54,6 +56,10 @@ Global
 		{3F6C835A-9A6A-4B8E-9E7E-1DE8BB3E3DF2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3F6C835A-9A6A-4B8E-9E7E-1DE8BB3E3DF2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3F6C835A-9A6A-4B8E-9E7E-1DE8BB3E3DF2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6FCB776B-CADB-4E04-9438-F8CD14B8415B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6FCB776B-CADB-4E04-9438-F8CD14B8415B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6FCB776B-CADB-4E04-9438-F8CD14B8415B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6FCB776B-CADB-4E04-9438-F8CD14B8415B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{F1059FFE-3D8A-4D11-B43E-7AD275A1470A} = {0D467DA2-65F7-4C74-8845-3F51D6121AD0}
@@ -62,5 +68,6 @@ Global
 		{9420B737-7239-4D36-9618-3AD5686DF070} = {8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}
 		{E9355B8F-5EAE-4B38-AF8C-8FC36A6FC830} = {8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}
 		{3F6C835A-9A6A-4B8E-9E7E-1DE8BB3E3DF2} = {8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}
+		{6FCB776B-CADB-4E04-9438-F8CD14B8415B} = {8D6C88C8-0A84-4F76-8B1B-01D6FFA1C90D}
 	EndGlobalSection
 EndGlobal
