@@ -39,12 +39,10 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ICompatibilityReportService _compatibilityReportService;
     private readonly ICompatibilityReportDialogService _compatibilityReportDialogService;
     private readonly IApplicationLogger _logger;
-    private readonly IUserConfirmationService _userConfirmationService;
     private readonly TimeSpan _fanPollingInterval;
     private readonly Func<TimeSpan, CancellationToken, Task> _fanPollingDelayAsync;
     private readonly SemaphoreSlim _fanOperationGate = new(1, 1);
     private readonly object _fanMonitoringSync = new();
-    private readonly HashSet<string> _acknowledgedUntestedModels = new(StringComparer.OrdinalIgnoreCase);
 
     private ModelVerificationResult _lastVerificationResult = ModelVerificationResult.Unknown();
     private bool _lastPowerStateReadSucceeded;
@@ -98,7 +96,6 @@ public sealed class MainViewModel : ViewModelBase
         ICompatibilityReportService compatibilityReportService,
         ICompatibilityReportDialogService compatibilityReportDialogService,
         IApplicationLogger logger,
-        IUserConfirmationService? userConfirmationService = null,
         TimeSpan? fanPollingInterval = null,
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
         ProfileRestoreService? profileRestoreService = null)
@@ -117,7 +114,6 @@ public sealed class MainViewModel : ViewModelBase
             compatibilityReportService,
             compatibilityReportDialogService,
             logger,
-            userConfirmationService,
             fanPollingInterval,
             fanPollingDelayAsync,
             profileRestoreService,
@@ -142,7 +138,6 @@ public sealed class MainViewModel : ViewModelBase
         ICompatibilityReportService compatibilityReportService,
         ICompatibilityReportDialogService compatibilityReportDialogService,
         IApplicationLogger logger,
-        IUserConfirmationService? userConfirmationService = null,
         TimeSpan? fanPollingInterval = null,
         Func<TimeSpan, CancellationToken, Task>? fanPollingDelayAsync = null,
         ProfileRestoreService? profileRestoreService = null,
@@ -190,7 +185,6 @@ public sealed class MainViewModel : ViewModelBase
         _compatibilityReportService = compatibilityReportService;
         _compatibilityReportDialogService = compatibilityReportDialogService;
         _logger = logger;
-        _userConfirmationService = userConfirmationService ?? new WpfUserConfirmationService();
         LoadApplicationOptions();
         _fanPollingInterval = fanPollingInterval ?? DefaultFanPollingInterval;
         if (_fanPollingInterval <= TimeSpan.Zero)
@@ -977,23 +971,6 @@ public sealed class MainViewModel : ViewModelBase
                 StringComparison.OrdinalIgnoreCase)
             && _gamingOptimisedSessionState == GamingOptimisedSessionState.PartialCpuOnly
             && _lastVerificationResult.PlatformSupport == PlatformSupportStatus.SupportedIntelMac;
-
-        if (string.Equals(profileId, "gaming-optimised", StringComparison.OrdinalIgnoreCase)
-            && _lastVerificationResult.ValidationLevel == ModelValidationLevel.NotIndividuallyTested)
-        {
-            if (!_acknowledgedUntestedModels.Contains(_lastVerificationResult.Model))
-            {
-                var confirmed = _userConfirmationService.ConfirmUntestedModelApply(_lastVerificationResult.Model);
-                if (!confirmed)
-                {
-                    StatusMessage = "Profile application canceled.";
-                    _logger.Info($"Profile application canceled by user for untested model: {_lastVerificationResult.Model}.");
-                    return;
-                }
-
-                _acknowledgedUntestedModels.Add(_lastVerificationResult.Model);
-            }
-        }
 
         IsBusy = true;
         StatusMessage = isPartialGamingFanResume

@@ -107,7 +107,6 @@ public static class AppCompositionRoot
             compatibilityReportService,
             new WpfCompatibilityReportDialogService(logger),
             logger,
-            new WpfUserConfirmationService(),
             profileRestoreService: profileRestoreService,
             ownershipReader: ownershipStore,
             gamingOptimisedRestoreCoordinator: gamingOptimisedRestoreCoordinator,
