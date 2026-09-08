@@ -10,7 +10,7 @@ Processor-profile availability and fan-write availability are intentionally sepa
 - Release candidate `0.5.0-rc.1`: dynamic fan topology plus verified T2-style SMC capability-family write gate.
 - Current `main` development runtime: mechanism-based `PerFanModeFloat32` and bounded `GlobalMaskFpe2` writers selected from exact live capability fingerprints.
 - `0.5.0-rc.1` is published as a GitHub pre-release.
-- End-to-end physical fan-write validation is currently completed on `MacBookPro16,1` only.
+- Physical fan-write validation is completed on `MacBookPro16,1` for `PerFanModeFloat32` and on `MacBookPro12,1` for the one-fan `GlobalMaskFpe2` write/readback/Apple Auto round trip.
 
 Published RC identity:
 
@@ -31,7 +31,7 @@ Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is 
 | Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Validation status |
 |---|---:|---:|---:|---:|---|
 | `MacBookPro16,1` / `PerFanModeFloat32` | Yes | Yes | Capability-qualified | Yes | **Physically verified end-to-end** |
-| `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Implemented with v4 journal; fake restart-tested | Read-only fingerprint physically verified; physical write round trip pending |
+| `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Implemented with v4 journal; fake restart-tested | **One-fan physical write/readback/Apple Auto round trip PASS** |
 | Other `SupportedIntelMac` | Yes | Capability-dependent | Only when an exact bounded live family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
 
 ## Global Gaming Optimised processor target
@@ -163,6 +163,40 @@ A forced-process termination was then physically tested while Gaming Optimised w
 
 See [0.5.0-rc.1 Hardware Validation Record](0.5.0-rc.1-HARDWARE-VALIDATION.md).
 
+## MacBookPro12,1 — one-fan GlobalMaskFpe2 physical qualification
+
+Physical validation on `2026-09-08` confirmed the bounded one-fan `GlobalMaskFpe2` mechanism on `MacBookPro12,1`.
+
+Fresh pre-write state included:
+
+```text
+Protocol: Mmio (1)
+FNum: 1
+Family: GlobalMaskFpe2
+FS! : 0000
+F0Md: ConfirmedAbsent
+F0Mx: 60DC = 6199 RPM
+```
+
+The controlled write/readback sequence was:
+
+```text
+FS! 0000 -> 0001
+readback FS! = 0001
+re-read F0Mx = 60DC
+F0Tg <- exact raw 60DC
+readback F0Tg = 60DC
+FS! 0001 -> 0000
+readback FS! = 0000
+final family probe PASS
+```
+
+Only three SMC write attempts were issued: `FS! 0001`, `F0Tg 60DC`, and `FS! 0000`. The qualifier exited `0`, reported `PHYSICAL QUALIFICATION: PASS`, and the wrapper restored AppleSMC to its original `Stopped` state.
+
+This physically qualifies the observed one-fan mechanism. It does not physically qualify two-fan `FS! = 0003`, does not establish generic T1 support, and does not qualify the native `BootCampSmc` research driver for writes.
+
+See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
+
 ## Restore, clean exit and crash recovery
 
 When BCPC has valid fan ownership/recovery context, explicit Restore remains ordered:
@@ -206,9 +240,9 @@ Known project state:
 - `99%` Maximum Processor State improved behaviour in informal testing
 - reliable comparative `95%` benchmarking remains deferred until cooling-system maintenance is completed
 
-Physical read-only evidence on `MacBookPro12,1` confirms the exact `GlobalMaskFpe2` schema, `fpe2` byte order/scale and `FS! = 0000` Auto state. The bounded implementation is covered by fake-transport tests; physical write qualification is intentionally deferred to a controlled manual step.
+Physical one-fan `GlobalMaskFpe2` write/readback/Apple Auto qualification is now complete on `MacBookPro12,1`. That is mechanism evidence only and must not be generalized into a T1-wide compatibility claim. A physical two-fan machine remains required before the `FS! = 0003` path can receive its own BCPC-owned physical write qualification.
 
-Hard-crash recovery of the implementation's deterministic partial write prefixes is also covered by fake/in-memory restart tests. This does not change the physical qualification status: the real Maximum Safe RPM / Apple Auto round trip is still pending.
+Hard-crash recovery of the implementation's deterministic partial write prefixes remains covered by fake/in-memory restart tests. Physical hard-crash recovery for `GlobalMaskFpe2` has not yet been exercised and is not implied by the short controlled round trip.
 
 ## What “T2 family support” means in `0.5.0-rc.1`
 
@@ -221,7 +255,7 @@ It does **not** mean:
 - model identity alone can enable writes,
 - BCPC will generate unknown SMC timings/keys or guess a fan-control protocol.
 
-The current end-to-end physical write reference remains `MacBookPro16,1`. Additional machines should be validated with read-only capability capture first, then controlled write/read-back/Auto-restore testing.
+Physical write references now include `MacBookPro16,1` for `PerFanModeFloat32` and `MacBookPro12,1` for the one-fan `GlobalMaskFpe2` round trip. Additional machines should still be validated with read-only capability capture first, then controlled write/read-back/Auto-restore testing.
 
 ## AppleSMC compatibility dependency
 
