@@ -1823,7 +1823,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void GamingButton_NotIndividuallyTested_ShowsConfirmationDialog_CancelAbortsApplyWithoutWrites()
+    public async Task GamingButton_NotIndividuallyTested_AppliesDirectlyOnceAndFanOnlyResumeDoesNotRewriteProcessorState()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
@@ -1831,38 +1831,10 @@ public sealed class MainViewModelTests
             PlatformSupportStatus.SupportedIntelMac,
             ModelValidationLevel.NotIndividuallyTested,
             "Not individually tested.");
-        var confirmationService = new FakeUserConfirmationService { Result = false };
-        var powerManagementService = new FakePowerManagementService(InitialPowerState());
-        var logger = new TestApplicationLogger();
-        var viewModel = CreateViewModel(
-            new FakeHardwareDetectionService(verification),
-            powerManagementService,
-            logger: logger,
-            userConfirmationService: confirmationService);
-
-        viewModel.RefreshCommand.Execute(null);
-        GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
-
-        Assert.Equal(1, confirmationService.CallCount);
-        Assert.Equal(VerifiedHardwareModels.MacBookPro14_3, confirmationService.LastModelName);
-        Assert.Equal("Profile application canceled.", viewModel.StatusMessage);
-        Assert.Equal(0, powerManagementService.GuardedApplyCallCount);
-        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
-    }
-
-    [Fact]
-    public async Task GamingButton_NotIndividuallyTested_ShowsConfirmationDialog_ConfirmAllowsApplyAndRemembersSession()
-    {
-        var verification = new ModelVerificationResult(
-            "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
-            PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Not individually tested.");
-        var confirmationService = new FakeUserConfirmationService { Result = true };
         var expectedStateBefore = InitialPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
         var refreshedState = GamingOptimisedPowerState();
+        var restoreSnapshotStore = new InMemoryRestoreSnapshotStore();
         var powerManagementService = new FakePowerManagementService(
             SuccessfulPowerOperation(expectedStateBefore, requestedSettings),
             InitialPowerState(),
@@ -1875,30 +1847,33 @@ public sealed class MainViewModelTests
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(verification),
             powerManagementService,
-            userConfirmationService: confirmationService,
+            restoreSnapshotStore,
             fanExecutionSessionFactory: sessionFactory);
 
         viewModel.RefreshCommand.Execute(null);
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(1, confirmationService.CallCount);
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+        Assert.Equal(requestedSettings, powerManagementService.LastGuardedSettings);
         Assert.Contains("applied successfully", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
 
         // Second activation in the same partial CPU-only session is fan-only:
-        // it must not prompt again or rewrite the processor snapshot/settings.
+        // it must not rewrite the processor snapshot/settings.
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(1, confirmationService.CallCount);
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
+        Assert.Equal(
+            expectedStateBefore,
+            await restoreSnapshotStore.GetOriginalRestoreSnapshotAsync(CancellationToken.None));
     }
 
     [Fact]
-    public async Task GamingButton_PerformanceValidated_DoesNotShowConfirmationDialog()
+    public async Task GamingButton_PerformanceValidated_StillExecutesNormalGuardedApplyPath()
     {
-        var confirmationService = new FakeUserConfirmationService { Result = true };
         var expectedStateBefore = InitialPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
         var refreshedState = GamingOptimisedPowerState();
@@ -1909,15 +1884,14 @@ public sealed class MainViewModelTests
             refreshedState);
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(VerifiedMacBookPro16_1()),
-            powerManagementService,
-            userConfirmationService: confirmationService);
+            powerManagementService);
 
         viewModel.RefreshCommand.Execute(null);
         GetProfile(viewModel, "gaming-optimised").Command!.Execute(null);
         await WaitForIdleAsync(viewModel);
 
-        Assert.Equal(0, confirmationService.CallCount);
         Assert.Equal(1, powerManagementService.GuardedApplyCallCount);
+        Assert.Equal(0, powerManagementService.UnguardedApplyCallCount);
     }
 
     [Fact]
@@ -3760,7 +3734,6 @@ public sealed class MainViewModelTests
         FakeDiagnosticReportFileSaveService? diagnosticReportFileSaveService = null,
         FakeCompatibilityReportService? compatibilityReportService = null,
         FakeCompatibilityReportDialogService? compatibilityReportDialogService = null,
-        IUserConfirmationService? userConfirmationService = null,
         FakeFanControlService? fanControlService = null,
         FakeAppleSmcBackendElevationLauncher? elevationLauncher = null,
         IApplicationOptionsService? applicationOptionsService = null,
@@ -3827,7 +3800,6 @@ public sealed class MainViewModelTests
             compatibilityReportService ?? new FakeCompatibilityReportService(),
             compatibilityReportDialogService ?? new FakeCompatibilityReportDialogService(),
             logger ?? new TestApplicationLogger(),
-            userConfirmationService,
             fanPollingInterval: TimeSpan.FromSeconds(2),
             fanPollingDelayAsync: fanPollingDelayAsync,
             profileRestoreService: profileRestoreService,
@@ -4564,20 +4536,6 @@ public sealed class MainViewModelTests
             using var registration = cancellationToken.Register(
                 () => completion.TrySetCanceled(cancellationToken));
             await completion.Task;
-        }
-    }
-
-    private sealed class FakeUserConfirmationService : IUserConfirmationService
-    {
-        public bool Result { get; set; } = true;
-        public int CallCount { get; private set; }
-        public string? LastModelName { get; private set; }
-
-        public bool ConfirmUntestedModelApply(string modelName)
-        {
-            CallCount++;
-            LastModelName = modelName;
-            return Result;
         }
     }
 
