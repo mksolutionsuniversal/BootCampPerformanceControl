@@ -6,6 +6,10 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 ## [Unreleased]
 
+### Documentation
+
+- Synchronized current repository documentation after publication of `v0.5.0-rc.2`; this post-release documentation update does not modify the published tag, source snapshot, release artifact, hardware-control code, or safety behavior.
+
 ## [0.5.0-rc.2] - 2026-09-08
 
 ### Added
@@ -32,8 +36,10 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 - Prepared repository documentation for the `0.5.0-rc.2` release candidate while keeping stable `0.4.0` as the latest stable release.
 - Preserved the immutable `v0.5.0-rc.1` publication identity and older release history.
-- Final `0.5.0-rc.2` ZIP size and SHA-256 are intentionally deferred until the final tagged-source build.
-- No hardware-control code is changed by this release-preparation documentation update.
+- Published `v0.5.0-rc.2` as a GitHub pre-release from source `59450231ef06db4ffdb86302855c4394f1bda6ba`.
+- Final Windows x64 ZIP: `70340224 bytes`, SHA-256 `573F5E36BEB0D4DB98CBAFCFAD3634B003955F7719F1499CFA504D5B708A5F88`, built with .NET SDK `8.0.424`; `632 / 632` automated tests passed.
+- Stable `v0.4.0` remains the latest stable release.
+- No hardware-control code is changed by the release-preparation or post-publication documentation synchronization.
 
 ## [0.5.0-rc.1] - 2026-09-05
 

@@ -26,7 +26,21 @@ ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
 Tests:         589 / 589 PASS
 ```
 
-`0.5.0-rc.2` is prepared as the current release candidate. Its final ZIP size and SHA-256 must come from the final tagged-source build and are not predeclared here. Stable `0.4.0` remains unchanged and remains the latest stable release.
+`0.5.0-rc.2` is published as the current GitHub pre-release for controlled compatibility testing. Stable `0.4.0` remains unchanged and remains the latest stable release.
+
+Published current RC identity:
+
+```text
+Tag:           v0.5.0-rc.2
+Source commit: 59450231ef06db4ffdb86302855c4394f1bda6ba
+ZIP:           BootCampPerformanceControl-0.5.0-rc.2-win-x64.zip
+ZIP size:      70340224 bytes
+ZIP SHA-256:   573F5E36BEB0D4DB98CBAFCFAD3634B003955F7719F1499CFA504D5B708A5F88
+.NET SDK:      8.0.424
+Tests:         632 / 632 PASS
+```
+
+Post-release documentation commits do not change this immutable release identity.
 
 ## What changed from stable 0.4.0
 

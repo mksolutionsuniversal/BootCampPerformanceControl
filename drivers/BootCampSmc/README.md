@@ -1,6 +1,6 @@
 # BootCampSmc experimental research driver
 
-> **Status: experimental research only.** `BootCampSmc.sys` is not the production fan-control dependency for stable BCPC `0.4.0` or release candidate `0.5.0-rc.1`, is not included in their release packages, and must not be presented as a generally supported Apple SMC driver.
+> **Status: experimental research only.** `BootCampSmc.sys` is not the production fan-control dependency for stable BCPC `0.4.0` or release candidate `0.5.0-rc.2`, is not included in their release packages, and must not be presented as a generally supported Apple SMC driver.
 
 `BootCampSmc` is an independently authored KMDF function-driver research path for BootCamp Performance Control.
 
@@ -28,7 +28,7 @@ BootCamp Performance Control
 
 Stable `0.4.0` uses an exact `MacBookPro16,1` production fan-write gate.
 
-Release candidate `0.5.0-rc.1` uses a live guarded T2-style SMC capability-family gate in the application production backend. That broader runtime application policy **does not** change the native research driver's current Gate 5D-B boundary and does not make `BootCampSmc.sys` a production dependency.
+Release candidate `0.5.0-rc.2` determines normal `SupportedIntelMac` eligibility from detected Apple hardware plus an Intel CPU and independently selects guarded `PerFanModeFloat32` or bounded `GlobalMaskFpe2` application writers only from the fresh live AppleSMC capability fingerprint. That broader runtime application policy **does not** change the native research driver's current Gate 5D-B boundary and does not make `BootCampSmc.sys` a production dependency.
 
 BCPC does not redistribute Macs Fan Control, `MacsFanControl.exe`, `macsfancontrol_setup.exe`, or `applesmc.sys`.
 
@@ -36,15 +36,19 @@ The native research driver is paused as a product dependency because public kern
 
 ## Current release-candidate relationship
 
-Published `0.5.0-rc.1` identity:
+Published `0.5.0-rc.2` identity:
 
 ```text
-Tag:           v0.5.0-rc.1
-Source commit: 27511afee7e1ae092bb53e63d8c1c96b73004c81
-Tests:         589 / 589 PASS
+Tag:           v0.5.0-rc.2
+Source commit: 59450231ef06db4ffdb86302855c4394f1bda6ba
+ZIP:           BootCampPerformanceControl-0.5.0-rc.2-win-x64.zip
+ZIP size:      70340224 bytes
+ZIP SHA-256:   573F5E36BEB0D4DB98CBAFCFAD3634B003955F7719F1499CFA504D5B708A5F88
+.NET SDK:      8.0.424
+Tests:         632 / 632 PASS
 ```
 
-The published RC ZIP intentionally excludes `.sys`, `.inf` and `.cat` driver-package files. The release-packaging safety scan enforces that boundary.
+The published RC ZIP intentionally excludes `.sys`, `.inf` and `.cat` driver-package files. The release-packaging safety scan enforces that boundary. Post-release documentation commits do not change the published tag or artifact.
 
 ## Independently verified interoperability facts
 
@@ -180,7 +184,7 @@ Gate 5D-B is therefore a **closed experimental fact** and should not be rerun me
 
 ## What remains future work
 
-The native driver should not be expanded casually just because Gate 5D-B passed or because the application now recognizes a broader verified T2-style capability family.
+The native driver should not be expanded casually just because Gate 5D-B passed or because the application now recognizes bounded capability-family fan writers.
 
 Any future native-driver work must continue as small, independently reviewable safety gates.
 
@@ -225,6 +229,6 @@ See:
 
 ## Current conclusion
 
-The native T2 transport research is technically useful and has reached a working Gate 5D-B checkpoint, but both stable BCPC `0.4.0` and release candidate `0.5.0-rc.1` intentionally ship **without** this kernel driver.
+The native T2 transport research is technically useful and has reached a working Gate 5D-B checkpoint, but both stable BCPC `0.4.0` and release candidate `0.5.0-rc.2` intentionally ship **without** this kernel driver.
 
 The public application must remain usable and safe even if native-driver research is paused indefinitely.
