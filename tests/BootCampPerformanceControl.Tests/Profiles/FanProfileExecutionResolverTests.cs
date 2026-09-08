@@ -58,7 +58,7 @@ public sealed class FanProfileExecutionResolverTests
             GamingOptimisedProfile(),
             new ModelVerificationResult(
                 "Apple Inc.",
-                VerifiedHardwareModels.MacBookPro14_3,
+                "MacBookPro14,3",
                 PlatformSupportStatus.SupportedIntelMac,
                 string.Empty),
             SafetyGatedCapability());

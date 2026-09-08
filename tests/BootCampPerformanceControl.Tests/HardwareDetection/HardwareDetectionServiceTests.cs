@@ -6,7 +6,7 @@ public sealed class HardwareDetectionServiceTests
 {
     [Theory]
     [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
-    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro14,3")]
     [InlineData("MacBookPro99,9")]
     [InlineData("Unknown")]
     [InlineData("")]

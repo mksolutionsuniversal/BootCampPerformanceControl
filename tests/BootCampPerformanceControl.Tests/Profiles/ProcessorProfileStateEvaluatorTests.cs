@@ -8,7 +8,7 @@ public sealed class ProcessorProfileStateEvaluatorTests
 {
     [Theory]
     [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
-    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro14,3")]
     [InlineData("MacBookPro99,1")]
     public void Evaluate_SupportedIntelMacWithExactGamingValues_ReturnsGamingOptimisedDetected(string model)
     {

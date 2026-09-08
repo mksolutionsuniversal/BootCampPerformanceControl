@@ -45,11 +45,6 @@
             <TextBlock Text="info@mkus.co.uk"
                        Style="{StaticResource BodyTextStyle}" />
 
-            <TextBlock Text="Physical validation reference:"
-                       Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="MacBookPro16,1"
-                       Style="{StaticResource BodyTextStyle}" />
-
             <TextBlock Text="Fan control:"
                        Style="{StaticResource SectionHeadingStyle}" />
             <TextBlock Text="Physical validation records are evidence for observed mechanisms, not runtime permission lists. Fan write control is available only when the live AppleSMC interface matches an exact bounded capability family."

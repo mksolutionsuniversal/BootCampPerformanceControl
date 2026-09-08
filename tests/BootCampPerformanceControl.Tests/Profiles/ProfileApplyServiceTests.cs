@@ -43,7 +43,7 @@ public sealed class ProfileApplyServiceTests
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             PlatformSupportStatus.SupportedIntelMac,
             string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);

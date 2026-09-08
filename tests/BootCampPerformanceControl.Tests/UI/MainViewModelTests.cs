@@ -2675,7 +2675,7 @@ public sealed class MainViewModelTests
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             PlatformSupportStatus.SupportedIntelMac,
             string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);
@@ -2683,7 +2683,7 @@ public sealed class MainViewModelTests
         var ownershipStore = new TestFanOverrideOwnershipStore
         {
             Marker = new FanOverrideOwnershipMarker(
-                VerifiedHardwareModels.MacBookPro14_3,
+                "MacBookPro14,3",
                 5321.25f,
                 4789.5f,
                 DateTimeOffset.UtcNow)

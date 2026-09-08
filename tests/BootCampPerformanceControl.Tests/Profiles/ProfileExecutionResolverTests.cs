@@ -10,7 +10,7 @@ public sealed class ProfileExecutionResolverTests
 
     [Theory]
     [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
-    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro14,3")]
     [InlineData("MacBookPro99,1")]
     public void ResolveProcessorSettings_GamingOptimised_IsExecutableOnAnySupportedIntelMac(string model)
     {

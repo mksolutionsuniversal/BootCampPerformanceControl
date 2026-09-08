@@ -68,7 +68,7 @@ public sealed class CleanExitFanRecoveryServiceTests
     [Fact]
     public async Task RestoreOwnedFansAsync_MarkerModelMismatch_BlocksAndRetainsMarker()
     {
-        var marker = OwnedMarker(VerifiedHardwareModels.MacBookPro14_3);
+        var marker = OwnedMarker("MacBookPro14,3");
         var ownershipStore = new TestFanOverrideOwnershipStore
         {
             Marker = marker
