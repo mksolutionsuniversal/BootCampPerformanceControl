@@ -73,7 +73,7 @@ This family already has a bounded production write path. Runtime permission must
 
 ### GlobalMaskFpe2
 
-Physically observed on a project Mac with:
+Physically observed on project hardware with:
 
 - dynamic `FNum`,
 - per-fan RPM values encoded as 2-byte `fpe2`,
@@ -84,9 +84,11 @@ Physical evidence confirms `fpe2` RPM scale 4 on the validated capture: `0x60DC 
 
 The bounded production path for this family is capability-gated and implements only Maximum Safe RPM plus Apple Auto release. It writes the proven `FS! ` masks only for one- and two-fan topologies, copies fresh exact `F{i}Mx` bytes to matching `F{i}Tg` keys, and verifies each transition by readback. Topologies above fan index 1 remain read-only because broader mask semantics have not been proven.
 
-The writer implementation and in-memory transport tests do not constitute physical write qualification. A controlled physical Maximum Safe RPM / Apple Auto round trip remains a separate manual validation step.
+On 2026-09-08, a controlled physical one-fan round trip on `MacBookPro12,1` verified the exact sequence `FS! 0000 -> 0001`, exact fresh `F0Mx 60DC -> F0Tg`, and `FS! 0001 -> 0000` with exact readback at every stage and final Apple Auto verification. The qualifier reported exactly three SMC write attempts and `PHYSICAL QUALIFICATION: PASS`.
 
-The crash-recovery implementation persists exact pre-write mode/target baselines and accepts only deterministic prefixes of BCPC's documented write ordering. Fake/in-memory restart tests cover those boundaries. Restore Apple Auto before downgrading from a live `GlobalMaskFpe2` override because older releases cannot represent this ownership family.
+That physical PASS qualifies the observed one-fan `GlobalMaskFpe2` mechanism. It does not physically qualify two-fan `FS! = 0003`, does not establish generic T1 support, and does not turn the validation model into a runtime whitelist. See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
+
+The crash-recovery implementation persists exact pre-write mode/target baselines and accepts only deterministic prefixes of BCPC's documented write ordering. Fake/in-memory restart tests cover those boundaries. Physical hard-crash recovery for `GlobalMaskFpe2` remains a separate validation boundary. Restore Apple Auto before downgrading from a live `GlobalMaskFpe2` override because older releases cannot represent this ownership family.
 
 ## Unknown fingerprints
 
