@@ -412,7 +412,10 @@ public sealed class CrystalIdeaFanExecutionSessionTests
             KeyInfoReadCount++;
 
             var key = DecodeKey(input.Span);
-            var register = _registers[key];
+            if (!_registers.TryGetValue(key, out var register))
+            {
+                return Array.Empty<byte>();
+            }
             var response = new byte[CrystalIdeaAppleSmcCodec.KeyInfoLength];
             response[0] = register.Length;
             Encoding.ASCII.GetBytes(register.Type, response.AsSpan(1, AppleSmcProtocol.KeyLength));
@@ -497,6 +500,15 @@ public sealed class CrystalIdeaFanExecutionSessionTests
         }
 
         public Task SaveNewAsync(
+            FanOverrideOwnershipMarker marker,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _marker = marker;
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceAsync(
             FanOverrideOwnershipMarker marker,
             CancellationToken cancellationToken)
         {

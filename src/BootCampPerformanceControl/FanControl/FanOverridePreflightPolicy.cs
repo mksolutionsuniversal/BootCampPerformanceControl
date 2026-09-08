@@ -17,18 +17,24 @@ internal sealed class FanOverridePreflightPolicy
                 "Fan override is blocked because the hardware safety gate is not satisfied.");
         }
 
-        var snapshot = capability.Snapshot;
-        if (snapshot.Fans.Any(fan => fan.Mode.GetUInt8() != 0))
+        IFanCapabilityFamilyStrategy strategy;
+        try
+        {
+            strategy = FanCapabilityFamilyStrategies.Get(capability.Family);
+        }
+        catch (InvalidOperationException)
         {
             return FanOverridePreparationResult.Blocked(
-                "Fan override is blocked because every fan must be in Apple Auto before this application can take ownership.");
+                "Fan override is blocked because write capability is not verified for the observed family.");
+        }
+
+        if (!strategy.IsAppleAuto(capability))
+        {
+            return FanOverridePreparationResult.Blocked(
+                "Fan override is blocked because Apple Auto must be active before this application can take ownership.");
         }
 
         return FanOverridePreparationResult.Allowed(
-            new FanMaximumSafeRpmPlan(
-                model,
-                snapshot.Fans.Select(fan => new FanMaximumSafeRpmTarget(
-                    fan.Index,
-                    fan.Maximum.GetFloat32()))));
+            strategy.CreateMaximumSafeRpmPlan(model, capability));
     }
 }

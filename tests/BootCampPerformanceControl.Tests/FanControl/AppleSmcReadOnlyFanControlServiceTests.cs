@@ -158,7 +158,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         Assert.Equal(0, controller.StopCount);
         Assert.Equal(1, transportFactory.OpenCount);
         Assert.Equal(1, transport.ProtocolCalls);
-        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
         Assert.True(transport.IsDisposed);
         Assert.Equal(1, controller.DisposeCount);
@@ -322,7 +322,10 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             KeyInfoCalls++;
-            var entry = _entries[key];
+            if (!_entries.TryGetValue(key, out var entry))
+            {
+                throw new SmcKeyNotFoundException(key);
+            }
             return Task.FromResult(new SmcKeyInfo(
                 key,
                 checked((byte)entry.Data.Length),

@@ -33,6 +33,10 @@ Classify capability family
 Run only the bounded writer implemented for that exact live fingerprint
 ```
 
+Optional key discovery records `Available`, `ConfirmedAbsent`, or `ReadFailed`. Only a positive backend missing-key result can satisfy an absence requirement. A failed IOCTL, access error, or malformed non-zero response remains `ReadFailed`, keeps its diagnostic reason, and prevents write-family classification.
+
+Transport qualification is a write gate, not a prerequisite for attempting safe diagnostic reads. When an unverified transport successfully serves the read requests, BCPC reports the discovered candidate fingerprint but performs zero writes because the hardware safety gate remains false.
+
 ## Dynamic topology
 
 `FNum` is the authority for discovered fan count.
@@ -69,7 +73,7 @@ This family already has a bounded production write path. Runtime permission must
 
 ### GlobalMaskFpe2
 
-Physically observed on a project Mac with:
+Physically observed on project hardware with:
 
 - dynamic `FNum`,
 - per-fan RPM values encoded as 2-byte `fpe2`,
@@ -78,7 +82,13 @@ Physically observed on a project Mac with:
 
 Physical evidence confirms `fpe2` RPM scale 4 on the validated capture: `0x60DC = 24796`, `24796 / 4 = 6199 RPM`.
 
-The production writer for this family must remain disabled until its bounded write/readback/rollback path is implemented and physically round-trip tested.
+The bounded production path for this family is capability-gated and implements only Maximum Safe RPM plus Apple Auto release. It writes the proven `FS! ` masks only for one- and two-fan topologies, copies fresh exact `F{i}Mx` bytes to matching `F{i}Tg` keys, and verifies each transition by readback. Topologies above fan index 1 remain read-only because broader mask semantics have not been proven.
+
+On 2026-09-08, a controlled physical one-fan round trip on `MacBookPro12,1` verified the exact sequence `FS! 0000 -> 0001`, exact fresh `F0Mx 60DC -> F0Tg`, and `FS! 0001 -> 0000` with exact readback at every stage and final Apple Auto verification. The qualifier reported exactly three SMC write attempts and `PHYSICAL QUALIFICATION: PASS`.
+
+That physical PASS qualifies the observed one-fan `GlobalMaskFpe2` mechanism. It does not physically qualify two-fan `FS! = 0003`, does not establish generic T1 support, and does not turn the validation model into a runtime whitelist. See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
+
+The crash-recovery implementation persists exact pre-write mode/target baselines and accepts only deterministic prefixes of BCPC's documented write ordering. Fake/in-memory restart tests cover those boundaries. Physical hard-crash recovery for `GlobalMaskFpe2` remains a separate validation boundary. Restore Apple Auto before downgrading from a live `GlobalMaskFpe2` override because older releases cannot represent this ownership family.
 
 ## Unknown fingerprints
 

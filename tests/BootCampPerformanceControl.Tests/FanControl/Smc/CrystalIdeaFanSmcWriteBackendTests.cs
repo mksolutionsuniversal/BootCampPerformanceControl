@@ -136,7 +136,6 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
     }
 
     [Theory]
-    [InlineData("FS! ")]
     [InlineData("F0Mx")]
     [InlineData("F0Ac")]
     [InlineData("F0Mn")]
@@ -163,6 +162,65 @@ public sealed class CrystalIdeaFanSmcWriteBackendTests
 
         Assert.Equal(new byte[] { 0x46, 0x39, 0x4D, 0x64, 0x01, 0x01 }, modeRequest);
         Assert.Equal(new byte[] { 0x46, 0x39, 0x54, 0x67, 0x04, 0, 0, 0, 0 }, targetRequest);
+    }
+
+    [Theory]
+    [InlineData(0x0001, 0x00, 0x01)]
+    [InlineData(0x0003, 0x00, 0x03)]
+    public async Task SetGlobalManualMaskAsync_WritesOnlyProvenBigEndianMasks(
+        ushort mask,
+        byte high,
+        byte low)
+    {
+        using var device = ExpectSingleWrite(
+            new byte[] { 0x46, 0x53, 0x21, 0x20, 0x02, high, low });
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
+
+        await backend.SetGlobalManualMaskAsync(mask, CancellationToken.None);
+
+        Assert.Equal(1, device.InvocationCount);
+    }
+
+    [Fact]
+    public async Task SetFpe2TargetPayloadAsync_CopiesExactFreshRawBytes()
+    {
+        using var device = ExpectSingleWrite(
+            new byte[] { 0x46, 0x30, 0x54, 0x67, 0x02, 0x60, 0xDC });
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
+
+        await backend.SetFpe2TargetPayloadAsync(
+            new FanIndex(0),
+            new byte[] { 0x60, 0xDC },
+            CancellationToken.None);
+
+        Assert.Equal(1, device.InvocationCount);
+    }
+
+    [Fact]
+    public async Task SetGlobalAppleAutoAsync_WritesOnlyZeroGlobalMask()
+    {
+        using var device = ExpectSingleWrite(
+            new byte[] { 0x46, 0x53, 0x21, 0x20, 0x02, 0x00, 0x00 });
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
+
+        await backend.SetGlobalAppleAutoAsync(CancellationToken.None);
+
+        Assert.Equal(1, device.InvocationCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(4)]
+    public async Task SetGlobalManualMaskAsync_RejectsUnprovenMasksBeforeDeviceAccess(ushort mask)
+    {
+        using var device = new FakeDeviceIoControlClient();
+        await using var backend = new CrystalIdeaFanSmcWriteBackend(device);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => backend.SetGlobalManualMaskAsync(mask, CancellationToken.None));
+
+        Assert.Equal(0, device.InvocationCount);
     }
 
     [Fact]

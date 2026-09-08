@@ -56,6 +56,54 @@ internal sealed class CrystalIdeaFanSmcWriteBackend :
         return WriteModeAsync(fan, 0, cancellationToken);
     }
 
+    public bool SupportsFamily(FanCapabilityFamily family)
+    {
+        return family is FanCapabilityFamily.PerFanModeFloat32
+            or FanCapabilityFamily.GlobalMaskFpe2;
+    }
+
+    public Task SetGlobalManualMaskAsync(
+        ushort mask,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (mask is not 0x0001 and not 0x0003)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(mask),
+                "Only the physically evidenced one-fan and two-fan global manual masks are permitted.");
+        }
+
+        Span<byte> data = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16BigEndian(data, mask);
+        WriteWhitelistedKey("FS! ", data);
+        return Task.CompletedTask;
+    }
+
+    public Task SetFpe2TargetPayloadAsync(
+        FanIndex fan,
+        ReadOnlyMemory<byte> exactPayload,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (exactPayload.Length != 2)
+        {
+            throw new ArgumentException(
+                "An fpe2 target payload must contain exactly two bytes.",
+                nameof(exactPayload));
+        }
+
+        WriteWhitelistedKey(GetTargetKey(fan), exactPayload.Span);
+        return Task.CompletedTask;
+    }
+
+    public Task SetGlobalAppleAutoAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        WriteWhitelistedKey("FS! ", [0, 0]);
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync()
     {
         _device.Dispose();

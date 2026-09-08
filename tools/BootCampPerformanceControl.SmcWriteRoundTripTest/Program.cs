@@ -261,14 +261,16 @@ static bool IsVerifiedMaximumState(
     FanControlCapabilityResult capability,
     ExpectedMaximumTargets expectedTargets)
 {
-    if (!capability.IsHardwareSafetyGateSatisfied || capability.Snapshot is null)
+    if (!capability.IsHardwareSafetyGateSatisfied ||
+        capability.Family != FanCapabilityFamily.PerFanModeFloat32 ||
+        capability.Snapshot is null)
     {
         return false;
     }
 
     var snapshot = capability.Snapshot;
-    return snapshot.Fans[0].Mode.GetUInt8() == 1 &&
-           snapshot.Fans[1].Mode.GetUInt8() == 1 &&
+    return snapshot.Fans[0].Mode!.GetUInt8() == 1 &&
+           snapshot.Fans[1].Mode!.GetUInt8() == 1 &&
            Math.Abs(snapshot.Fans[0].Maximum.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
            Math.Abs(snapshot.Fans[1].Maximum.GetFloat32() - expectedTargets.Fan1TargetRpm) <= 1f &&
            Math.Abs(snapshot.Fans[0].Target.GetFloat32() - expectedTargets.Fan0TargetRpm) <= 1f &&
@@ -278,8 +280,9 @@ static bool IsVerifiedMaximumState(
 static bool IsVerifiedAppleAutoState(FanControlCapabilityResult capability)
 {
     return capability.IsHardwareSafetyGateSatisfied &&
+           capability.Family == FanCapabilityFamily.PerFanModeFloat32 &&
            capability.Snapshot is not null &&
-           capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
+           capability.Snapshot.Fans.All(fan => fan.Mode!.GetUInt8() == 0);
 }
 
 static void PrintCapability(string label, FanControlCapabilityResult capability)
@@ -309,7 +312,7 @@ static void PrintCapability(string label, FanControlCapabilityResult capability)
             fan.Index.Value,
             fan.Actual.GetFloat32(),
             fan.Maximum.GetFloat32(),
-            fan.Mode.GetUInt8(),
+            fan.Mode?.GetUInt8().ToString(CultureInfo.InvariantCulture) ?? "unavailable",
             fan.Target.GetFloat32()));
     }
 }

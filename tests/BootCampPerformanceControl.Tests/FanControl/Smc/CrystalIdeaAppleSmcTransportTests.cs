@@ -53,6 +53,37 @@ public sealed class CrystalIdeaAppleSmcTransportTests
     }
 
     [Fact]
+    public async Task GetKeyInfoAsync_ZeroByteResponseIsConfirmedMissingKey()
+    {
+        using var device = new FakeDeviceIoControlClient
+        {
+            Handler = (_, _, _) => []
+        };
+        await using var transport = new CrystalIdeaAppleSmcTransport(device);
+
+        var exception = await Assert.ThrowsAsync<SmcKeyNotFoundException>(
+            () => transport.GetKeyInfoAsync("FS! ", CancellationToken.None));
+
+        Assert.Equal("FS! ", exception.Key);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(7)]
+    public async Task GetKeyInfoAsync_NonZeroMalformedResponseRemainsReadFailure(int length)
+    {
+        using var device = new FakeDeviceIoControlClient
+        {
+            Handler = (_, _, _) => new byte[length]
+        };
+        await using var transport = new CrystalIdeaAppleSmcTransport(device);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => transport.GetKeyInfoAsync("FS! ", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ReadKeyAsync_UsesConfirmedReadRequestAndFullOutputBuffer()
     {
         using var device = new FakeDeviceIoControlClient

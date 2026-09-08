@@ -435,8 +435,8 @@ internal sealed class GamingOptimisedApplyCoordinator
 
         try
         {
-            return capability.Snapshot.Fans.Count > 0 &&
-                   capability.Snapshot.Fans.All(fan => fan.Mode.GetUInt8() == 0);
+            return FanCapabilityFamilyStrategies.Get(capability.Family)
+                .IsAppleAuto(capability);
         }
         catch (InvalidOperationException)
         {

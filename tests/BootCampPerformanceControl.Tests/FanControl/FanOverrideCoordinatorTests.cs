@@ -27,8 +27,12 @@ public sealed class FanOverrideCoordinatorTests
         Assert.True(result.IsApplied);
         Assert.NotNull(result.Marker);
         Assert.Equal(FixedUtc, result.Marker.CreatedAtUtc);
-        Assert.Equal(new[] { "load", "save", "apply" }, events);
+        Assert.Equal(new[] { "load", "save", "apply", "replace" }, events);
         Assert.NotNull(store.Marker);
+        Assert.False(store.Marker.IsTransactionJournal);
+        Assert.NotNull(store.LastSavedMarker);
+        Assert.True(store.LastSavedMarker.IsTransactionJournal);
+        Assert.Equal(1, store.ReplaceCalls);
         Assert.Equal(1, writer.ApplyCalls);
     }
 
@@ -238,7 +242,8 @@ public sealed class FanOverrideCoordinatorTests
                     Float32("F0Ac", 2500f, 0x84),
                     UInt8("F0Md", 1, 0xD0),
                     Float32("F0Tg", maximum, 0xD4))
-            ]);
+            ],
+            SmcKeyObservation.ConfirmedAbsent("FS! "));
         var capability = new FanSafetyPolicy().Evaluate(
             model,
             SmcTransportProtocol.Mmio,
@@ -299,7 +304,8 @@ public sealed class FanOverrideCoordinatorTests
             IsHardwareSafetyGateSatisfied: true,
             Array.Empty<string>(),
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static SmcValue UInt8(string key, byte value, byte attributes)
@@ -327,7 +333,11 @@ public sealed class FanOverrideCoordinatorTests
 
         public FanOverrideOwnershipMarker? Marker { get; set; }
 
+        public FanOverrideOwnershipMarker? LastSavedMarker { get; private set; }
+
         public int SaveCalls { get; private set; }
+
+        public int ReplaceCalls { get; private set; }
 
         public int ClearCalls { get; private set; }
 
@@ -350,7 +360,24 @@ public sealed class FanOverrideCoordinatorTests
 
             SaveCalls++;
             Marker = marker;
+            LastSavedMarker = marker;
             _events?.Add("save");
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceAsync(
+            FanOverrideOwnershipMarker marker,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Marker is null)
+            {
+                throw new InvalidOperationException("Marker does not exist.");
+            }
+
+            ReplaceCalls++;
+            Marker = marker;
+            _events?.Add("replace");
             return Task.CompletedTask;
         }
 

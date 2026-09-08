@@ -46,6 +46,28 @@ public sealed class FanControllerTests
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Apple Auto)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Write control: Available (verified SMC capability family)", result.Status.DisplayText, StringComparison.Ordinal);
+        Assert.Contains("FS! : absent", result.Status.CapabilityDiagnostics);
+        Assert.Contains(result.Status.CapabilityDiagnostics, line =>
+            line.StartsWith("F0Mx: type='flt ';", StringComparison.Ordinal) &&
+            line.Contains("raw=", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_DistinguishesReadFailureFromConfirmedAbsence()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.FailKeyInfo("FS! ", new IOException("transient transport failure"));
+        var controller = CreateController(transport);
+
+        var result = await controller.ReadStatusAsync(
+            VerifiedHardwareModels.MacBookPro16_1,
+            CancellationToken.None);
+
+        Assert.False(result.Capability.IsHardwareSafetyGateSatisfied);
+        Assert.Contains(result.Status.CapabilityDiagnostics, line =>
+            line.Contains("FS! : read failed:", StringComparison.Ordinal) &&
+            line.Contains("transient transport failure", StringComparison.Ordinal));
+        Assert.DoesNotContain("FS! : absent", result.Status.CapabilityDiagnostics);
     }
 
     [Fact]
@@ -63,7 +85,7 @@ public sealed class FanControllerTests
         Assert.True(result.Capability.IsReadSupported);
         Assert.True(result.Capability.IsHardwareSafetyGateSatisfied);
         Assert.Contains("read-only monitoring verified", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
     }
 
@@ -87,7 +109,7 @@ public sealed class FanControllerTests
         Assert.Equal(FanOperatingMode.Manual, result.Status.Fans[1].Reading.Mode);
         Assert.Contains("Fan 0: 1840 / 5616 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
         Assert.Contains("Fan 1: 1691 / 5200 RPM (Manual)", result.Status.DisplayText, StringComparison.Ordinal);
-        Assert.Equal(9, transport.KeyInfoCalls);
+        Assert.Equal(12, transport.KeyInfoCalls);
         Assert.Equal(9, transport.ReadCalls);
     }
 
@@ -111,6 +133,39 @@ public sealed class FanControllerTests
         Assert.Contains("Write control: Maximum Safe RPM detected (Manual mode)", result.Status.DisplayText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ReadStatusAsync_GlobalMaskFpe2NormalizesRpmAndGlobalMode()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.ConfigureGlobalMaskFpe2(mask: 0x0001);
+        var controller = CreateController(transport);
+
+        var result = await controller.ReadStatusAsync("MacBookPro12,1", CancellationToken.None);
+
+        Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, result.Status.CapabilityFamily);
+        Assert.Equal(new FanReading(2305f, 6199f, FanOperatingMode.Manual), result.Status.Fans[0].Reading);
+        Assert.Equal(FanWriteControlState.ManualModeDetected, result.Status.WriteControlState);
+        Assert.Contains(result.Status.CapabilityDiagnostics, line =>
+            line.Contains("FS! ", StringComparison.Ordinal) &&
+            line.Contains("raw=0001", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadStatusAsync_PassiveTopologyIsSupportedAndNotApplicableForWrites()
+    {
+        await using var transport = new FakeSmcTransport();
+        transport.SetUInt8("FNum", 0, 0x80);
+        var controller = CreateController(transport);
+
+        var result = await controller.ReadStatusAsync("UnlistedIntelMac", CancellationToken.None);
+
+        Assert.True(result.Status.IsAvailable);
+        Assert.Equal(FanCapabilityFamily.Passive, result.Status.CapabilityFamily);
+        Assert.Equal(FanWriteControlState.NotAvailable, result.Status.WriteControlState);
+        Assert.Contains("passive/fanless topology", result.Status.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Not applicable", result.Status.WriteControlDisplayText, StringComparison.Ordinal);
+    }
+
     private static FanController CreateController(FakeSmcTransport transport)
     {
         return new FanController(
@@ -122,6 +177,7 @@ public sealed class FanControllerTests
     private sealed class FakeSmcTransport : ISmcTransport
     {
         private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Exception> _keyInfoFailures = new(StringComparer.Ordinal);
 
         public FakeSmcTransport()
         {
@@ -150,7 +206,15 @@ public sealed class FanControllerTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             KeyInfoCalls++;
-            var entry = _entries[key];
+            if (_keyInfoFailures.TryGetValue(key, out var failure))
+            {
+                throw failure;
+            }
+
+            if (!_entries.TryGetValue(key, out var entry))
+            {
+                throw new SmcKeyNotFoundException(key);
+            }
             return Task.FromResult(new SmcKeyInfo(
                 key,
                 checked((byte)entry.Raw.Length),
@@ -178,6 +242,38 @@ public sealed class FanControllerTests
         public void SetFloat32(string key, float value, byte attributes)
         {
             _entries[key] = new Entry("flt ", attributes, BitConverter.GetBytes(value));
+        }
+
+        public void FailKeyInfo(string key, Exception exception)
+        {
+            _keyInfoFailures[key] = exception;
+        }
+
+        public void ConfigureGlobalMaskFpe2(ushort mask)
+        {
+            _entries.Clear();
+            SetUInt8("FNum", 1, 0x80);
+            SetFpe2("F0Mn", 0x144C, 0xC0);
+            SetFpe2("F0Mx", 0x60DC, 0xC0);
+            SetFpe2("F0Ac", 0x2404, 0x90);
+            SetFpe2("F0Tg", 0x248C, 0xD0);
+            SetUInt16("FS! ", mask, 0xC0);
+        }
+
+        private void SetFpe2(string key, ushort raw, byte attributes)
+        {
+            _entries[key] = new Entry(
+                "fpe2",
+                attributes,
+                [checked((byte)(raw >> 8)), checked((byte)(raw & 0xFF))]);
+        }
+
+        private void SetUInt16(string key, ushort value, byte attributes)
+        {
+            _entries[key] = new Entry(
+                "ui16",
+                attributes,
+                [checked((byte)(value >> 8)), checked((byte)(value & 0xFF))]);
         }
 
         public ValueTask DisposeAsync()

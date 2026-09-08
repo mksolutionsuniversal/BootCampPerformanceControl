@@ -639,7 +639,8 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
             IsHardwareSafetyGateSatisfied: true,
             Failures: [],
             Protocol: SmcTransportProtocol.Mmio,
-            Snapshot: ValidFanSnapshot(fan0Mode, fan1Mode));
+            Snapshot: ValidFanSnapshot(fan0Mode, fan1Mode),
+            Family: FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static FanSmcSnapshot ValidFanSnapshot(

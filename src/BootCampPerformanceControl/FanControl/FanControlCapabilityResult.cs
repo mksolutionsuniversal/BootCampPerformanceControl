@@ -7,7 +7,8 @@ internal sealed record FanControlCapabilityResult(
     bool IsHardwareSafetyGateSatisfied,
     IReadOnlyList<string> Failures,
     SmcTransportProtocol? Protocol,
-    FanSmcSnapshot? Snapshot)
+    FanSmcSnapshot? Snapshot,
+    FanCapabilityFamily Family)
 {
     public static FanControlCapabilityResult Rejected(
         SmcTransportProtocol? protocol,
@@ -18,6 +19,7 @@ internal sealed record FanControlCapabilityResult(
             IsHardwareSafetyGateSatisfied: false,
             failures,
             protocol,
-            Snapshot: null);
+            Snapshot: null,
+            FanCapabilityFamily.Unknown);
     }
 }

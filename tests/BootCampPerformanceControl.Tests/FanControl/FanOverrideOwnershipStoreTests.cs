@@ -23,6 +23,7 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         Assert.NotNull(loaded);
         Assert.Equal(marker.Model, loaded.Model);
         Assert.Equal(marker.CreatedAtUtc, loaded.CreatedAtUtc);
+        Assert.Equal(marker.Family, loaded.Family);
         Assert.Equal(marker.Targets, loaded.Targets);
         Assert.True(File.Exists(GetMarkerPath()));
 
@@ -55,6 +56,47 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         Assert.Equal(original.Model, loaded.Model);
         Assert.Equal(original.CreatedAtUtc, loaded.CreatedAtUtc);
         Assert.Equal(original.Targets, loaded.Targets);
+    }
+
+    [Fact]
+    public async Task SaveLoad_SchemaVersion4TransactionJournalPreservesExactBaseline()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var journal = CreatePerFanJournal();
+
+        await store.SaveNewAsync(journal, CancellationToken.None);
+
+        using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath())))
+        {
+            Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(2, document.RootElement.GetProperty("baselineTargets").GetArrayLength());
+        }
+
+        var loaded = await store.LoadAsync(CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.True(loaded.IsTransactionJournal);
+        Assert.Equal(journal.Targets, loaded.Targets);
+        Assert.Equal(journal.BaselineTargets, loaded.BaselineTargets);
+        Assert.Null(loaded.BaselineGlobalModeMask);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_CompletedValidatedPerFanTransactionWritesLegacySchemaVersion1()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var journal = CreatePerFanJournal();
+        await store.SaveNewAsync(journal, CancellationToken.None);
+
+        await store.ReplaceAsync(
+            journal.ToFinalOwnershipMarker(),
+            CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
+        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.False(document.RootElement.TryGetProperty("baselineTargets", out _));
+        var loaded = await store.LoadAsync(CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.False(loaded.IsTransactionJournal);
     }
 
     [Fact]
@@ -116,6 +158,7 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
 
         Assert.NotNull(marker);
         Assert.Equal("MacBookPro16,1", marker.Model);
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, marker.Family);
         Assert.Equal(new[] { 0, 1 }, marker.Targets.Select(target => target.Index.Value));
         Assert.Equal(new[] { 5616f, 5200f }, marker.Targets.Select(target => target.ExpectedTargetRpm));
         Assert.Equal(
@@ -125,7 +168,31 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveNewAsync_WritesDynamicSchemaVersion2()
+    public async Task LoadAsync_SchemaVersion2IsInterpretedOnlyAsPerFanFamily()
+    {
+        Directory.CreateDirectory(_directory);
+        var json = """
+            {
+              "schemaVersion": 2,
+              "model": "Macmini8,1",
+              "targets": [
+                { "index": 0, "expectedTargetRpm": 2900 }
+              ],
+              "createdAtUtc": "2026-08-18T19:00:00+00:00"
+            }
+            """;
+        await File.WriteAllTextAsync(GetMarkerPath(), json);
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+
+        var marker = await store.LoadAsync(CancellationToken.None);
+
+        Assert.NotNull(marker);
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, marker.Family);
+        Assert.Null(marker.ExpectedGlobalModeMask);
+    }
+
+    [Fact]
+    public async Task SaveNewAsync_WritesFamilyAwareSchemaVersion3()
     {
         var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
         var marker = new FanOverrideOwnershipMarker(
@@ -140,7 +207,9 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         await store.SaveNewAsync(marker, CancellationToken.None);
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
-        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("PerFanModeFloat32", document.RootElement.GetProperty("capabilityFamily").GetString());
+        Assert.Equal(3, document.RootElement.GetProperty("reportedFanCount").GetInt32());
         var targets = document.RootElement.GetProperty("targets");
         Assert.Equal(3, targets.GetArrayLength());
         Assert.Equal(2, targets[2].GetProperty("index").GetInt32());
@@ -149,7 +218,7 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveNewAsync_ExactLegacyModelAndTwoFanTopology_WritesSchemaVersion1()
+    public async Task SaveNewAsync_ExactLegacyModelRetainsDowngradeCompatibleSchemaVersion1()
     {
         var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
 
@@ -159,11 +228,11 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(5616f, document.RootElement.GetProperty("fan0ExpectedTargetRpm").GetSingle());
         Assert.Equal(5200f, document.RootElement.GetProperty("fan1ExpectedTargetRpm").GetSingle());
-        Assert.False(document.RootElement.TryGetProperty("targets", out _));
+        Assert.False(document.RootElement.TryGetProperty("capabilityFamily", out _));
     }
 
     [Fact]
-    public async Task SaveNewAsync_OtherModelWithTwoFans_WritesSchemaVersion2()
+    public async Task SaveNewAsync_OtherModelWithTwoFansWritesSchemaVersion3()
     {
         var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
         var marker = new FanOverrideOwnershipMarker(
@@ -177,9 +246,34 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
         await store.SaveNewAsync(marker, CancellationToken.None);
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(GetMarkerPath()));
-        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(2, document.RootElement.GetProperty("targets").GetArrayLength());
         Assert.False(document.RootElement.TryGetProperty("fan0ExpectedTargetRpm", out _));
+    }
+
+    [Fact]
+    public async Task SaveLoad_GlobalMaskMarkerPreservesFamilyMaskTopologyAndExactTargets()
+    {
+        var store = new JsonFanOverrideOwnershipStore(_directory, new TestLogger());
+        var marker = new FanOverrideOwnershipMarker(
+            "MacBookPro12,1",
+            FanCapabilityFamily.GlobalMaskFpe2,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 6199f)
+                {
+                    ExpectedTargetRawHex = "60DC"
+                }
+            ],
+            new DateTimeOffset(2026, 9, 6, 12, 0, 0, TimeSpan.Zero),
+            expectedGlobalModeMask: 0x0001);
+
+        await store.SaveNewAsync(marker, CancellationToken.None);
+        var loaded = await store.LoadAsync(CancellationToken.None);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(FanCapabilityFamily.GlobalMaskFpe2, loaded.Family);
+        Assert.Equal((ushort)0x0001, loaded.ExpectedGlobalModeMask);
+        Assert.Equal("60DC", loaded.Targets[0].ExpectedTargetRawHex);
     }
 
     public void Dispose()
@@ -202,6 +296,38 @@ public sealed class FanOverrideOwnershipStoreTests : IDisposable
             5616f,
             5200f,
             new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
+    }
+
+    private static FanOverrideOwnershipMarker CreatePerFanJournal()
+    {
+        return new FanOverrideOwnershipMarker(
+            "MacBookPro16,1",
+            FanCapabilityFamily.PerFanModeFloat32,
+            [
+                new FanOverrideOwnershipTarget(new FanIndex(0), 5616f)
+                {
+                    ExpectedTargetRawHex = Convert.ToHexString(BitConverter.GetBytes(5616f))
+                },
+                new FanOverrideOwnershipTarget(new FanIndex(1), 5200f)
+                {
+                    ExpectedTargetRawHex = Convert.ToHexString(BitConverter.GetBytes(5200f))
+                }
+            ],
+            new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero),
+            expectedGlobalModeMask: null)
+        {
+            BaselineTargets =
+            [
+                new FanOverrideBaselineTarget(
+                    new FanIndex(0),
+                    Convert.ToHexString(BitConverter.GetBytes(1836f)),
+                    Mode: 0),
+                new FanOverrideBaselineTarget(
+                    new FanIndex(1),
+                    Convert.ToHexString(BitConverter.GetBytes(1700f)),
+                    Mode: 0)
+            ]
+        };
     }
 
     private sealed class TestLogger : IApplicationLogger

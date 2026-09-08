@@ -63,6 +63,10 @@ public sealed record FanControlStatus(
 
     public int? DiscoveredFanCount { get; init; }
 
+    public FanCapabilityFamily CapabilityFamily { get; init; } = FanCapabilityFamily.Unknown;
+
+    public IReadOnlyList<string> CapabilityDiagnostics { get; init; } = Array.Empty<string>();
+
     public bool IsAvailable => SafetyState == FanSafetyState.ReadOnlyVerified;
 
     // Physical Manual mode is observed hardware state, not proof of BCPC ownership.
@@ -112,7 +116,7 @@ public sealed record FanControlStatus(
     };
 
     public string DisplayText => IsAvailable
-        ? $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {FormatFansWithModes(Fans)} "
+        ? $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {FormatFansWithModes(Fans, CapabilityFamily)} "
             + $"Write control: {WriteControlDisplayText}."
         : $"Fan Control: {SafetyDisplayText.ToLowerInvariant()}. {Details}";
 
@@ -170,10 +174,14 @@ public sealed record FanControlStatus(
             fans.Select(fan => $"Fan {fan.Index}: {FormatMode(fan.Reading.Mode)}"));
     }
 
-    private static string FormatFansWithModes(IReadOnlyList<FanChannelReading> fans)
+    private static string FormatFansWithModes(
+        IReadOnlyList<FanChannelReading> fans,
+        FanCapabilityFamily family)
     {
         return fans.Count == 0
-            ? "No fans reported (passive topology)."
+            ? family == FanCapabilityFamily.Passive
+                ? "No controllable fans reported by AppleSMC (passive/fanless topology)."
+                : "Decoded fan readings unavailable; capability fingerprint retained for diagnostics."
             : string.Join(
                 "; ",
                 fans.Select(fan =>
@@ -192,6 +200,11 @@ public sealed record FanControlStatus(
 
     private string FormatUnavailableWriteControl()
     {
+        if (CapabilityFamily == FanCapabilityFamily.Passive)
+        {
+            return "Not applicable (passive/fanless topology)";
+        }
+
         if (SafetyState == FanSafetyState.UnsupportedModel)
         {
             return "Disabled (unsupported model)";

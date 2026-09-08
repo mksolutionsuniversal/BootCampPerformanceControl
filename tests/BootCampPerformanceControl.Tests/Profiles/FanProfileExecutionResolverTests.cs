@@ -109,7 +109,8 @@ public sealed class FanProfileExecutionResolverTests
                     Float32("F0Ac", 1200f, 0x84),
                     UInt8("F0Md", 0, 0xD0),
                     Float32("F0Tg", 1200f, 0xD4))
-            ]);
+            ],
+            SmcKeyObservation.ConfirmedAbsent("FS! "));
         var capability = new FanSafetyPolicy().Evaluate(
             "Macmini8,1",
             SmcTransportProtocol.Mmio,
@@ -260,7 +261,8 @@ public sealed class FanProfileExecutionResolverTests
             isHardwareSafetyGateSatisfied,
             [],
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static FanSmcSnapshot ValidSnapshot(
@@ -284,7 +286,8 @@ public sealed class FanProfileExecutionResolverTests
                     Float32("F1Ac", 1700f, 0x84),
                     UInt8("F1Md", fan1Mode, 0xD0),
                     Float32("F1Tg", 1700f, 0xD4))
-            ]);
+            ],
+            SmcKeyObservation.ConfirmedAbsent("FS! "));
     }
 
     private static SmcValue Float32(

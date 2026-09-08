@@ -50,6 +50,8 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("AppleSMC backend state: Running", result.Content);
         Assert.Contains("Transport: MMIO (protocol 1)", result.Content);
         Assert.Contains("FNum / discovered fan count: 2 / 2", result.Content);
+        Assert.Contains("Capability family: PerFanModeFloat32", result.Content);
+        Assert.Contains("F0Mx: type='flt '; len=4; attrs=0x85", result.Content);
         Assert.Contains("Fan safety state: Read-only monitoring verified", result.Content);
         Assert.Contains("Fan 0 RPM: 1840 / 5616 RPM", result.Content);
         Assert.Contains("Fan 1 RPM: 1691 / 5200 RPM", result.Content);
@@ -125,7 +127,13 @@ public sealed class CompatibilityReportServiceTests
             FanBackendState.Running,
             FanSafetyState.ReadOnlyVerified,
             [new FanChannelReading(0, new FanReading(1800f, 5600f, FanOperatingMode.AppleAuto))],
-            @"Details sent by bob@example.com from 10.0.0.2 COMPUTERNAME=PRIVATE-PC USERPROFILE=C:\Users\Bob");
+            @"Details sent by bob@example.com from 10.0.0.2 COMPUTERNAME=PRIVATE-PC USERPROFILE=C:\Users\Bob")
+        {
+            CapabilityDiagnostics =
+            [
+                @"F0Mx failure from bob@example.com at C:\Users\Bob\capture.txt"
+            ]
+        };
 
         var result = await service.GenerateAsync(fanStatus, CancellationToken.None);
 
@@ -262,7 +270,12 @@ public sealed class CompatibilityReportServiceTests
         {
             TransportDisplayText = "MMIO (protocol 1)",
             ReportedFanCount = 2,
-            DiscoveredFanCount = 2
+            DiscoveredFanCount = 2,
+            CapabilityFamily = FanCapabilityFamily.PerFanModeFloat32,
+            CapabilityDiagnostics =
+            [
+                "F0Mx: type='flt '; len=4; attrs=0x85; raw=00C0AF45; rpm=5616"
+            ]
         };
     }
 

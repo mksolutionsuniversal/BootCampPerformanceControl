@@ -18,8 +18,8 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 - **Current `main` development target:** `0.5.0-rc.2` — not tagged or published.
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
 - **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
-- **RC fan-control milestone:** dynamic topology plus capability-family T2-style fan-write eligibility.
-- **Physical fan-control validation:** end-to-end on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2).
+- **Current fan-control milestone:** dynamic topology plus bounded `PerFanModeFloat32` and `GlobalMaskFpe2` capability-family writers.
+- **Physical fan-control validation:** `MacBookPro16,1` end-to-end for `PerFanModeFloat32`; `MacBookPro12,1` one-fan write/readback/Apple Auto round trip PASS for `GlobalMaskFpe2`.
 
 Published `0.5.0-rc.1` identity:
 
@@ -64,11 +64,11 @@ On every `SupportedIntelMac`:
 
 Fan control is additive:
 
-- if the live AppleSMC backend matches the verified MMIO + `FNum` + per-fan FLT4 capability family and all ownership/safety checks pass, Gaming Optimised also applies `Maximum Safe RPM` to every discovered fan using fresh live `F{i}Mx` values;
+- if the live AppleSMC backend matches an exact bounded capability family and all ownership/safety checks pass, Gaming Optimised also applies `Maximum Safe RPM` to every discovered fan using fresh live `F{i}Mx` values;
 - if AppleSMC is missing, stopped, unsupported, reports `FNum = 0`, or the fans are already Manual without BCPC ownership, Gaming Optimised remains available as a CPU-only profile;
 - if fan state becomes ambiguous after BCPC has started hardware writes, the recovery context is retained and the operation fails closed rather than guessing.
 
-Only `MacBookPro16,1` has completed BCPC end-to-end physical validation for this production fan path so far. Other machines are release-candidate compatibility targets only when their live capability fingerprint passes the same guarded policy.
+`MacBookPro16,1` has completed BCPC end-to-end physical write validation for the `PerFanModeFloat32` family. `MacBookPro12,1` has completed the controlled one-fan `GlobalMaskFpe2` Maximum Safe RPM / Apple Auto write/readback round trip. Runtime permission is never granted by either model identifier, and the two-fan `GlobalMaskFpe2` path remains without BCPC-owned physical write qualification.
 
 ### Restore Original Settings
 
@@ -113,11 +113,15 @@ Primary validation machine:
 
 See [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md).
 
-### T1 fan writes remain blocked
+### GlobalMaskFpe2 capability family
 
-**MacBookPro14,3 — MacBook Pro 15-inch (2017), Apple T1**
+**MacBookPro12,1 — one-fan physical write qualification reference**
 
-Processor power-management behaviour has been observed, but its `fpe2` / global-mask fan family is not the verified T2-style family used by this RC. Production fan writes remain disabled pending independent T1 work.
+Physical evidence from `MacBookPro12,1` confirms the `fpe2` big-endian `/ 4` RPM encoding and the global `FS! ` mode authority. On 2026-09-08, the controlled qualifier verified `FS! 0000 -> 0001`, exact fresh `F0Mx 60DC -> F0Tg`, and `FS! 0001 -> 0000`, with exact readback at every stage and final Apple Auto verification.
+
+The writer and hard-crash recovery paths remain covered by fake/in-memory validation; physical hard-crash recovery for this family is still a separate validation boundary. The one-fan Maximum Safe RPM / Apple Auto round trip is physically qualified, while two-fan `FS! = 0003` still requires its own physical qualification. Restore Apple Auto with the current BCPC version before downgrading to a version that predates `GlobalMaskFpe2`; older marker schemas cannot represent global-mask ownership safely.
+
+See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
 
 ### Other Intel Macs
 
@@ -162,14 +166,15 @@ BCPC follows fail-closed rules for hardware-affecting operations:
 - verify expected current state before processor writes,
 - re-read fan capability immediately before fan writes,
 - require the exact verified runtime fan-family metadata rather than trusting a model name,
+- distinguish a backend-confirmed missing key from a failed key read; only confirmed absence can satisfy a family fingerprint,
 - derive fan targets from fresh live SMC maxima rather than hard-coded RPM values,
 - reject non-finite, non-positive or implausibly high maximum RPM data,
-- allow only whitelisted per-fan mode/target keys,
-- never use `FS!`, T1 `fpe2`, arbitrary SMC writes, minimum-RPM controls or a manual fan-speed slider in this RC,
+- allow only bounded family-specific per-fan mode/target keys and the proven global `FS! ` mode key,
+- never expose arbitrary SMC writes, minimum-RPM controls or a manual fan-speed slider,
 - verify hardware state after writes,
 - attempt Apple Auto compensation if the processor phase fails after fan takeover,
 - restore owned fans before processor settings,
-- retain recovery context across crashes,
+- persist an exact pre-write baseline transaction journal before hardware writes and retain recovery context across crashes,
 - never infer BCPC fan ownership from Manual mode alone,
 - never auto-start AppleSMC merely because a stale recovery marker exists,
 - preserve CPU-only Gaming when fan control is unavailable or safely declined,
@@ -229,6 +234,7 @@ The publish script creates a versioned self-contained `win-x64` directory, ZIP, 
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)
 - [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md)
+- [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md)
 - [Third-Party Software](THIRD_PARTY.md)
 - [Security Policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)

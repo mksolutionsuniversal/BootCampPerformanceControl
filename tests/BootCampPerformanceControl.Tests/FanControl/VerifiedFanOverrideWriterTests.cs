@@ -9,12 +9,7 @@ public sealed class VerifiedFanOverrideWriterTests
 {
     private const string Model = VerifiedHardwareModels.MacBookPro16_1;
     private static readonly FanMaximumSafeRpmPlan Plan =
-        new(
-            Model,
-            [
-                new FanMaximumSafeRpmTarget(new FanIndex(0), 5616f),
-                new FanMaximumSafeRpmTarget(new FanIndex(1), 5200f)
-            ]);
+        CreatePerFanPlan([5616f, 5200f], [1836f, 1700f]);
     private static readonly FanOverrideOwnershipMarker Marker =
         new(Model, 5616f, 5200f, new DateTimeOffset(2026, 8, 18, 19, 0, 0, TimeSpan.Zero));
 
@@ -55,9 +50,7 @@ public sealed class VerifiedFanOverrideWriterTests
     {
         var events = new List<string>();
         var maxima = new[] { 5616f, 5200f, 4800f };
-        var plan = new FanMaximumSafeRpmPlan(
-            Model,
-            maxima.Select((rpm, index) => new FanMaximumSafeRpmTarget(new FanIndex(index), rpm)));
+        var plan = CreatePerFanPlan(maxima, [1500f, 1500f, 1500f]);
         var probe = new SequenceProbe(
             events,
             CreateDynamicCapability(maxima, manualMaximum: false),
@@ -90,9 +83,7 @@ public sealed class VerifiedFanOverrideWriterTests
     {
         const string model = Model;
         var maxima = new[] { 2900f };
-        var plan = new FanMaximumSafeRpmPlan(
-            model,
-            [new FanMaximumSafeRpmTarget(new FanIndex(0), maxima[0])]);
+        var plan = CreatePerFanPlan(maxima, [1500f]);
         var applyEvents = new List<string>();
         var applyWriter = CreateWriter(
             new RecordingWriteBackend(applyEvents),
@@ -134,8 +125,8 @@ public sealed class VerifiedFanOverrideWriterTests
         var stalePlan = new FanMaximumSafeRpmPlan(
             Model,
             [
-                new FanMaximumSafeRpmTarget(new FanIndex(0), 5600f),
-                new FanMaximumSafeRpmTarget(new FanIndex(1), 5200f)
+                PerFanTarget(0, 5600f, 1836f),
+                PerFanTarget(1, 5200f, 1700f)
             ]);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -143,6 +134,150 @@ public sealed class VerifiedFanOverrideWriterTests
 
         Assert.Contains("changed", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(new[] { "probe" }, events);
+    }
+
+    [Fact]
+    public async Task ApplyMaximumSafeRpmAsync_UnknownFreshFingerprintIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var probe = new SequenceProbe(
+            events,
+            FanControlCapabilityResult.Rejected(
+                SmcTransportProtocol.Mmio,
+                "Write capability not verified."));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(Plan, CancellationToken.None));
+
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task ApplyMaximumSafeRpmAsync_UnverifiedTransportCandidateIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var diagnosticCandidate = CreateCapability() with
+        {
+            IsHardwareSafetyGateSatisfied = false,
+            Protocol = SmcTransportProtocol.Unknown,
+            Failures = ["MMIO (1) is required for writes."]
+        };
+        var writer = CreateWriter(
+            new RecordingWriteBackend(events),
+            new SequenceProbe(events, diagnosticCandidate));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(Plan, CancellationToken.None));
+
+        Assert.True(diagnosticCandidate.IsReadSupported);
+        Assert.Equal(FanCapabilityFamily.PerFanModeFloat32, diagnosticCandidate.Family);
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task ApplyMaximumSafeRpmAsync_GlobalModeReadFailureIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var readable = CreateCapability();
+        var failedSnapshot = new FanSmcSnapshot(
+            readable.Snapshot!.FanCount,
+            readable.Snapshot.Fans,
+            SmcKeyObservation.ReadFailed(
+                "FS! ",
+                new IOException("transient DeviceIoControl failure")));
+        var failedCapability = new FanSafetyPolicy().Evaluate(
+            Model,
+            SmcTransportProtocol.Mmio,
+            failedSnapshot);
+        var writer = CreateWriter(
+            new RecordingWriteBackend(events),
+            new SequenceProbe(events, failedCapability));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(Plan, CancellationToken.None));
+
+        Assert.Equal(FanCapabilityFamily.Unknown, failedCapability.Family);
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_ModeReadFailureIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var readable = CreateGlobalCapability([0x60DC], 0x0000, [0x248C]);
+        var fan = readable.Snapshot!.Fans[0];
+        var failedFan = new FanSmcChannelSnapshot(
+            fan.Index,
+            fan.Minimum,
+            fan.MaximumObservation,
+            fan.ActualObservation,
+            SmcKeyObservation.ReadFailed(
+                "F0Md",
+                new IOException("transient DeviceIoControl failure")),
+            fan.TargetObservation);
+        var failedCapability = new FanSafetyPolicy().Evaluate(
+            Model,
+            SmcTransportProtocol.Mmio,
+            new FanSmcSnapshot(
+                readable.Snapshot.FanCount,
+                [failedFan],
+                readable.Snapshot.GlobalMode));
+        var writer = CreateWriter(
+            new RecordingWriteBackend(events),
+            new SequenceProbe(events, failedCapability));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(
+                CreateGlobalPlan(0x60DC),
+                CancellationToken.None));
+
+        Assert.Equal(FanCapabilityFamily.Unknown, failedCapability.Family);
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task ApplyMaximumSafeRpmAsync_MalformedFreshMetadataIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var malformed = CreateCapability() with
+        {
+            IsReadSupported = false,
+            IsHardwareSafetyGateSatisfied = false,
+            Family = FanCapabilityFamily.Unknown,
+            Failures = ["F0Mx metadata mismatch."]
+        };
+        var writer = CreateWriter(
+            new RecordingWriteBackend(events),
+            new SequenceProbe(events, malformed));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(Plan, CancellationToken.None));
+
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_UnprovenTopologyIssuesZeroWrites()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC, 0x58DC, 0x50DC);
+        var unsupported = CreateGlobalCapability(
+            [0x60DC, 0x58DC, 0x50DC],
+            0x0000,
+            [0x248C, 0x248C, 0x248C]) with
+        {
+            IsHardwareSafetyGateSatisfied = false,
+            Failures = ["Write capability not verified for this topology."]
+        };
+        var writer = CreateWriter(
+            new RecordingWriteBackend(events),
+            new SequenceProbe(events, unsupported));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None));
+
+        Assert.Equal(["probe"], events);
     }
 
     [Fact]
@@ -346,6 +481,150 @@ public sealed class VerifiedFanOverrideWriterTests
         Assert.Equal("probe", events[^1]);
     }
 
+    [Fact]
+    public async Task GlobalMaskFpe2_OneFanWritesModeVerifiesThenCopiesFreshMaximumExactly()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0001, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0001, [0x60DC]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None);
+
+        Assert.Equal(
+            ["probe", "global:0001", "probe", "fpe2:Fan0:60DC", "probe"],
+            events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_TwoFansUsesOnlyProvenMaskAndExactPerFanPayloads()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC, 0x58DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0000, [0x248C, 0x248C]),
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0003, [0x248C, 0x248C]),
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0003, [0x60DC, 0x58DC]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None);
+
+        Assert.Equal(
+            [
+                "probe", "global:0003", "probe",
+                "fpe2:Fan0:60DC", "fpe2:Fan1:58DC", "probe"
+            ],
+            events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_FsReadbackFailureRollsBackBeforeAnyTargetWrite()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None));
+
+        Assert.Equal(
+            ["probe", "global:0001", "probe", "global:auto", "probe"],
+            events);
+        Assert.DoesNotContain(events, value => value.StartsWith("fpe2:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_TargetReadbackFailureTriggersGlobalAppleAutoRollback()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0001, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0001, [0x248C]),
+            CreateGlobalCapability([0x60DC], 0x0000, [0x248C]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None));
+
+        Assert.Contains("global:auto", events);
+        Assert.Equal("probe", events[^1]);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_PartialTargetFailureUsesNonCancellableGlobalRollback()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC, 0x58DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0000, [0x248C, 0x248C]),
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0003, [0x248C, 0x248C]),
+            CreateGlobalCapability([0x60DC, 0x58DC], 0x0000, [0x60DC, 0x248C]));
+        var backend = new RecordingWriteBackend(events)
+        {
+            ThrowOnEvent = "fpe2:Fan1:58DC"
+        };
+        var writer = CreateWriter(backend, probe);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None));
+
+        Assert.Equal(
+            [
+                "probe", "global:0003", "probe", "fpe2:Fan0:60DC", "fpe2:Fan1:58DC",
+                "global:auto", "probe"
+            ],
+            events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_FreshMaximumChangeBlocksBeforeAnyWrite()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC);
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60E0], 0x0000, [0x248C]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.ApplyMaximumSafeRpmAsync(plan, CancellationToken.None));
+
+        Assert.Equal(["probe"], events);
+    }
+
+    [Fact]
+    public async Task GlobalMaskFpe2_RestoreRelinquishesOnlyGlobalManualOwnership()
+    {
+        var events = new List<string>();
+        var plan = CreateGlobalPlan(0x60DC);
+        var marker = FanOverrideOwnershipMarker.FromPlan(
+            plan,
+            new DateTimeOffset(2026, 9, 6, 12, 0, 0, TimeSpan.Zero));
+        var probe = new SequenceProbe(
+            events,
+            CreateGlobalCapability([0x60DC], 0x0001, [0x60DC]),
+            CreateGlobalCapability([0x60DC], 0x0000, [0x60DC]));
+        var writer = CreateWriter(new RecordingWriteBackend(events), probe);
+
+        await writer.RestoreAppleAutoAsync(marker, CancellationToken.None);
+
+        Assert.Equal(["probe", "global:auto", "probe"], events);
+    }
+
     private static VerifiedFanOverrideWriter CreateWriter(
         IFanSmcWriteBackend backend,
         IFanCapabilityProbe probe)
@@ -358,6 +637,93 @@ public sealed class VerifiedFanOverrideWriterTests
             new TestLogger(),
             verificationAttempts: 1,
             verificationDelay: TimeSpan.Zero);
+    }
+
+    private static FanMaximumSafeRpmPlan CreateGlobalPlan(params ushort[] maxima)
+    {
+        return new FanMaximumSafeRpmPlan(
+            Model,
+            FanCapabilityFamily.GlobalMaskFpe2,
+            maxima.Select((raw, index) =>
+                new FanMaximumSafeRpmTarget(new FanIndex(index), raw / 4f)
+                {
+                    ExactTargetPayload = new[]
+                    {
+                        checked((byte)(raw >> 8)),
+                        checked((byte)(raw & 0xFF))
+                    },
+                    BaselineTargetPayload = new byte[] { 0x24, 0x8C }
+                }),
+            baselineGlobalModeMask: 0);
+    }
+
+    private static FanMaximumSafeRpmPlan CreatePerFanPlan(
+        IReadOnlyList<float> maxima,
+        IReadOnlyList<float> baselines)
+    {
+        return new FanMaximumSafeRpmPlan(
+            Model,
+            maxima.Select((rpm, index) => PerFanTarget(index, rpm, baselines[index])));
+    }
+
+    private static FanMaximumSafeRpmTarget PerFanTarget(
+        int index,
+        float maximum,
+        float baseline)
+    {
+        return new FanMaximumSafeRpmTarget(new FanIndex(index), maximum)
+        {
+            ExactTargetPayload = BitConverter.GetBytes(maximum),
+            BaselineTargetPayload = BitConverter.GetBytes(baseline),
+            BaselineMode = 0
+        };
+    }
+
+    private static FanControlCapabilityResult CreateGlobalCapability(
+        IReadOnlyList<ushort> maxima,
+        ushort mask,
+        IReadOnlyList<ushort> targets)
+    {
+        var fans = maxima.Select((maximum, index) =>
+        {
+            var fan = new FanIndex(index);
+            return new FanSmcChannelSnapshot(
+                fan,
+                Available(Fpe2(fan.GetSmcKey("Mn"), 0x144C, 0xC0)),
+                Available(Fpe2(fan.GetSmcKey("Mx"), maximum, 0xC0)),
+                Available(Fpe2(fan.GetSmcKey("Ac"), 0x2404, 0x90)),
+                SmcKeyObservation.ConfirmedAbsent(fan.GetSmcKey("Md")),
+                Available(Fpe2(fan.GetSmcKey("Tg"), targets[index], 0xD0)));
+        });
+        var snapshot = new FanSmcSnapshot(
+            UInt8("FNum", checked((byte)maxima.Count), 0x80),
+            fans,
+            Available(UInt16("FS! ", mask, 0xC0)));
+
+        return new FanControlCapabilityResult(
+            true,
+            true,
+            Array.Empty<string>(),
+            SmcTransportProtocol.Mmio,
+            snapshot,
+            FanCapabilityFamily.GlobalMaskFpe2);
+    }
+
+    private static SmcKeyObservation Available(SmcValue value) =>
+        SmcKeyObservation.Available(value);
+
+    private static SmcValue Fpe2(string key, ushort raw, byte attributes)
+    {
+        return new SmcValue(
+            new SmcKeyInfo(key, 2, "fpe2", attributes),
+            [checked((byte)(raw >> 8)), checked((byte)(raw & 0xFF))]);
+    }
+
+    private static SmcValue UInt16(string key, ushort value, byte attributes)
+    {
+        return new SmcValue(
+            new SmcKeyInfo(key, 2, "ui16", attributes),
+            [checked((byte)(value >> 8)), checked((byte)(value & 0xFF))]);
     }
 
     private static FanControlCapabilityResult CreateCapability(
@@ -382,7 +748,8 @@ public sealed class VerifiedFanOverrideWriterTests
             IsHardwareSafetyGateSatisfied: true,
             Array.Empty<string>(),
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static FanControlCapabilityResult CreateDynamicCapability(
@@ -408,7 +775,8 @@ public sealed class VerifiedFanOverrideWriterTests
             IsHardwareSafetyGateSatisfied: true,
             Array.Empty<string>(),
             SmcTransportProtocol.Mmio,
-            snapshot);
+            snapshot,
+            FanCapabilityFamily.PerFanModeFloat32);
     }
 
     private static SmcValue UInt8(string key, byte value, byte attributes)
@@ -469,6 +837,10 @@ public sealed class VerifiedFanOverrideWriterTests
 
         public string? ThrowOnEvent { get; init; }
 
+        public bool SupportsFamily(FanCapabilityFamily family) =>
+            family is FanCapabilityFamily.PerFanModeFloat32
+                or FanCapabilityFamily.GlobalMaskFpe2;
+
         public Task SetManualModeAsync(
             FanIndex fan,
             CancellationToken cancellationToken)
@@ -494,6 +866,32 @@ public sealed class VerifiedFanOverrideWriterTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Record($"auto:{fan}");
+            return Task.CompletedTask;
+        }
+
+        public Task SetGlobalManualMaskAsync(
+            ushort mask,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Record($"global:{mask:X4}");
+            return Task.CompletedTask;
+        }
+
+        public Task SetFpe2TargetPayloadAsync(
+            FanIndex fan,
+            ReadOnlyMemory<byte> exactPayload,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Record($"fpe2:{fan}:{Convert.ToHexString(exactPayload.Span)}");
+            return Task.CompletedTask;
+        }
+
+        public Task SetGlobalAppleAutoAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Record("global:auto");
             return Task.CompletedTask;
         }
 

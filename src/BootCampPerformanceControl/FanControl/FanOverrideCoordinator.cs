@@ -51,7 +51,7 @@ internal sealed class FanOverrideCoordinator : IFanOverrideCoordinator
                 "Fan override is blocked because an ownership marker already exists and must be recovered first.");
         }
 
-        var marker = FanOverrideOwnershipMarker.FromPlan(
+        var marker = FanOverrideOwnershipMarker.CreateTransactionJournal(
             preparation.Plan,
             _timeProvider.GetUtcNow());
 
@@ -67,9 +67,14 @@ internal sealed class FanOverrideCoordinator : IFanOverrideCoordinator
                 .ApplyMaximumSafeRpmAsync(preparation.Plan, cancellationToken)
                 .ConfigureAwait(false);
 
+            var finalMarker = marker.ToFinalOwnershipMarker();
+            await _ownershipStore
+                .ReplaceAsync(finalMarker, CancellationToken.None)
+                .ConfigureAwait(false);
+
             _logger.Info(
                 $"Fan override writer completed for model {model}. Ownership marker remains active until Apple Auto is restored.");
-            return FanOverrideExecutionResult.Applied(marker);
+            return FanOverrideExecutionResult.Applied(finalMarker);
         }
         catch (OperationCanceledException)
         {
