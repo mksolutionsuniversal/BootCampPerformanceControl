@@ -88,8 +88,7 @@ public partial class App : System.Windows.Application
         {
             logger.Info("Elevated AppleSMC activation helper started.");
 
-            var hardwareDetectionService = new HardwareDetectionService(
-                new ModelSupportRegistry());
+            var hardwareDetectionService = new HardwareDetectionService();
             var helper = new AppleSmcBackendActivationHelper(
                 hardwareDetectionService,
                 new FanSafetyPolicy(),

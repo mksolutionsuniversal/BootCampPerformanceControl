@@ -45,14 +45,9 @@
             <TextBlock Text="info@mkus.co.uk"
                        Style="{StaticResource BodyTextStyle}" />
 
-            <TextBlock Text="Performance-validated model:"
-                       Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="MacBookPro16,1"
-                       Style="{StaticResource BodyTextStyle}" />
-
             <TextBlock Text="Fan control:"
                        Style="{StaticResource SectionHeadingStyle}" />
-            <TextBlock Text="Fan write control is available only when the live AppleSMC interface matches an exact bounded capability family. Physical model validation is tracked separately from runtime capability."
+            <TextBlock Text="Physical validation records are evidence for observed mechanisms, not runtime permission lists. Fan write control is available only when the live AppleSMC interface matches an exact bounded capability family."
                        Style="{StaticResource BodyTextStyle}"
                        Margin="0,0,0,16" />
         </StackPanel>

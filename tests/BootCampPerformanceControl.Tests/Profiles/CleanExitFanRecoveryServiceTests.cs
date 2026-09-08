@@ -68,7 +68,7 @@ public sealed class CleanExitFanRecoveryServiceTests
     [Fact]
     public async Task RestoreOwnedFansAsync_MarkerModelMismatch_BlocksAndRetainsMarker()
     {
-        var marker = OwnedMarker(VerifiedHardwareModels.MacBookPro14_3);
+        var marker = OwnedMarker("MacBookPro14,3");
         var ownershipStore = new TestFanOverrideOwnershipStore
         {
             Marker = marker
@@ -201,8 +201,7 @@ public sealed class CleanExitFanRecoveryServiceTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private sealed class StubHardwareDetectionService : IHardwareDetectionService

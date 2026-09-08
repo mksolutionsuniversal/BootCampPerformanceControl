@@ -77,7 +77,7 @@ public sealed class FanControllerTests
         var controller = CreateController(transport);
 
         var result = await controller.ReadStatusAsync(
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             CancellationToken.None);
 
         Assert.True(result.Status.IsAvailable);

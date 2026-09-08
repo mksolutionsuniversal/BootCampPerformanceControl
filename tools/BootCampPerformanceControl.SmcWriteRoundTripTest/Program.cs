@@ -23,7 +23,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 try
 {
-    var hardwareDetection = new HardwareDetectionService(new ModelSupportRegistry());
+    var hardwareDetection = new HardwareDetectionService();
     var hardware = await hardwareDetection.DetectAsync(CancellationToken.None);
     var model = hardware.ComputerSystem.Model;
 

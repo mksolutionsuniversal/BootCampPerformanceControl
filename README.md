@@ -127,7 +127,7 @@ See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBA
 
 The processor Gaming profile is available on `SupportedIntelMac` systems. Fan-write eligibility is not granted merely because a machine is an Intel Mac or is believed to contain T2.
 
-`0.5.0-rc.1` requires the fresh runtime AppleSMC fingerprint documented in [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) and [Fan Control](docs/FAN-CONTROL.md). A machine that passes that family gate may be eligible for writes even if its model is not individually whitelisted, but that is not a claim of physical validation for that model.
+Current development builds determine `SupportedIntelMac` from Apple hardware plus an Intel CPU; the exact model identifier does not decide normal processor-profile eligibility. Fan writes separately require the fresh runtime AppleSMC fingerprint documented in [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) and [Fan Control](docs/FAN-CONTROL.md). Physical validation records are evidence for the observed capability mechanisms, not runtime permission lists.
 
 ## Fan-control dependency: Macs Fan Control 1.5.16
 

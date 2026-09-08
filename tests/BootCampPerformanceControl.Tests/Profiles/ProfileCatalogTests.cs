@@ -13,8 +13,7 @@ public sealed class ProfileCatalogTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
 
@@ -45,14 +44,13 @@ public sealed class ProfileCatalogTests
     }
 
     [Fact]
-    public void SupportedIntelMacNotIndividuallyTested_ExposesGamingOptimisedAndRestoreProfiles()
+    public void UnknownSupportedIntelMac_ExposesGamingOptimisedAndRestoreProfiles()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro99,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported Intel Mac.");
+            string.Empty);
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
 
@@ -70,7 +68,6 @@ public sealed class ProfileCatalogTests
             "Manufacturer",
             "Model",
             platformSupport,
-            ModelValidationLevel.NotIndividuallyTested,
             "Unsupported platform.");
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
@@ -86,8 +83,7 @@ public sealed class ProfileCatalogTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
         var gaming = Assert.Single(profiles, profile => profile.Id == "gaming-optimised");
@@ -110,8 +106,7 @@ public sealed class ProfileCatalogTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
         var restore = Assert.Single(profiles, profile => profile.Id == "restore");
@@ -128,10 +123,9 @@ public sealed class ProfileCatalogTests
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported 14,3.");
+            string.Empty);
 
         var profiles = new ProfileCatalog().GetProfiles(verification);
         var gaming = Assert.Single(profiles, profile => profile.Id == "gaming-optimised");

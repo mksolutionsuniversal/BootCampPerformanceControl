@@ -4,7 +4,6 @@ public sealed record ModelVerificationResult(
     string Manufacturer,
     string Model,
     PlatformSupportStatus PlatformSupport,
-    ModelValidationLevel ValidationLevel,
     string Message)
 {
     public bool IsApple => PlatformSupport == PlatformSupportStatus.SupportedIntelMac
@@ -20,7 +19,6 @@ public sealed record ModelVerificationResult(
             "Unknown",
             "Unknown",
             PlatformSupportStatus.DetectionIncomplete,
-            ModelValidationLevel.NotIndividuallyTested,
             "Hardware has not been detected yet.");
     }
 }

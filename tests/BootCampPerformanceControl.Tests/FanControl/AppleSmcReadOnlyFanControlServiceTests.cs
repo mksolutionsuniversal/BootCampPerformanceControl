@@ -19,7 +19,7 @@ public sealed class AppleSmcReadOnlyFanControlServiceTests
         var service = CreateService(() => controller, transportFactory);
 
         var status = await service.ReadStatusAsync(
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             CancellationToken.None);
 
         Assert.Equal(FanBackendState.Running, status.BackendState);

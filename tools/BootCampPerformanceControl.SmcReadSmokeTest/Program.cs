@@ -11,7 +11,7 @@ Console.WriteLine();
 
 try
 {
-    var hardwareDetection = new HardwareDetectionService(new ModelSupportRegistry());
+    var hardwareDetection = new HardwareDetectionService();
     var hardware = await hardwareDetection.DetectAsync(CancellationToken.None);
     var verification = hardwareDetection.VerifyModel(hardware);
     var model = verification.Model;
@@ -19,7 +19,6 @@ try
     Console.WriteLine($"Manufacturer: {verification.Manufacturer}");
     Console.WriteLine($"Model:        {model}");
     Console.WriteLine($"Platform:     {verification.PlatformSupport}");
-    Console.WriteLine($"Validation:   {verification.ValidationLevel}");
 
     if (!verification.IsSupportedIntelMac)
     {

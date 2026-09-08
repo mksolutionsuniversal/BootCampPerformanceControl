@@ -23,7 +23,7 @@ public sealed class GamingOptimisedRestoreCoordinatorTests
         var coordinator = CreateCoordinator(power, sessionFactory);
 
         var result = await coordinator.RestoreAsync(
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);

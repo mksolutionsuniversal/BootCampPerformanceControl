@@ -150,8 +150,7 @@ public sealed class GamingOptimisedFanResumeServiceTests
             "Apple Inc.",
             "Macmini8,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported Intel Mac in test.");
+            string.Empty);
 
         public Task<HardwareSnapshot> DetectAsync(CancellationToken cancellationToken)
         {

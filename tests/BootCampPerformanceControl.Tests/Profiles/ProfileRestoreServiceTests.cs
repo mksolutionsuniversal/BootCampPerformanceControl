@@ -81,10 +81,9 @@ public sealed class ProfileRestoreServiceTests
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro14,3",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported 14,3.");
+            string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);
         var power = new FakePowerManagementService();
         var sessionFactory = new TestFanExecutionSessionFactory();
@@ -293,8 +292,7 @@ public sealed class ProfileRestoreServiceTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private static TestFanOverrideOwnershipStore OwnershipMarker()

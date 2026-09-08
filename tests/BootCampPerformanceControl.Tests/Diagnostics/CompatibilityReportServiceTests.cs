@@ -44,8 +44,12 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("PERFBOOSTMODE DC: 0", result.Content);
         Assert.Contains("Processor state readable: Yes", result.Content);
         Assert.Contains("Gaming Optimised eligibility: Yes", result.Content);
-        Assert.Contains("Model validation level: PerformanceValidated", result.Content);
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
+        Assert.DoesNotContain("Model validation", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Validation details", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("individually tested", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PerformanceValidated", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("NotIndividuallyTested", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Original Restore snapshot present: Yes", result.Content);
         Assert.Contains("AppleSMC backend state: Running", result.Content);
         Assert.Contains("Transport: MMIO (protocol 1)", result.Content);
@@ -58,6 +62,23 @@ public sealed class CompatibilityReportServiceTests
         Assert.Contains("Mode: Apple Auto", result.Content);
         Assert.Contains("Write control state: Available (verified SMC capability family)", result.Content);
         Assert.Contains("Fan status/details: Verified in test.", result.Content);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithUnsupportedNonAppleHardware_RetainsPlatformFailureDetails()
+    {
+        var service = CreateService(
+            VerifiedHardwareSnapshot(manufacturer: "PC Manufacturer", model: "Generic PC"));
+
+        var result = await service.GenerateAsync(FanControlStatus.NotChecked, CancellationToken.None);
+
+        Assert.Contains("Mac model identifier: Generic PC", result.Content);
+        Assert.Contains("Platform support: UnsupportedNonApple", result.Content);
+        Assert.Contains(
+            "Platform details: BootCamp Performance Control requires an Apple Mac",
+            result.Content);
+        Assert.Contains("Gaming Optimised eligibility: No", result.Content);
+        Assert.Contains("Fan compatibility", result.Content);
     }
 
     [Fact]
@@ -291,7 +312,7 @@ public sealed class CompatibilityReportServiceTests
 
     private sealed class FakeHardwareDetectionService : IHardwareDetectionService
     {
-        private readonly HardwareDetectionService _hardwareDetectionService = new(new ModelSupportRegistry());
+        private readonly HardwareDetectionService _hardwareDetectionService = new();
         private readonly HardwareSnapshot _snapshot;
 
         public FakeHardwareDetectionService(HardwareSnapshot snapshot)

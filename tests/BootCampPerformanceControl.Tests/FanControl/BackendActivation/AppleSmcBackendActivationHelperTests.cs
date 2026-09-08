@@ -15,7 +15,6 @@ public sealed class AppleSmcBackendActivationHelperTests
                 "Unknown",
                 VerifiedHardwareModels.MacBookPro16_1,
                 PlatformSupportStatus.DetectionIncomplete,
-                ModelValidationLevel.NotIndividuallyTested,
                 "Hardware detection incomplete."),
             activator);
 
@@ -35,7 +34,7 @@ public sealed class AppleSmcBackendActivationHelperTests
                 "Running.")
         };
         var helper = CreateHelper(
-            SupportedIntelMac(VerifiedHardwareModels.MacBookPro14_3),
+            SupportedIntelMac("MacBookPro14,3"),
             activator);
 
         var result = await helper.RunAsync(CancellationToken.None);
@@ -121,8 +120,7 @@ public sealed class AppleSmcBackendActivationHelperTests
             "Apple Inc.",
             model,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Supported.");
+            string.Empty);
     }
 
     private sealed class FakeHardwareDetectionService : IHardwareDetectionService

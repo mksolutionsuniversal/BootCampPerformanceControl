@@ -30,7 +30,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(
                 new ProcessorPowerProfileTarget(100, 100, 2, 2, ProfileUnspecifiedValueSource.None)),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
@@ -64,7 +64,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Equal(1, power.ReadCurrentStateCallCount);
@@ -95,7 +95,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Same(openException, exception);
@@ -124,7 +124,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -152,7 +152,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -177,7 +177,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -201,7 +201,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -231,7 +231,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -253,7 +253,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -277,7 +277,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -314,7 +314,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -345,7 +345,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Same(cleanupException, exception);
@@ -383,7 +383,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         var compensation = Assert.IsType<GamingOptimisedApplyCompensationException>(
@@ -412,7 +412,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Same(cleanupException, exception);
@@ -441,7 +441,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 cancellationSource.Token));
 
         Assert.Equal(0, power.GuardedApplyCallCount);
@@ -489,7 +489,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<GamingOptimisedApplyCompensationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 cancellationSource.Token));
 
         Assert.Same(originalException, exception.OperationException);
@@ -522,7 +522,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.True(result.IsSuccessful);
@@ -559,7 +559,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
@@ -615,7 +615,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Null(exception.OperationException);
@@ -653,7 +653,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
@@ -698,7 +698,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<FanExecutionSessionCleanupException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Null(exception.OperationException);
@@ -736,7 +736,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
@@ -766,7 +766,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         var exception = await Assert.ThrowsAsync<GamingOptimisedApplyCompensationException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 CancellationToken.None));
 
         Assert.Same(recoveryException, exception.CompensationException);
@@ -792,7 +792,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.Equal(
@@ -818,7 +818,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => coordinator.ApplyAsync(
                 GamingOptimisedProfile(),
-                PerformanceValidatedMacBookPro16_1(),
+                SupportedMacBookPro16_1(),
                 cancellationSource.Token));
 
         Assert.Equal(1, power.GuardedApplyCallCount);
@@ -861,7 +861,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         var result = await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.False(result.IsSuccessful);
@@ -887,7 +887,7 @@ public sealed class GamingOptimisedApplyCoordinatorTests
 
         await coordinator.ApplyAsync(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             CancellationToken.None);
 
         Assert.Same(expectedStateBefore, power.LastExpectedStateBefore);
@@ -930,14 +930,13 @@ public sealed class GamingOptimisedApplyCoordinatorTests
             "Test Gaming Optimised profile.");
     }
 
-    private static ModelVerificationResult PerformanceValidatedMacBookPro16_1()
+    private static ModelVerificationResult SupportedMacBookPro16_1()
     {
         return new ModelVerificationResult(
             "Apple Inc.",
             Model,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Performance validated.");
+            string.Empty);
     }
 
     private static ProcessorPowerSettings GamingOptimisedSettings()

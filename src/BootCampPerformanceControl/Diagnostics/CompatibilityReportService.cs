@@ -225,12 +225,15 @@ public sealed class CompatibilityReportService : ICompatibilityReportService
         builder.AppendLine($"PERFBOOSTMODE DC: {FormatUInt32(powerState?.BoostModeDc)}");
         builder.AppendLine($"Processor state readable: {FormatYesNo(profileSupport.PowerStateReadable)}");
         builder.AppendLine();
-        builder.AppendLine("Power validation");
-        builder.AppendLine("----------------");
+        builder.AppendLine("Platform & profile support");
+        builder.AppendLine("--------------------------");
         builder.AppendLine($"Gaming Optimised eligibility: {FormatYesNo(profileSupport.GamingOptimisedEligible)}");
-        builder.AppendLine($"Model validation level: {verificationResult.ValidationLevel}");
         builder.AppendLine($"Platform support: {verificationResult.PlatformSupport}");
-        builder.AppendLine($"Validation details: {FormatValue(verificationResult.Message)}");
+        if (!verificationResult.IsSupportedIntelMac
+            && !string.IsNullOrWhiteSpace(verificationResult.Message))
+        {
+            builder.AppendLine($"Platform details: {FormatValue(verificationResult.Message)}");
+        }
         builder.AppendLine();
         builder.AppendLine("Restore");
         builder.AppendLine("-------");
