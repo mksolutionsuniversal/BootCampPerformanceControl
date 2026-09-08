@@ -7,9 +7,9 @@ BootCamp Performance Control (BCPC) is an independent open-source project by MK 
 The same third-party distribution boundary applies to:
 
 - stable `0.4.0`, and
-- release candidate `0.5.0-rc.1`.
+- release candidate `0.5.0-rc.2`.
 
-Neither release line bundles a production AppleSMC driver. `0.5.0-rc.1` broadens runtime fan-write eligibility through a guarded live capability-family policy, but that does not change the legal/distribution boundary described below.
+Neither release line bundles a production AppleSMC driver. `0.5.0-rc.2` uses guarded live `PerFanModeFloat32` and bounded `GlobalMaskFpe2` capability-family policies, but that does not change the legal/distribution boundary described below.
 
 ## Macs Fan Control / CrystalIDEA
 
@@ -37,7 +37,7 @@ Macs Fan Control and CrystalIDEA are independent third-party products and are no
 
 The repository contains an independently authored experimental KMDF research driver under `drivers/BootCampSmc/`.
 
-That research code is part of the BCPC source repository, but `BootCampSmc.sys` is **not** the production fan-control dependency for stable `0.4.0` or release candidate `0.5.0-rc.1` and is not included in their published ZIP artifacts.
+That research code is part of the BCPC source repository, but `BootCampSmc.sys` is **not** the production fan-control dependency for stable `0.4.0` or release candidate `0.5.0-rc.2`, is not included in their published ZIP artifacts and is not claimed as physically write-qualified.
 
 Its current closed physical research checkpoint is Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata discovery on `MacBookPro16,1`.
 

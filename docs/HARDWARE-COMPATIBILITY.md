@@ -7,12 +7,11 @@ Processor-profile availability and fan-write availability are intentionally sepa
 ## Current release status
 
 - Stable `0.4.0`: exact `MacBookPro16,1` production fan-write gate.
-- Release candidate `0.5.0-rc.1`: dynamic fan topology plus verified T2-style SMC capability-family write gate.
-- Current `main` development runtime: mechanism-based `PerFanModeFloat32` and bounded `GlobalMaskFpe2` writers selected from exact live capability fingerprints.
-- `0.5.0-rc.1` is published as a GitHub pre-release.
+- Release candidate `0.5.0-rc.2`: Apple-hardware-plus-Intel-CPU platform eligibility, dynamic fan topology, and mechanism-based `PerFanModeFloat32` and bounded `GlobalMaskFpe2` writers selected from exact live capability fingerprints.
+- `0.5.0-rc.2` is prepared as the current release candidate for controlled compatibility testing.
 - Physical fan-write validation is completed on `MacBookPro16,1` for `PerFanModeFloat32` and on `MacBookPro12,1` for the one-fan `GlobalMaskFpe2` write/readback/Apple Auto round trip.
 
-Published RC identity:
+Previous published RC identity:
 
 ```text
 Tag:           v0.5.0-rc.1
@@ -24,13 +23,13 @@ Tests:         589 / 589 PASS
 
 Stable `0.4.0` remains unchanged and remains the latest stable release.
 
-Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is **not** a statement that the detected Mac model has been physically tested by the BCPC project.
+Passing the `0.5.0-rc.2` family gate is a runtime compatibility decision. It is **not** a statement that the detected Mac model has been physically tested by the BCPC project.
 
-Current development builds determine normal `SupportedIntelMac` eligibility directly from detected Apple hardware and an Intel CPU. Exact model identity remains useful hardware/reporting context, but it is neither a processor-profile whitelist nor a fan-write permission gate.
+`0.5.0-rc.2` determines normal `SupportedIntelMac` eligibility directly from detected Apple hardware and an Intel CPU. Exact model identity remains useful hardware/reporting context, but it is neither a processor-profile whitelist nor a fan-write permission gate.
 
 ## Compatibility matrix
 
-| Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Physical evidence |
+| Model / observed family | Processor profile | Fan monitoring | `0.5.0-rc.2` fan writes | Crash fan recovery | Physical evidence |
 |---|---:|---:|---:|---:|---|
 | `MacBookPro16,1` / `PerFanModeFloat32` | Yes | Yes | Capability-qualified | Yes | **Physically verified end-to-end** |
 | `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Implemented with v4 journal; fake restart-tested | **One-fan physical write/readback/Apple Auto round trip PASS** |
@@ -121,7 +120,7 @@ A new BCPC fan takeover additionally requires:
 
 If fans are already Manual without valid BCPC ownership, BCPC does not silently take control. The CPU Gaming profile remains available independently.
 
-## MacBookPro16,1 — physically verified reference path
+## MacBookPro16,1 — PerFanModeFloat32 physical evidence
 
 Primary physical validation machine:
 
@@ -246,7 +245,7 @@ Physical one-fan `GlobalMaskFpe2` write/readback/Apple Auto qualification is now
 
 Hard-crash recovery of the implementation's deterministic partial write prefixes remains covered by fake/in-memory restart tests. Physical hard-crash recovery for `GlobalMaskFpe2` has not yet been exercised and is not implied by the short controlled round trip.
 
-## What “T2 family support” means in `0.5.0-rc.1`
+## What capability-family support means in `0.5.0-rc.2`
 
 It means BCPC can enable one guarded writer only when the **live** AppleSMC interface exactly matches that writer's verified mechanism schema and runtime state.
 
@@ -294,7 +293,7 @@ The repository also contains an independently authored experimental KMDF researc
 
 Its physically completed T2 research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
 
-This research driver is not the production fan-control dependency for `0.5.0-rc.1`, is not included in release packages, and must not be interpreted as generic T1/T2 support.
+This research driver is not the production fan-control dependency for `0.5.0-rc.2`, is not included in release packages, and is not claimed as physically write-qualified or as generic T1/T2 support.
 
 ## Safe validation order for another Mac
 

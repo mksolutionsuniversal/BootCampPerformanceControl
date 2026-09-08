@@ -9,19 +9,18 @@ BootCamp Performance Control (BCPC) is an open-source Windows utility for Intel 
 
 Its goal is to reduce unnecessary heat and thermal throttling using conservative Windows processor power management and guarded Apple SMC fan control when a verified runtime capability family is present.
 
-**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · **[Download 0.5.0-rc.1](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1)** · [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases) · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
+**[Download the latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)** · **[Download 0.5.0-rc.2](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.2)** · [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases) · [Hardware compatibility](docs/HARDWARE-COMPATIBILITY.md) · [Fan control](docs/FAN-CONTROL.md) · [Changelog](CHANGELOG.md)
 
 ## Release status
 
 - **Current stable release:** `0.4.0`
-- **Current published release candidate:** `0.5.0-rc.1`
-- **Current `main` development target:** `0.5.0-rc.2` — not tagged or published.
+- **Current release candidate:** `0.5.0-rc.2`
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
-- **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
+- **RC status:** `0.5.0-rc.2` is prepared as the release candidate for controlled compatibility testing.
 - **Current fan-control milestone:** dynamic topology plus bounded `PerFanModeFloat32` and `GlobalMaskFpe2` capability-family writers.
 - **Physical fan-control validation:** `MacBookPro16,1` end-to-end for `PerFanModeFloat32`; `MacBookPro12,1` one-fan write/readback/Apple Auto round trip PASS for `GlobalMaskFpe2`.
 
-Published `0.5.0-rc.1` identity:
+Previous published `0.5.0-rc.1` identity:
 
 ```text
 Tag:           v0.5.0-rc.1
@@ -32,17 +31,17 @@ ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
 Tests:         589 / 589 PASS
 ```
 
-The annotated release tag is immutable project evidence for this candidate. Documentation and development commits made after publication do not move or rewrite `v0.5.0-rc.1`.
+The annotated release tag is immutable project evidence for that previous candidate. Documentation and development commits made after publication do not move or rewrite `v0.5.0-rc.1`.
 
-Source builds from `main` after the release may report `0.5.0-rc.2`; that value identifies the next development target only and must not be represented as a published RC until a dedicated tag/release checkpoint is created.
+The source reports `0.5.0-rc.2`. Its final ZIP size and SHA-256 must come from the final tagged-source build and are intentionally not predeclared here.
 
-`0.5.0-rc.1` broadens runtime fan-write eligibility from the stable line's exact-model gate to a strict live SMC capability-family gate. That does **not** mean every T2 Mac has been physically validated.
+`0.5.0-rc.2` determines normal `SupportedIntelMac` eligibility from Apple hardware plus an Intel CPU and gates fan writes separately through a strict live SMC capability-family match. Exact model identity is not normal writer permission, and physical evidence for one machine is not a model whitelist.
 
 > **Important:** Gaming Optimised uses Maximum Processor State `95% / 95%` and disables Turbo/Boost on AC and DC for every `SupportedIntelMac`. Fan control is additive and remains independently capability-gated.
 
 ## Quick start
 
-For normal use, start with the latest stable release. For `0.5.0-rc.1` testing, use the dedicated [0.5.0-rc.1 GitHub pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1).
+For normal use, start with the latest stable release. For `0.5.0-rc.2` testing, use the dedicated [0.5.0-rc.2 GitHub pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.2).
 
 1. Download the matching `win-x64` ZIP and `.sha256` file.
 2. Optionally verify the ZIP SHA-256.
@@ -127,7 +126,7 @@ See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBA
 
 The processor Gaming profile is available on `SupportedIntelMac` systems. Fan-write eligibility is not granted merely because a machine is an Intel Mac or is believed to contain T2.
 
-Current development builds determine `SupportedIntelMac` from Apple hardware plus an Intel CPU; the exact model identifier does not decide normal processor-profile eligibility. Fan writes separately require the fresh runtime AppleSMC fingerprint documented in [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) and [Fan Control](docs/FAN-CONTROL.md). Physical validation records are evidence for the observed capability mechanisms, not runtime permission lists.
+`0.5.0-rc.2` determines `SupportedIntelMac` from Apple hardware plus an Intel CPU; the exact model identifier does not decide normal processor-profile eligibility. Fan writes separately require the fresh runtime AppleSMC fingerprint documented in [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md) and [Fan Control](docs/FAN-CONTROL.md). Physical validation records are evidence for the observed capability mechanisms, not runtime permission lists.
 
 ## Fan-control dependency: Macs Fan Control 1.5.16
 
@@ -229,7 +228,7 @@ The publish script creates a versioned self-contained `win-x64` directory, ZIP, 
 ## Documentation
 
 - [Latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest)
-- [0.5.0-rc.1 pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1)
+- [0.5.0-rc.2 pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.2)
 - [All releases and pre-releases](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases)
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)

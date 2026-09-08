@@ -7,9 +7,9 @@ Security fixes are provided for the latest stable release of BootCamp Performanc
 Current public lines:
 
 - stable: `0.4.0`
-- release candidate: `0.5.0-rc.1`
+- release candidate: `0.5.0-rc.2`
 
-`0.5.0-rc.1` is a pre-release and broadens production fan-write eligibility from the stable line's exact-model gate to a guarded live capability-family gate. It does not claim physical validation of every T2 Mac.
+`0.5.0-rc.2` is a pre-release. Normal `SupportedIntelMac` eligibility derives from detected Apple hardware plus an Intel CPU; production fan writes are independently restricted to guarded live `PerFanModeFloat32` or bounded `GlobalMaskFpe2` capability-family matches. It does not claim physical validation of every Intel Mac.
 
 ## Reporting a Vulnerability
 
@@ -44,7 +44,7 @@ Reports involving any of the following are treated as safety-relevant:
 - failure to return BCPC-owned hardware to Apple Auto,
 - crash-recovery failures,
 - fan writes occurring when the live capability-family gate should have blocked them,
-- fan writes occurring on T1-style `fpe2` / `FS!` hardware through the T2-style production path,
+- fan writes occurring through the wrong capability-family semantics or outside the exact bounded `PerFanModeFloat32` / `GlobalMaskFpe2` fingerprints,
 - recovery ownership markers being cleared without verified hardware recovery,
 - replacement or loss of the original processor Restore snapshot during fan-only resume.
 
@@ -52,20 +52,20 @@ Reports involving any of the following are treated as safety-relevant:
 
 Stable `0.4.0` uses the historical exact `MacBookPro16,1` production fan-write gate.
 
-Release candidate `0.5.0-rc.1` uses a stricter live capability-family decision at write time. Production fan writes require, at minimum:
+Release candidate `0.5.0-rc.2` uses a strict live capability-family decision at write time. Production fan writes require, at minimum:
 
 - `SupportedIntelMac`,
 - MMIO AppleSMC protocol,
 - exact verified `FNum` metadata,
 - a supported dynamic topology within `F0..F9`,
-- exact verified per-fan `Mx/Ac/Md/Tg` metadata,
+- exact complete metadata for either `PerFanModeFloat32` or the bounded one-/two-fan `GlobalMaskFpe2` family,
 - sane finite runtime values,
 - Apple Auto before new BCPC ownership,
 - fresh preflight before the write.
 
-The production write surface remains restricted to discovered per-fan `Md` and `Tg` keys. `FS!`, T1 `fpe2`, arbitrary SMC keys, minimum-RPM controls and user-defined fan-speed sliders remain outside the RC write path.
+The production write surface remains restricted to discovered per-fan mode/target keys for `PerFanModeFloat32` and the proven global `FS! ` mode plus per-fan targets for bounded `GlobalMaskFpe2`. Arbitrary SMC keys, minimum-RPM controls, unknown fingerprints and user-defined fan-speed sliders remain outside the RC write path.
 
-`MacBookPro16,1` remains the only model physically validated end-to-end for this production path so far. Runtime compatibility on another machine is not equivalent to project physical validation.
+`MacBookPro16,1` remains physically validated end-to-end for `PerFanModeFloat32`, while `MacBookPro12,1` has passed one-fan `GlobalMaskFpe2` write/readback/Apple Auto qualification. Two-fan global-mask physical qualification remains pending. Runtime compatibility on another machine is not equivalent to project physical validation, and neither model identifier grants writer permission.
 
 BCPC does not infer ownership from observed Manual mode alone. A Manual state without BCPC ownership context is treated as externally controlled and is not silently taken over.
 
