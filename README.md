@@ -19,7 +19,7 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
 - **RC status:** `0.5.0-rc.1` is published as a GitHub pre-release for controlled compatibility testing.
 - **Current fan-control milestone:** dynamic topology plus bounded `PerFanModeFloat32` and `GlobalMaskFpe2` capability-family writers.
-- **Physical fan-control validation:** end-to-end on `MacBookPro16,1` (MacBook Pro 16-inch, 2019, Apple T2).
+- **Physical fan-control validation:** `MacBookPro16,1` end-to-end for `PerFanModeFloat32`; `MacBookPro12,1` one-fan write/readback/Apple Auto round trip PASS for `GlobalMaskFpe2`.
 
 Published `0.5.0-rc.1` identity:
 
@@ -68,7 +68,7 @@ Fan control is additive:
 - if AppleSMC is missing, stopped, unsupported, reports `FNum = 0`, or the fans are already Manual without BCPC ownership, Gaming Optimised remains available as a CPU-only profile;
 - if fan state becomes ambiguous after BCPC has started hardware writes, the recovery context is retained and the operation fails closed rather than guessing.
 
-Only `MacBookPro16,1` has completed BCPC end-to-end physical write validation for the per-fan family so far. `MacBookPro12,1` supplies read-only physical evidence for `GlobalMaskFpe2`; its physical Maximum Safe RPM / Apple Auto round trip remains a separate controlled qualification step. Runtime permission is never granted by either model identifier.
+`MacBookPro16,1` has completed BCPC end-to-end physical write validation for the `PerFanModeFloat32` family. `MacBookPro12,1` has completed the controlled one-fan `GlobalMaskFpe2` Maximum Safe RPM / Apple Auto write/readback round trip. Runtime permission is never granted by either model identifier, and the two-fan `GlobalMaskFpe2` path remains without BCPC-owned physical write qualification.
 
 ### Restore Original Settings
 
@@ -115,11 +115,13 @@ See [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.
 
 ### GlobalMaskFpe2 capability family
 
-**MacBookPro12,1 — physical read-only capability reference**
+**MacBookPro12,1 — one-fan physical write qualification reference**
 
-Physical read-only evidence from `MacBookPro12,1` confirms the `fpe2` big-endian `/ 4` RPM encoding and the global `FS! ` Auto state. The bounded writer is selected only by the exact live `GlobalMaskFpe2` fingerprint, uses fresh exact maximum bytes, and permits writes only for the proven one- and two-fan mask range. This is not a model or T1/T2 generation gate.
+Physical evidence from `MacBookPro12,1` confirms the `fpe2` big-endian `/ 4` RPM encoding and the global `FS! ` mode authority. On 2026-09-08, the controlled qualifier verified `FS! 0000 -> 0001`, exact fresh `F0Mx 60DC -> F0Tg`, and `FS! 0001 -> 0000`, with exact readback at every stage and final Apple Auto verification.
 
-The writer and hard-crash recovery paths are covered by fake/in-memory validation. Physical Maximum Safe RPM / Apple Auto write qualification for this family is still pending. Restore Apple Auto with the current BCPC version before downgrading to a version that predates `GlobalMaskFpe2`; older marker schemas cannot represent global-mask ownership safely.
+The writer and hard-crash recovery paths remain covered by fake/in-memory validation; physical hard-crash recovery for this family is still a separate validation boundary. The one-fan Maximum Safe RPM / Apple Auto round trip is physically qualified, while two-fan `FS! = 0003` still requires its own physical qualification. Restore Apple Auto with the current BCPC version before downgrading to a version that predates `GlobalMaskFpe2`; older marker schemas cannot represent global-mask ownership safely.
+
+See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
 
 ### Other Intel Macs
 
@@ -232,6 +234,7 @@ The publish script creates a versioned self-contained `win-x64` directory, ZIP, 
 - [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md)
 - [Fan Control and AppleSMC Compatibility Backend](docs/FAN-CONTROL.md)
 - [0.5.0-rc.1 Hardware Validation Record](docs/0.5.0-rc.1-HARDWARE-VALIDATION.md)
+- [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](docs/0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md)
 - [Third-Party Software](THIRD_PARTY.md)
 - [Security Policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
