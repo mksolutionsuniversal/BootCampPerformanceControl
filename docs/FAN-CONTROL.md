@@ -7,16 +7,16 @@ The production feature remains deliberately narrow:
 - **Apple Auto**
 - **Maximum Safe RPM**
 
-BCPC does not expose arbitrary SMC writes, a user-defined RPM slider or minimum-RPM control in `0.5.0-rc.1`.
+BCPC does not expose arbitrary SMC writes, a user-defined RPM slider or minimum-RPM control in `0.5.0-rc.2`.
 
-## Published release-candidate status
+## Current release-candidate status
 
 Current public lines:
 
 - stable: `0.4.0`
-- release candidate: `0.5.0-rc.1`
+- release candidate: `0.5.0-rc.2`
 
-Published RC identity:
+Previous published RC identity:
 
 ```text
 Tag:           v0.5.0-rc.1
@@ -26,15 +26,15 @@ ZIP SHA-256:   B2215F7C6846614F2F1606A5DC11DC2D0BB1A496C66ACBA523B607A8DC65DDD5
 Tests:         589 / 589 PASS
 ```
 
-`0.5.0-rc.1` is a GitHub pre-release. Stable `0.4.0` remains unchanged and remains the latest stable release.
+`0.5.0-rc.2` is prepared as the current release candidate. Its final ZIP size and SHA-256 must come from the final tagged-source build and are not predeclared here. Stable `0.4.0` remains unchanged and remains the latest stable release.
 
 ## What changed from stable 0.4.0
 
 Stable `0.4.0` enables production fan writes only for the exact physically verified `MacBookPro16,1` path.
 
-`0.5.0-rc.1` removes that exact-model permission gate and instead requires a fresh live AppleSMC capability-family match immediately before write execution.
+`0.5.0-rc.2` removes that exact-model permission gate and instead requires a fresh live AppleSMC capability-family match immediately before write execution. Normal `SupportedIntelMac` eligibility derives from detected Apple hardware plus an Intel CPU, independently of the fan-write gate.
 
-This is a runtime compatibility decision, **not** a claim that every T2 Mac is physically validated.
+This is a runtime compatibility decision, **not** a claim that every T1/T2 Mac is physically validated. Physical validation records are mechanism evidence, not model-based writer permission.
 
 The complete production path has been physically validated end-to-end on:
 
@@ -49,7 +49,7 @@ The capability-driven runtime also recognizes the bounded `GlobalMaskFpe2` mecha
 
 ## Third-party compatibility dependency
 
-BCPC does not ship its own production AppleSMC Windows driver in stable `0.4.0` or release candidate `0.5.0-rc.1`.
+BCPC does not ship its own production AppleSMC Windows driver in stable `0.4.0` or release candidate `0.5.0-rc.2`.
 
 The physically verified production backend interoperates with the AppleSMC compatibility driver installed by a separate Windows installation of **Macs Fan Control 1.5.16 (Build 693)**.
 
@@ -368,7 +368,7 @@ These physical validation records support the observed capability families and t
 
 BCPC also contains an independently authored experimental KMDF research driver under `drivers/BootCampSmc/`.
 
-That driver is **not** the production fan-control dependency for `0.5.0-rc.1` and is **not** included in release packages. Its physically completed research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
+That driver is **not** the production fan-control dependency for `0.5.0-rc.2`, is **not** included in release packages, and is **not** claimed as physically write-qualified. Its physically completed research boundary currently reaches Gate 5D-B fixed-key `GET_KEY_INFO(F0Mx/F1Mx)` metadata transactions on `MacBookPro16,1`.
 
 See [../drivers/BootCampSmc/README.md](../drivers/BootCampSmc/README.md).
 

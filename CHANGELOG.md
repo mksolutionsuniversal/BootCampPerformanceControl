@@ -6,20 +6,34 @@ The project follows Semantic Versioning. Release candidates are pre-release buil
 
 ## [Unreleased]
 
-### Development
+## [0.5.0-rc.2] - 2026-09-08
 
-- Removed the legacy per-model validation classification and confirmation UI. Apple hardware with an Intel CPU now determines `SupportedIntelMac` directly; exact model identity remains reporting/persistence context and fan writes remain gated by the live capability family. The global `95%` / Boost Disabled CPU policy is unchanged.
-- Advanced the `main` development identity to `0.5.0-rc.2` after publication of `v0.5.0-rc.1` so post-release source builds cannot be confused with the immutable published RC artifact.
-- `0.5.0-rc.2` is a development target only at this point. No tag or GitHub Release has been created for it.
-- Published stable `v0.4.0` and pre-release `v0.5.0-rc.1` remain unchanged.
+### Added
+
+- Added the bounded `GlobalMaskFpe2` capability family with exact live metadata, topology, state and value checks. The writer supports only explicit one- and two-fan global masks and fails closed on unknown fingerprints or higher fan counts.
+- Added schema-v4 pre-write transaction journaling and deterministic partial-write-prefix recovery for both `PerFanModeFloat32` and `GlobalMaskFpe2`, with hardened crash, startup, clean-exit and Apple Auto recovery handling.
+
+### Changed
+
+- Gaming Optimised now applies the same processor rule to every `SupportedIntelMac`: Maximum Processor State AC/DC `95% / 95%` with processor boost disabled on AC/DC.
+- `SupportedIntelMac` now derives directly from detected Apple hardware plus an Intel CPU rather than an exact Mac-model whitelist.
+- Removed the legacy per-model validation/tested-model classification and confirmation UI. Exact model identity remains hardware/reporting and persistence context, not normal processor-profile or fan-writer permission.
+- Fan writes remain independently gated by a fresh exact live capability-family match plus all existing topology, value, ownership, Apple Auto, read-back and recovery checks.
+- The exact `MacBookPro16,1` model check remains only where required for stable `0.4.0` schema-v1 ownership-marker downgrade compatibility and bounded physical SMC research tooling; it is not a general writer gate.
+
+### Physical validation
+
+- Physically qualified the one-fan `GlobalMaskFpe2` write/readback/Apple Auto round trip on `MacBookPro12,1` using exact fresh `F0Mx` bytes and the global `FS! ` mode mask.
+- The existing `MacBookPro16,1` end-to-end physical validation for `PerFanModeFloat32` remains applicable.
+- Two-fan `GlobalMaskFpe2` (`FS! = 0003`) physical qualification remains pending and is not inferred from the one-fan result.
+- The experimental native `BootCampSmc` write transport is **not** claimed as physically write-qualified or as a production dependency.
 
 ### Documentation
 
-- Synchronized all repository Markdown documentation after publication of `0.5.0-rc.1`.
-- Recorded the immutable `v0.5.0-rc.1` tag, qualified source commit and published ZIP digest.
-- Updated contributor, support and security guidance from the stable `0.4.0` exact-model fan gate to the `0.5.0-rc.1` live capability-family policy.
-- Clarified that stable `0.4.0` remains the latest stable release while `0.5.0-rc.1` is a separate GitHub pre-release.
-- No hardware-control code is changed by this post-release documentation synchronization.
+- Prepared repository documentation for the `0.5.0-rc.2` release candidate while keeping stable `0.4.0` as the latest stable release.
+- Preserved the immutable `v0.5.0-rc.1` publication identity and older release history.
+- Final `0.5.0-rc.2` ZIP size and SHA-256 are intentionally deferred until the final tagged-source build.
+- No hardware-control code is changed by this release-preparation documentation update.
 
 ## [0.5.0-rc.1] - 2026-09-05
 

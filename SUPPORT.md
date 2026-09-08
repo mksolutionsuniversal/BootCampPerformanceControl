@@ -2,16 +2,16 @@
 
 BootCamp Performance Control is an open-source project for Intel Macs running Windows through Boot Camp.
 
-Before reporting a problem, check the current [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md), [Fan Control](docs/FAN-CONTROL.md), [Third-Party Software](THIRD_PARTY.md), [latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest), and the current [`0.5.0-rc.1` pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.1).
+Before reporting a problem, check the current [Hardware Compatibility](docs/HARDWARE-COMPATIBILITY.md), [Fan Control](docs/FAN-CONTROL.md), [Third-Party Software](THIRD_PARTY.md), [latest stable release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/latest), and the current [`0.5.0-rc.2` pre-release](https://github.com/mksolutionsuniversal/BootCampPerformanceControl/releases/tag/v0.5.0-rc.2).
 
 ## Current public versions
 
 - Stable: `0.4.0`
-- Release candidate: `0.5.0-rc.1`
-- Current RC automated qualification baseline: `589 / 589` tests
-- Physically validated production fan path: `MacBookPro16,1` / Apple T2
+- Release candidate: `0.5.0-rc.2`
+- Current RC automated qualification baseline: `632 / 632` tests
+- Physical fan-write evidence: `MacBookPro16,1` / `PerFanModeFloat32` and `MacBookPro12,1` / one-fan `GlobalMaskFpe2`
 
-Stable `0.4.0` remains the recommended release for normal use. `0.5.0-rc.1` is intended for controlled compatibility testing and uses live capability-family fan-write gating.
+Stable `0.4.0` remains the recommended release for normal use. `0.5.0-rc.2` is intended for controlled compatibility testing and uses live capability-family fan-write gating.
 
 ## Bug reports and compatibility issues
 
@@ -40,11 +40,11 @@ For fan-control problems, also report the observed fan mode and RPM state before
 
 A request for support on a different Intel Mac does **not** imply that the model is physically validated by BCPC.
 
-In `0.5.0-rc.1`, fan-write eligibility is not controlled by a simple exact-model whitelist. A machine may become runtime-eligible only when the fresh live AppleSMC interface matches the complete verified MMIO + dynamic `FNum` + per-fan FLT4/`Md`/`Tg` family and all ownership/safety conditions pass.
+In `0.5.0-rc.2`, normal `SupportedIntelMac` eligibility derives from Apple hardware plus an Intel CPU, while fan-write eligibility is separately capability-gated. A machine may become fan-write eligible only when the fresh live AppleSMC interface matches the complete verified MMIO + dynamic `FNum` fingerprint for `PerFanModeFloat32` or bounded `GlobalMaskFpe2` and all ownership/safety conditions pass.
 
-That runtime result is still only a compatibility decision. `MacBookPro16,1` is the only model physically validated end-to-end for this production path so far.
+That runtime result is still only a compatibility decision. `MacBookPro16,1` provides end-to-end `PerFanModeFloat32` evidence, and `MacBookPro12,1` provides one-fan `GlobalMaskFpe2` write/readback/Apple Auto evidence; neither model is a permission whitelist.
 
-T1-style `fpe2` / global `FS!` fan control remains write-disabled in this RC.
+The one-fan `GlobalMaskFpe2` path is physically qualified. Two-fan `FS! = 0003` physical qualification remains pending, and unknown or mismatched global-mask fingerprints remain write-disabled.
 
 Do not test speculative SMC writes merely to produce a bug report. For a new machine, start with read-only capability capture.
 
@@ -58,7 +58,7 @@ Measured CS2 thermal/performance results published by the project come from the 
 
 ## Fan-control dependency
 
-Neither stable `0.4.0` nor release candidate `0.5.0-rc.1` ships a production AppleSMC kernel driver.
+Neither stable `0.4.0` nor release candidate `0.5.0-rc.2` ships a production AppleSMC kernel driver.
 
 The physically validated production fan-control environment uses a **separately installed** copy of Macs Fan Control `1.5.16` (Build `693`) with AppleSMC driver file version `1.0.7.0`.
 
@@ -70,7 +70,7 @@ Close the Macs Fan Control application before BCPC attempts to own the AppleSMC 
 
 ## Native BootCampSmc research driver
 
-The `drivers/BootCampSmc/` tree is experimental research and is not the production dependency for stable `0.4.0` or release candidate `0.5.0-rc.1`.
+The `drivers/BootCampSmc/` tree is experimental research and is not the production dependency for stable `0.4.0` or release candidate `0.5.0-rc.2`; its native write transport is not claimed as physically qualified.
 
 Its current physically completed checkpoint is Gate 5D-B on `MacBookPro16,1`.
 
