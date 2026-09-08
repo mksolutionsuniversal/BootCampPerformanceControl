@@ -16,7 +16,7 @@ Its goal is to reduce unnecessary heat and thermal throttling using conservative
 - **Current stable release:** `0.4.0`
 - **Current release candidate:** `0.5.0-rc.2`
 - **Stable status:** `0.4.0` remains the recommended stable build and remains GitHub's latest stable release.
-- **RC status:** `0.5.0-rc.2` is prepared as the release candidate for controlled compatibility testing.
+- **RC status:** `0.5.0-rc.2` is published as a GitHub pre-release for controlled compatibility testing.
 - **Current fan-control milestone:** dynamic topology plus bounded `PerFanModeFloat32` and `GlobalMaskFpe2` capability-family writers.
 - **Physical fan-control validation:** `MacBookPro16,1` end-to-end for `PerFanModeFloat32`; `MacBookPro12,1` one-fan write/readback/Apple Auto round trip PASS for `GlobalMaskFpe2`.
 
@@ -33,7 +33,19 @@ Tests:         589 / 589 PASS
 
 The annotated release tag is immutable project evidence for that previous candidate. Documentation and development commits made after publication do not move or rewrite `v0.5.0-rc.1`.
 
-The source reports `0.5.0-rc.2`. Its final ZIP size and SHA-256 must come from the final tagged-source build and are intentionally not predeclared here.
+Published `0.5.0-rc.2` identity:
+
+```text
+Tag:           v0.5.0-rc.2
+Source commit: 59450231ef06db4ffdb86302855c4394f1bda6ba
+ZIP:           BootCampPerformanceControl-0.5.0-rc.2-win-x64.zip
+ZIP size:      70340224 bytes
+ZIP SHA-256:   573F5E36BEB0D4DB98CBAFCFAD3634B003955F7719F1499CFA504D5B708A5F88
+.NET SDK:      8.0.424
+Tests:         632 / 632 PASS
+```
+
+The annotated `v0.5.0-rc.2` tag and published ZIP are immutable release evidence. Post-release documentation commits on `main` do not move the tag or replace the published artifact.
 
 `0.5.0-rc.2` determines normal `SupportedIntelMac` eligibility from Apple hardware plus an Intel CPU and gates fan writes separately through a strict live SMC capability-family match. Exact model identity is not normal writer permission, and physical evidence for one machine is not a model whitelist.
 

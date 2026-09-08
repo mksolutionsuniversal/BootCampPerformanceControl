@@ -8,8 +8,22 @@ Processor-profile availability and fan-write availability are intentionally sepa
 
 - Stable `0.4.0`: exact `MacBookPro16,1` production fan-write gate.
 - Release candidate `0.5.0-rc.2`: Apple-hardware-plus-Intel-CPU platform eligibility, dynamic fan topology, and mechanism-based `PerFanModeFloat32` and bounded `GlobalMaskFpe2` writers selected from exact live capability fingerprints.
-- `0.5.0-rc.2` is prepared as the current release candidate for controlled compatibility testing.
+- `0.5.0-rc.2` is published as the current GitHub pre-release for controlled compatibility testing.
 - Physical fan-write validation is completed on `MacBookPro16,1` for `PerFanModeFloat32` and on `MacBookPro12,1` for the one-fan `GlobalMaskFpe2` write/readback/Apple Auto round trip.
+
+Published current RC identity:
+
+```text
+Tag:           v0.5.0-rc.2
+Source commit: 59450231ef06db4ffdb86302855c4394f1bda6ba
+ZIP:           BootCampPerformanceControl-0.5.0-rc.2-win-x64.zip
+ZIP size:      70340224 bytes
+ZIP SHA-256:   573F5E36BEB0D4DB98CBAFCFAD3634B003955F7719F1499CFA504D5B708A5F88
+.NET SDK:      8.0.424
+Tests:         632 / 632 PASS
+```
+
+The published tag/artifact remain immutable even when `main` receives later documentation-only commits.
 
 Previous published RC identity:
 
