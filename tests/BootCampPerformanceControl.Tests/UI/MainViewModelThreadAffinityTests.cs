@@ -211,8 +211,7 @@ public sealed class MainViewModelThreadAffinityTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified in S0 dispatcher regression test.");
+            string.Empty);
     }
 
     private static PowerStateSnapshot InitialPowerState()

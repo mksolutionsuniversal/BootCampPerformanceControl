@@ -229,8 +229,11 @@ public sealed class DiagnosticReportService : IDiagnosticReportService
         builder.AppendLine("Platform & Profile Support");
         builder.AppendLine("--------------------------");
         builder.AppendLine($"Platform support: {verificationResult.PlatformSupport}");
-        builder.AppendLine($"Model validation: {verificationResult.ValidationLevel}");
-        builder.AppendLine($"Verification message: {FormatValue(verificationResult.Message)}");
+        if (!verificationResult.IsSupportedIntelMac
+            && !string.IsNullOrWhiteSpace(verificationResult.Message))
+        {
+            builder.AppendLine($"Platform details: {FormatValue(verificationResult.Message)}");
+        }
         builder.AppendLine($"Processor power settings readable: {FormatYesNo(profileSupport.PowerStateReadable)}");
         builder.AppendLine($"Gaming Optimised eligible: {FormatYesNo(profileSupport.GamingOptimisedEligible)}");
 

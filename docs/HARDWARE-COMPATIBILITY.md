@@ -26,13 +26,15 @@ Stable `0.4.0` remains unchanged and remains the latest stable release.
 
 Passing the `0.5.0-rc.1` family gate is a runtime compatibility decision. It is **not** a statement that the detected Mac model has been physically tested by the BCPC project.
 
+Current development builds determine normal `SupportedIntelMac` eligibility directly from detected Apple hardware and an Intel CPU. Exact model identity remains useful hardware/reporting context, but it is neither a processor-profile whitelist nor a fan-write permission gate.
+
 ## Compatibility matrix
 
-| Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Validation status |
+| Model / observed family | Processor profile | Fan monitoring | Current development fan writes | Crash fan recovery | Physical evidence |
 |---|---:|---:|---:|---:|---|
 | `MacBookPro16,1` / `PerFanModeFloat32` | Yes | Yes | Capability-qualified | Yes | **Physically verified end-to-end** |
 | `MacBookPro12,1` / `GlobalMaskFpe2` | Yes | Yes | Capability-qualified for proven one-fan topology | Implemented with v4 journal; fake restart-tested | **One-fan physical write/readback/Apple Auto round trip PASS** |
-| Other `SupportedIntelMac` | Yes | Capability-dependent | Only when an exact bounded live family fingerprint passes | Only for valid BCPC-owned compatible-family state | **Not individually physically validated** |
+| Other `SupportedIntelMac` | Yes | Capability-dependent | Only when an exact bounded live family fingerprint passes | Only for valid BCPC-owned compatible-family state | No model-specific physical record required for platform eligibility |
 
 ## Global Gaming Optimised processor target
 

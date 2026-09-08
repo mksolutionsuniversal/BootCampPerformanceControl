@@ -201,8 +201,7 @@ public sealed class CleanExitFanRecoveryServiceTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private sealed class StubHardwareDetectionService : IHardwareDetectionService

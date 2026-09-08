@@ -34,7 +34,7 @@ public sealed class DiagnosticReportServiceTests
         Assert.Contains("  - AMD Radeon Pro 5500M", result.Content);
         Assert.Contains($"Active Power Scheme: {schemeId}", result.Content);
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
-        Assert.Contains("Model validation: PerformanceValidated", result.Content);
+        Assert.DoesNotContain("Model validation", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Processor power settings readable: Yes", result.Content);
         Assert.Contains("Gaming Optimised eligible: Yes", result.Content);
         Assert.DoesNotContain("Model verified:", result.Content);
@@ -42,7 +42,7 @@ public sealed class DiagnosticReportServiceTests
     }
 
     [Fact]
-    public async Task GenerateAsync_WithNotIndividuallyTestedIntelMac_ReportsPlatformSupportAndValidationLevel()
+    public async Task GenerateAsync_WithUnknownIntelMac_ReportsPlatformSupportWithoutModelClassification()
     {
         var hardwareSnapshot = VerifiedHardwareSnapshot(model: "MacBookPro15,1");
         var service = CreateService(hardwareSnapshot);
@@ -51,7 +51,8 @@ public sealed class DiagnosticReportServiceTests
 
         Assert.Contains("Mac Model: MacBookPro15,1", result.Content);
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
-        Assert.Contains("Model validation: NotIndividuallyTested", result.Content);
+        Assert.DoesNotContain("Model validation", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("individually tested", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Processor power settings readable: Yes", result.Content);
         Assert.Contains("Gaming Optimised eligible: Yes", result.Content);
         Assert.DoesNotContain("Model verified:", result.Content);
@@ -66,7 +67,7 @@ public sealed class DiagnosticReportServiceTests
         var result = await service.GenerateAsync(CancellationToken.None);
 
         Assert.Contains("Platform support: UnsupportedNonApple", result.Content);
-        Assert.Contains("Model validation: NotIndividuallyTested", result.Content);
+        Assert.Contains("Platform details: BootCamp Performance Control requires an Apple Mac", result.Content);
         Assert.Contains("Gaming Optimised eligible: No", result.Content);
         Assert.DoesNotContain("Model verified:", result.Content);
     }
@@ -87,7 +88,7 @@ public sealed class DiagnosticReportServiceTests
         var result = await service.GenerateAsync(CancellationToken.None);
 
         Assert.Contains("Platform support: SupportedIntelMac", result.Content);
-        Assert.Contains("Model validation: PerformanceValidated", result.Content);
+        Assert.DoesNotContain("Model validation", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Processor power settings readable: No", result.Content);
         Assert.Contains("Gaming Optimised eligible: No", result.Content);
     }
@@ -335,7 +336,7 @@ public sealed class DiagnosticReportServiceTests
 
     private sealed class FakeHardwareDetectionService : IHardwareDetectionService
     {
-        private readonly HardwareDetectionService _hardwareDetectionService = new(new ModelSupportRegistry());
+        private readonly HardwareDetectionService _hardwareDetectionService = new();
         private readonly HardwareSnapshot _snapshot;
 
         public FakeHardwareDetectionService(HardwareSnapshot snapshot)

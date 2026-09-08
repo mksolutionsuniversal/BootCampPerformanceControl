@@ -4,53 +4,39 @@ namespace BootCampPerformanceControl.Tests.HardwareDetection;
 
 public sealed class HardwareDetectionServiceTests
 {
-    [Fact]
-    public void VerifyModel_AppleIntelMacBookPro16_1_ReturnsSupportedIntelMacAndPerformanceValidated()
+    [Theory]
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro99,9")]
+    [InlineData("Unknown")]
+    [InlineData("")]
+    public void VerifyModel_AnyAppleIntelModel_ReturnsSupportedIntelMac(string model)
     {
         var service = CreateService();
 
-        var result = service.VerifyModel(Snapshot("Apple Inc.", VerifiedHardwareModels.MacBookPro16_1, IntelProcessor()));
+        var result = service.VerifyModel(Snapshot("Apple Inc.", model, IntelProcessor()));
 
         Assert.Equal("Apple Inc.", result.Manufacturer);
-        Assert.Equal(VerifiedHardwareModels.MacBookPro16_1, result.Model);
+        Assert.Equal(model, result.Model);
         Assert.Equal(PlatformSupportStatus.SupportedIntelMac, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.PerformanceValidated, result.ValidationLevel);
         Assert.True(result.IsApple);
         Assert.True(result.IsIntelProcessor);
         Assert.True(result.IsSupportedIntelMac);
-        Assert.Contains("performance-validated", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Message);
     }
 
     [Fact]
-    public void VerifyModel_AppleIntelMacBookPro14_3_ReturnsSupportedIntelMacAndNotIndividuallyTested()
+    public void VerifyModel_UnknownNewAppleIntelModel_DoesNotRequireWhitelistEntry()
     {
         var service = CreateService();
+        const string newModel = "MacBookPro99,1";
 
-        var result = service.VerifyModel(Snapshot("Apple Inc.", VerifiedHardwareModels.MacBookPro14_3, IntelProcessor()));
+        var result = service.VerifyModel(Snapshot("Apple Inc.", newModel, IntelProcessor()));
 
-        Assert.Equal("Apple Inc.", result.Manufacturer);
-        Assert.Equal(VerifiedHardwareModels.MacBookPro14_3, result.Model);
+        Assert.Equal(newModel, result.Model);
         Assert.Equal(PlatformSupportStatus.SupportedIntelMac, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.NotIndividuallyTested, result.ValidationLevel);
-        Assert.True(result.IsApple);
-        Assert.True(result.IsIntelProcessor);
         Assert.True(result.IsSupportedIntelMac);
-        Assert.Contains("not individually performance-tested", result.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void VerifyModel_AppleIntelUnknownModel_ReturnsSupportedIntelMacAndNotIndividuallyTested()
-    {
-        var service = CreateService();
-
-        var result = service.VerifyModel(Snapshot("Apple Inc.", "MacBookPro15,1", IntelProcessor()));
-
-        Assert.Equal(PlatformSupportStatus.SupportedIntelMac, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.NotIndividuallyTested, result.ValidationLevel);
-        Assert.True(result.IsApple);
-        Assert.True(result.IsIntelProcessor);
-        Assert.True(result.IsSupportedIntelMac);
-        Assert.Contains("not individually performance-tested", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Message);
     }
 
     [Fact]
@@ -61,7 +47,6 @@ public sealed class HardwareDetectionServiceTests
         var result = service.VerifyModel(Snapshot("Apple Inc.", "MacBookPro18,1", NonIntelProcessor()));
 
         Assert.Equal(PlatformSupportStatus.UnsupportedNonIntel, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.NotIndividuallyTested, result.ValidationLevel);
         Assert.True(result.IsApple);
         Assert.False(result.IsIntelProcessor);
         Assert.False(result.IsSupportedIntelMac);
@@ -76,7 +61,6 @@ public sealed class HardwareDetectionServiceTests
         var result = service.VerifyModel(Snapshot("PC Manufacturer", "CustomModel", IntelProcessor()));
 
         Assert.Equal(PlatformSupportStatus.UnsupportedNonApple, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.NotIndividuallyTested, result.ValidationLevel);
         Assert.False(result.IsApple);
         Assert.False(result.IsSupportedIntelMac);
         Assert.Contains("requires an Apple Mac", result.Message, StringComparison.OrdinalIgnoreCase);
@@ -110,23 +94,9 @@ public sealed class HardwareDetectionServiceTests
         Assert.Contains("Hardware detection was incomplete", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void VerifyModel_CustomValidationRegistry_ReflectsAssignedValidationLevel()
-    {
-        var customRegistry = new FakeModelSupportRegistry(
-            new ModelSupportDefinition("MacBookPro14,3", ModelValidationLevel.FunctionallyValidated));
-        var service = new HardwareDetectionService(customRegistry);
-
-        var result = service.VerifyModel(Snapshot("Apple Inc.", "MacBookPro14,3", IntelProcessor()));
-
-        Assert.Equal(PlatformSupportStatus.SupportedIntelMac, result.PlatformSupport);
-        Assert.Equal(ModelValidationLevel.FunctionallyValidated, result.ValidationLevel);
-        Assert.Contains("functionally validated", result.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
     private static HardwareDetectionService CreateService()
     {
-        return new HardwareDetectionService(new ModelSupportRegistry());
+        return new HardwareDetectionService();
     }
 
     private static HardwareSnapshot Snapshot(string manufacturer, string model, ProcessorInfo? processor)
@@ -159,28 +129,4 @@ public sealed class HardwareDetectionServiceTests
             MaxClockSpeed: 2500);
     }
 
-    private sealed class FakeModelSupportRegistry : IModelSupportRegistry
-    {
-        private readonly ModelSupportDefinition _definition;
-
-        public FakeModelSupportRegistry(ModelSupportDefinition definition)
-        {
-            _definition = definition;
-        }
-
-        public ModelSupportDefinition? Find(string? modelIdentifier)
-        {
-            return string.Equals(
-                modelIdentifier,
-                _definition.ModelIdentifier,
-                StringComparison.OrdinalIgnoreCase)
-                    ? _definition
-                    : null;
-        }
-
-        public ModelValidationLevel GetValidationLevel(string? modelIdentifier)
-        {
-            return Find(modelIdentifier)?.ValidationLevel ?? ModelValidationLevel.NotIndividuallyTested;
-        }
-    }
 }

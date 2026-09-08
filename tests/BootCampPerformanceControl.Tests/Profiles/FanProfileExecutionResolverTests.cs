@@ -18,7 +18,7 @@ public sealed class FanProfileExecutionResolverTests
 
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability(fan0Maximum, fan1Maximum));
 
         Assert.True(result.IsExecutable);
@@ -34,7 +34,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             Profile("balanced"),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability());
 
         AssertBlocked(result);
@@ -45,7 +45,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             Profile("restore"),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability());
 
         AssertBlocked(result);
@@ -60,8 +60,7 @@ public sealed class FanProfileExecutionResolverTests
                 "Apple Inc.",
                 VerifiedHardwareModels.MacBookPro14_3,
                 PlatformSupportStatus.SupportedIntelMac,
-                ModelValidationLevel.PerformanceValidated,
-                "Supported Intel Mac."),
+                string.Empty),
             SafetyGatedCapability());
 
         Assert.True(result.IsExecutable);
@@ -88,8 +87,7 @@ public sealed class FanProfileExecutionResolverTests
                 "Apple Inc.",
                 VerifiedHardwareModels.MacBookPro16_1,
                 PlatformSupportStatus.SupportedIntelMac,
-                ModelValidationLevel.NotIndividuallyTested,
-                "Supported Intel Mac."),
+                string.Empty),
             SafetyGatedCapability());
 
         Assert.True(result.IsExecutable);
@@ -122,8 +120,7 @@ public sealed class FanProfileExecutionResolverTests
                 "Apple Inc.",
                 "Macmini8,1",
                 PlatformSupportStatus.SupportedIntelMac,
-                ModelValidationLevel.NotIndividuallyTested,
-                "Supported Intel Mac."),
+                string.Empty),
             capability);
 
         Assert.True(result.IsExecutable);
@@ -137,7 +134,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(isAvailableForDetectedModel: false),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability());
 
         AssertBlocked(result);
@@ -161,7 +158,7 @@ public sealed class FanProfileExecutionResolverTests
 
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             profile,
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability());
 
         AssertBlocked(result);
@@ -173,7 +170,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             Capability(
                 isReadSupported: false,
                 isHardwareSafetyGateSatisfied: true,
@@ -187,7 +184,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             Capability(
                 isReadSupported: true,
                 isHardwareSafetyGateSatisfied: false,
@@ -201,7 +198,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             Capability(
                 isReadSupported: true,
                 isHardwareSafetyGateSatisfied: true,
@@ -215,7 +212,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability(fan0Mode: 1));
 
         AssertBlocked(result);
@@ -226,7 +223,7 @@ public sealed class FanProfileExecutionResolverTests
     {
         var result = _resolver.ResolveMaximumSafeRpmPlan(
             GamingOptimisedProfile(),
-            PerformanceValidatedMacBookPro16_1(),
+            SupportedMacBookPro16_1(),
             SafetyGatedCapability(fan1Mode: 1));
 
         AssertBlocked(result);
@@ -334,13 +331,12 @@ public sealed class FanProfileExecutionResolverTests
             "Test profile.");
     }
 
-    private static ModelVerificationResult PerformanceValidatedMacBookPro16_1()
+    private static ModelVerificationResult SupportedMacBookPro16_1()
     {
         return new ModelVerificationResult(
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Performance validated.");
+            string.Empty);
     }
 }

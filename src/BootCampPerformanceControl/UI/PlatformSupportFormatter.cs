@@ -15,16 +15,4 @@ public static class PlatformSupportFormatter
             _ => "Not checked"
         };
     }
-
-    public static string FormatModelValidation(ModelValidationLevel level)
-    {
-        return level switch
-        {
-            ModelValidationLevel.PerformanceValidated => "Performance validated",
-            ModelValidationLevel.FunctionallyValidated => "Functionally validated",
-            ModelValidationLevel.CommunityTested => "Community tested",
-            ModelValidationLevel.NotIndividuallyTested => "Not individually tested",
-            _ => "Not checked"
-        };
-    }
 }

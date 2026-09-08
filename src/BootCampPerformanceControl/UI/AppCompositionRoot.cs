@@ -29,8 +29,7 @@ public static class AppCompositionRoot
 
         var restoreSnapshotStore = new JsonRestoreSnapshotStore(logger);
         var ownershipStore = new JsonFanOverrideOwnershipStore(logger);
-        var modelSupportRegistry = new ModelSupportRegistry();
-        var hardwareDetectionService = new HardwareDetectionService(modelSupportRegistry);
+        var hardwareDetectionService = new HardwareDetectionService();
         var profileCatalog = new ProfileCatalog();
         var profileExecutionResolver = new ProfileExecutionResolver();
         var fanProfileExecutionResolver = new FanProfileExecutionResolver();

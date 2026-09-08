@@ -428,8 +428,7 @@ public sealed class MainViewModelTests
             "Apple Inc.",
             "MacBookPro15,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported Intel Mac without verified fan activation identity.");
+            string.Empty);
         var elevationLauncher = new FakeAppleSmcBackendElevationLauncher();
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(unsupportedIdentity),
@@ -1533,7 +1532,6 @@ public sealed class MainViewModelTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple hardware.");
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(unsupportedResult),
@@ -1605,7 +1603,6 @@ public sealed class MainViewModelTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Hardware changed to unsupported.");
         var hardwareDetectionService = new FakeHardwareDetectionService(
             VerifiedMacBookPro16_1(),
@@ -1747,14 +1744,13 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void Compatibility_DisplaysPlatformSupportAndModelValidationIndependently()
+    public void Compatibility_SupportedIntelMac_ShowsOnlyPlatformSupport()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro16_1,
+            "MacBookPro99,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Performance validated model.");
+            "This legacy model-specific prose must not be displayed.");
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(verification),
             new FakePowerManagementService(InitialPowerState()));
@@ -1762,27 +1758,14 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
 
         Assert.Equal("Supported Intel Mac", viewModel.PlatformSupport);
-        Assert.Equal("Performance validated", viewModel.ModelValidation);
-        Assert.Equal("Performance validated model.", viewModel.CompatibilityDetails);
+        Assert.Empty(viewModel.CompatibilityDetails);
+        Assert.False(viewModel.IsCompatibilityDetailsVisible);
     }
 
     [Fact]
-    public void Compatibility_DisplaysNotIndividuallyTestedIntelMac()
+    public void Compatibility_MainViewModelDoesNotExposeModelValidationProperty()
     {
-        var verification = new ModelVerificationResult(
-            "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
-            PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported Intel Mac.");
-        var viewModel = CreateViewModel(
-            new FakeHardwareDetectionService(verification),
-            new FakePowerManagementService(InitialPowerState()));
-
-        viewModel.RefreshCommand.Execute(null);
-
-        Assert.Equal("Supported Intel Mac", viewModel.PlatformSupport);
-        Assert.Equal("Not individually tested", viewModel.ModelValidation);
+        Assert.Null(typeof(MainViewModel).GetProperty("ModelValidation"));
     }
 
     [Fact]
@@ -1792,7 +1775,6 @@ public sealed class MainViewModelTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple.");
         var viewModel = CreateViewModel(
             new FakeHardwareDetectionService(verification),
@@ -1801,7 +1783,27 @@ public sealed class MainViewModelTests
         viewModel.RefreshCommand.Execute(null);
 
         Assert.Equal("Unsupported - non-Apple hardware", viewModel.PlatformSupport);
-        Assert.Equal("Not individually tested", viewModel.ModelValidation);
+        Assert.Equal("Not Apple.", viewModel.CompatibilityDetails);
+        Assert.True(viewModel.IsCompatibilityDetailsVisible);
+    }
+
+    [Fact]
+    public void Compatibility_DisplaysDetectionIncompleteDetails()
+    {
+        var verification = new ModelVerificationResult(
+            "Unknown",
+            "Unknown",
+            PlatformSupportStatus.DetectionIncomplete,
+            "Hardware detection was incomplete.");
+        var viewModel = CreateViewModel(
+            new FakeHardwareDetectionService(verification),
+            new FakePowerManagementService(InitialPowerState()));
+
+        viewModel.RefreshCommand.Execute(null);
+
+        Assert.Equal("Detection incomplete", viewModel.PlatformSupport);
+        Assert.Equal("Hardware detection was incomplete.", viewModel.CompatibilityDetails);
+        Assert.True(viewModel.IsCompatibilityDetailsVisible);
     }
 
     [Fact]
@@ -1823,14 +1825,13 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public async Task GamingButton_NotIndividuallyTested_AppliesDirectlyOnceAndFanOnlyResumeDoesNotRewriteProcessorState()
+    public async Task GamingButton_UnknownSupportedIntelMac_AppliesOnceAndFanOnlyResumeDoesNotRewriteProcessorState()
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
-            VerifiedHardwareModels.MacBookPro14_3,
+            "MacBookPro99,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Not individually tested.");
+            string.Empty);
         var expectedStateBefore = InitialPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
         var refreshedState = GamingOptimisedPowerState();
@@ -2676,8 +2677,7 @@ public sealed class MainViewModelTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro14_3,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported Intel Mac.");
+            string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);
         var power = new FakePowerManagementService(InitialPowerState());
         var ownershipStore = new TestFanOverrideOwnershipStore
@@ -3845,8 +3845,7 @@ public sealed class MainViewModelTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private static ModelVerificationResult UnverifiedMacBookPro16_1()
@@ -3855,7 +3854,6 @@ public sealed class MainViewModelTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.DetectionIncomplete,
-            ModelValidationLevel.NotIndividuallyTested,
             "Matching model string without verification.");
     }
 

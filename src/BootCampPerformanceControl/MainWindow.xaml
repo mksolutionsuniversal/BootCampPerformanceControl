@@ -119,17 +119,19 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Platform support" />
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding PlatformSupport}" />
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Model validation" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding ModelValidation}" />
-
-                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource LabelTextStyle}" Text="Details" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource ValueTextStyle}" Text="{Binding CompatibilityDetails}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0"
+                                   Style="{StaticResource LabelTextStyle}"
+                                   Text="Details"
+                                   Visibility="{Binding IsCompatibilityDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1"
+                                   Style="{StaticResource ValueTextStyle}"
+                                   Text="{Binding CompatibilityDetails}"
+                                   Visibility="{Binding IsCompatibilityDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </Grid>
                 </GroupBox>
 

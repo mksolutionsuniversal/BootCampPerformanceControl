@@ -52,8 +52,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _gpu = "Not detected";
     private string _windowsVersion = "Not detected";
     private string _platformSupport = "Not checked";
-    private string _modelValidation = "Not checked";
-    private string _compatibilityDetails = "Not checked";
+    private string _compatibilityDetails = string.Empty;
     private string _activePowerScheme = "Not read";
     private string _processorMaximumAc = "Not read";
     private string _processorMaximumDc = "Not read";
@@ -267,17 +266,19 @@ public sealed class MainViewModel : ViewModelBase
         private set => SetProperty(ref _platformSupport, value);
     }
 
-    public string ModelValidation
-    {
-        get => _modelValidation;
-        private set => SetProperty(ref _modelValidation, value);
-    }
-
     public string CompatibilityDetails
     {
         get => _compatibilityDetails;
-        private set => SetProperty(ref _compatibilityDetails, value);
+        private set
+        {
+            if (SetProperty(ref _compatibilityDetails, value))
+            {
+                OnPropertyChanged(nameof(IsCompatibilityDetailsVisible));
+            }
+        }
     }
+
+    public bool IsCompatibilityDetailsVisible => !string.IsNullOrWhiteSpace(CompatibilityDetails);
 
     public string ActivePowerScheme
     {
@@ -533,7 +534,7 @@ public sealed class MainViewModel : ViewModelBase
                 }
 
                 _logger.Info(
-                    $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Platform support: {verificationResult.PlatformSupport}. Validation level: {verificationResult.ValidationLevel}.");
+                    $"Hardware detection completed. Detected Mac model: {verificationResult.Model}. Platform support: {verificationResult.PlatformSupport}.");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -1453,8 +1454,9 @@ public sealed class MainViewModel : ViewModelBase
     private void ApplyCompatibility(ModelVerificationResult verificationResult)
     {
         PlatformSupport = PlatformSupportFormatter.FormatPlatformSupport(verificationResult.PlatformSupport);
-        ModelValidation = PlatformSupportFormatter.FormatModelValidation(verificationResult.ValidationLevel);
-        CompatibilityDetails = verificationResult.Message;
+        CompatibilityDetails = verificationResult.IsSupportedIntelMac
+            ? string.Empty
+            : verificationResult.Message;
     }
 
     private static bool HasUsableFanModelIdentity(

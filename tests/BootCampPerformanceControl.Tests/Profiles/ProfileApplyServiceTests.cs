@@ -45,8 +45,7 @@ public sealed class ProfileApplyServiceTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro14_3,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Supported 14,3.");
+            string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);
         var expectedStateBefore = CurrentPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
@@ -70,8 +69,7 @@ public sealed class ProfileApplyServiceTests
             "Apple Inc.",
             "MacBookPro15,1",
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.NotIndividuallyTested,
-            "Generic Intel Mac.");
+            string.Empty);
         var hardware = new FakeHardwareDetectionService(verification);
         var expectedStateBefore = CurrentPowerState();
         var requestedSettings = new ProcessorPowerSettings(95, 95, 0, 0);
@@ -94,7 +92,6 @@ public sealed class ProfileApplyServiceTests
             "Apple Inc.",
             "MacBookPro18,1",
             PlatformSupportStatus.UnsupportedNonIntel,
-            ModelValidationLevel.NotIndividuallyTested,
             "Apple Silicon.");
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
@@ -115,7 +112,6 @@ public sealed class ProfileApplyServiceTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple hardware.");
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
@@ -136,7 +132,6 @@ public sealed class ProfileApplyServiceTests
             "Unknown",
             "Unknown",
             PlatformSupportStatus.DetectionIncomplete,
-            ModelValidationLevel.NotIndividuallyTested,
             "Detection incomplete.");
         var powerManagement = new FakePowerManagementService();
         var service = CreateService(new FakeHardwareDetectionService(verification), powerManagement);
@@ -369,8 +364,7 @@ public sealed class ProfileApplyServiceTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private static PowerStateSnapshot CurrentPowerState()

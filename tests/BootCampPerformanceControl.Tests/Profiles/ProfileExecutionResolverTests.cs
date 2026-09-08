@@ -9,21 +9,16 @@ public sealed class ProfileExecutionResolverTests
     private readonly ProfileExecutionResolver _resolver = new();
 
     [Theory]
-    [InlineData(VerifiedHardwareModels.MacBookPro16_1, ModelValidationLevel.PerformanceValidated)]
-    [InlineData(VerifiedHardwareModels.MacBookPro14_3, ModelValidationLevel.NotIndividuallyTested)]
-    [InlineData("MacBookPro15,1", ModelValidationLevel.NotIndividuallyTested)]
-    [InlineData("MacBookPro11,5", ModelValidationLevel.CommunityTested)]
-    [InlineData("MacBookPro15,2", ModelValidationLevel.FunctionallyValidated)]
-    public void ResolveProcessorSettings_GamingOptimised_IsExecutableOnAnySupportedIntelMacRegardlessOfValidationLevel(
-        string model,
-        ModelValidationLevel validationLevel)
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro99,1")]
+    public void ResolveProcessorSettings_GamingOptimised_IsExecutableOnAnySupportedIntelMac(string model)
     {
         var verification = new ModelVerificationResult(
             "Apple Inc.",
             model,
             PlatformSupportStatus.SupportedIntelMac,
-            validationLevel,
-            "Supported.");
+            string.Empty);
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
         var result = _resolver.ResolveProcessorSettings(profile, verification);
@@ -46,7 +41,6 @@ public sealed class ProfileExecutionResolverTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple hardware.");
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
@@ -64,7 +58,6 @@ public sealed class ProfileExecutionResolverTests
             "Apple Inc.",
             "MacBookPro18,1",
             PlatformSupportStatus.UnsupportedNonIntel,
-            ModelValidationLevel.NotIndividuallyTested,
             "Apple Silicon.");
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
@@ -82,7 +75,6 @@ public sealed class ProfileExecutionResolverTests
             "Unknown",
             "Unknown",
             PlatformSupportStatus.DetectionIncomplete,
-            ModelValidationLevel.NotIndividuallyTested,
             "Detection incomplete.");
         var profile = GetCatalogProfile("gaming-optimised", verification);
 
@@ -191,7 +183,6 @@ public sealed class ProfileExecutionResolverTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 }

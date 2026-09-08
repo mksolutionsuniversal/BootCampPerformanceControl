@@ -7,21 +7,16 @@ namespace BootCampPerformanceControl.Tests.Profiles;
 public sealed class ProcessorProfileStateEvaluatorTests
 {
     [Theory]
-    [InlineData(VerifiedHardwareModels.MacBookPro16_1, ModelValidationLevel.PerformanceValidated)]
-    [InlineData(VerifiedHardwareModels.MacBookPro14_3, ModelValidationLevel.NotIndividuallyTested)]
-    [InlineData("MacBookPro15,1", ModelValidationLevel.NotIndividuallyTested)]
-    [InlineData("MacBookPro11,5", ModelValidationLevel.CommunityTested)]
-    [InlineData("MacBookPro15,2", ModelValidationLevel.FunctionallyValidated)]
-    public void Evaluate_SupportedIntelMacWithExactGamingValues_ReturnsGamingOptimisedDetected(
-        string model,
-        ModelValidationLevel validationLevel)
+    [InlineData(VerifiedHardwareModels.MacBookPro16_1)]
+    [InlineData(VerifiedHardwareModels.MacBookPro14_3)]
+    [InlineData("MacBookPro99,1")]
+    public void Evaluate_SupportedIntelMacWithExactGamingValues_ReturnsGamingOptimisedDetected(string model)
     {
         var evaluator = CreateEvaluator(new ProfileCatalog());
         var verification = new ModelVerificationResult(
             "Apple Inc.",
             model,
             PlatformSupportStatus.SupportedIntelMac,
-            validationLevel,
             "Supported.");
 
         var result = evaluator.Evaluate(GamingPowerState(), verification);
@@ -50,7 +45,6 @@ public sealed class ProcessorProfileStateEvaluatorTests
             "PC Manufacturer",
             "PC Model",
             PlatformSupportStatus.UnsupportedNonApple,
-            ModelValidationLevel.NotIndividuallyTested,
             "Not Apple.");
 
         var result = evaluator.Evaluate(GamingPowerState(), verification);
@@ -66,7 +60,6 @@ public sealed class ProcessorProfileStateEvaluatorTests
             "Apple Inc.",
             "MacBookPro18,1",
             PlatformSupportStatus.UnsupportedNonIntel,
-            ModelValidationLevel.NotIndividuallyTested,
             "Non-Intel.");
 
         var result = evaluator.Evaluate(GamingPowerState(), verification);
@@ -82,7 +75,6 @@ public sealed class ProcessorProfileStateEvaluatorTests
             "Unknown",
             "Unknown",
             PlatformSupportStatus.DetectionIncomplete,
-            ModelValidationLevel.NotIndividuallyTested,
             "Incomplete.");
 
         var result = evaluator.Evaluate(GamingPowerState(), verification);
@@ -175,8 +167,7 @@ public sealed class ProcessorProfileStateEvaluatorTests
             "Apple Inc.",
             VerifiedHardwareModels.MacBookPro16_1,
             PlatformSupportStatus.SupportedIntelMac,
-            ModelValidationLevel.PerformanceValidated,
-            "Verified.");
+            string.Empty);
     }
 
     private sealed class SingleProfileCatalog : IProfileCatalog

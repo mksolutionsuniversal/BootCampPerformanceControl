@@ -5,15 +5,6 @@ namespace BootCampPerformanceControl.HardwareDetection;
 
 public sealed class HardwareDetectionService : IHardwareDetectionService
 {
-    private readonly IModelSupportRegistry _modelSupportRegistry;
-
-    public HardwareDetectionService(IModelSupportRegistry modelSupportRegistry)
-    {
-        ArgumentNullException.ThrowIfNull(modelSupportRegistry);
-
-        _modelSupportRegistry = modelSupportRegistry;
-    }
-
     public async Task<HardwareSnapshot> DetectAsync(CancellationToken cancellationToken)
     {
         try
@@ -42,7 +33,6 @@ public sealed class HardwareDetectionService : IHardwareDetectionService
                 manufacturer,
                 model,
                 PlatformSupportStatus.DetectionIncomplete,
-                ModelValidationLevel.NotIndividuallyTested,
                 "Hardware detection was incomplete. Platform compatibility could not be determined.");
         }
 
@@ -53,7 +43,6 @@ public sealed class HardwareDetectionService : IHardwareDetectionService
                 manufacturer,
                 model,
                 PlatformSupportStatus.UnsupportedNonApple,
-                ModelValidationLevel.NotIndividuallyTested,
                 "BootCamp Performance Control requires an Apple Mac running Windows through Boot Camp.");
         }
 
@@ -65,7 +54,6 @@ public sealed class HardwareDetectionService : IHardwareDetectionService
                 manufacturer,
                 model,
                 PlatformSupportStatus.DetectionIncomplete,
-                ModelValidationLevel.NotIndividuallyTested,
                 "Processor information could not be determined from hardware detection.");
         }
 
@@ -76,29 +64,14 @@ public sealed class HardwareDetectionService : IHardwareDetectionService
                 manufacturer,
                 model,
                 PlatformSupportStatus.UnsupportedNonIntel,
-                ModelValidationLevel.NotIndividuallyTested,
                 "BootCamp Performance Control requires an Intel processor on Apple hardware.");
         }
-
-        var validationLevel = _modelSupportRegistry.GetValidationLevel(model);
-        var message = validationLevel switch
-        {
-            ModelValidationLevel.PerformanceValidated =>
-                "This Mac model is performance-validated for Windows processor power settings.",
-            ModelValidationLevel.FunctionallyValidated =>
-                "This Mac model is functionally validated for Windows processor power settings.",
-            ModelValidationLevel.CommunityTested =>
-                "This Mac model has community-tested reports for Windows processor power settings.",
-            _ =>
-                "This Mac model is a supported Intel Mac (not individually performance-tested)."
-        };
 
         return new ModelVerificationResult(
             manufacturer,
             model,
             PlatformSupportStatus.SupportedIntelMac,
-            validationLevel,
-            message);
+            string.Empty);
     }
 
     private static HardwareSnapshot Detect(CancellationToken cancellationToken)
