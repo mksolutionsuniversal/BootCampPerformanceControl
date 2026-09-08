@@ -45,7 +45,7 @@ Apple T2
 Windows 10 Boot Camp
 ```
 
-The capability-driven runtime also recognizes the bounded `GlobalMaskFpe2` mechanism. This does not imply a T1/T2 generation claim: runtime permission comes only from the exact live key schema, values and proven one- or two-fan global-mask topology.
+The capability-driven runtime also recognizes the bounded `GlobalMaskFpe2` mechanism. On 2026-09-08, the one-fan `GlobalMaskFpe2` write/readback/Apple Auto sequence was physically qualified on `MacBookPro12,1`. This does not imply a T1/T2 generation claim: runtime permission comes only from the exact live key schema, values and proven one- or two-fan global-mask topology, and the two-fan `FS! = 0003` path remains without BCPC-owned physical write qualification.
 
 ## Third-party compatibility dependency
 
@@ -174,6 +174,8 @@ FS!     ui16  2 bytes   attributes 0xC0
 Key observations have three explicit states: `Available`, `ConfirmedAbsent`, and `ReadFailed`. Only `ConfirmedAbsent` satisfies an `absent` fingerprint requirement. On the observed CrystalIdea transport, an exactly zero-byte `GET_KEY_INFO` response is the positive missing-key signal. Any non-zero malformed length, device/IOCTL error, access error, or other exception is `ReadFailed` and disables the writer while retaining the diagnostic reason.
 
 An unverified transport may still be queried for read-only diagnostics when its read IOCTLs work. Its discovered topology, metadata, raw values, and candidate family are reported, but only MMIO protocol 1 is write-qualified.
+
+The one-fan physical qualification on `MacBookPro12,1` verified `FS! 0000 -> 0001`, exact fresh `F0Mx 60DC -> F0Tg`, and `FS! 0001 -> 0000` with exact readback and final Apple Auto verification. See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
 
 ## Closed write surface
 
@@ -318,7 +320,7 @@ Any mismatch prevents speculative writes and retains recovery context.
 
 When recovery is permitted, BCPC restores **fans only** to Apple Auto, verifies read-back and clears ownership only after successful verification.
 
-These partial-transaction restart decisions are covered by fake/in-memory tests at the hardware-write boundaries. `GlobalMaskFpe2` physical Maximum Safe RPM / Apple Auto round-trip qualification remains pending.
+These partial-transaction restart decisions are covered by fake/in-memory tests at the hardware-write boundaries. The one-fan `GlobalMaskFpe2` Maximum Safe RPM / Apple Auto round trip is physically qualified; physical hard-crash recovery for this family remains pending.
 
 BCPC does not automatically restore the saved processor profile at startup. The user retains explicit control through **Restore Original Settings**.
 
@@ -358,7 +360,9 @@ Normal Restore returned Apple Auto and the exact original processor state. Force
 
 See [0.5.0-rc.1 Hardware Validation Record](0.5.0-rc.1-HARDWARE-VALIDATION.md).
 
-This physical validation supports the reference model. It does not certify every T2-family machine.
+The one-fan `GlobalMaskFpe2` mechanism was physically write-qualified on `MacBookPro12,1` on 2026-09-08. The controlled test verified `FS! 0001`, exact `F0Mx 60DC -> F0Tg`, `FS! 0000`, exact readback, final Apple Auto, and an unchanged healthy family fingerprint. See [0.5.0-rc.2 GlobalMaskFpe2 Hardware Validation Record](0.5.0-rc.2-GLOBALMASK-FPE2-HARDWARE-VALIDATION.md).
+
+These physical validation records support the observed capability families and test machines. They do not certify every T1/T2-family machine or convert model identity into runtime permission.
 
 ## Native BootCampSmc research path
 
@@ -370,7 +374,7 @@ See [../drivers/BootCampSmc/README.md](../drivers/BootCampSmc/README.md).
 
 ## Future validation
 
-Additional compatible T2-family machines should be validated in stages:
+Additional compatible Intel Macs should be validated in stages:
 
 1. read-only hardware/platform capture,
 2. read-only AppleSMC protocol and topology capture,
@@ -380,4 +384,4 @@ Additional compatible T2-family machines should be validated in stages:
 6. processor snapshot/Restore round-trip,
 7. crash/startup recovery only after the earlier stages pass.
 
-T1 support remains a separate engineering track and must not reuse T2-family write assumptions.
+Two-fan `GlobalMaskFpe2` physical write qualification and T1-specific model evidence remain separate validation boundaries; neither should be inferred from the one-fan PASS.
